@@ -1,0 +1,80 @@
+/* TecSubstitution — sign-in page. Same tokens as the rest of the app. */
+
+.login-page { background: var(--canvas); }
+
+.login-shell {
+  min-height: 100vh;
+  display: grid; grid-template-columns: 1fr 1fr;
+}
+
+/* --------------------------- brand panel --------------------------- */
+.login-aside {
+  background: var(--brand-700);
+  color: #ffffff;
+  padding: 56px 52px;
+  display: flex; flex-direction: column; justify-content: center; gap: 22px;
+}
+.login-aside .brand-text { color: #ffffff; }
+.login-aside .brand-mark { background: rgba(255, 255, 255, 0.16); color: #ffffff; }
+.login-aside h1 {
+  color: #ffffff; font-size: clamp(1.7rem, 2.8vw, 2.4rem);
+  font-weight: 700; letter-spacing: -0.03em; line-height: 1.2;
+}
+.login-aside p { color: #d5d8f5; font-size: 1rem; max-width: 44ch; }
+.login-points { list-style: none; margin: 6px 0 0; padding: 0; display: grid; gap: 10px; }
+.login-points li { display: flex; align-items: center; gap: 10px; font-size: 0.94rem; color: #eef2ff; }
+.login-points .tick { color: #a5f3c4; }
+
+/* ------------------------------ form ------------------------------- */
+.login-main { display: flex; align-items: center; justify-content: center; padding: 48px 24px; }
+.login-card {
+  width: min(430px, 100%);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow);
+  padding: 34px;
+}
+.login-card h2 { font-size: 1.4rem; font-weight: 700; }
+.login-card > .muted { margin-top: 6px; }
+.login-card form { margin-top: 24px; display: grid; gap: 16px; }
+.login-submit { width: 100%; padding: 11px 18px; }
+
+.login-message { display: none; }
+.login-message.is-visible {
+  display: block; padding: 10px 13px; border-radius: var(--radius-sm);
+  font-size: 0.87rem; border: 1px solid transparent;
+}
+.login-message.is-error { background: var(--danger-100); border-color: var(--danger-line); color: var(--danger-700); }
+.login-message.is-ok { background: var(--ok-100); border-color: var(--ok-line); color: var(--ok-700); }
+.login-message.is-info { background: var(--brand-050); border-color: var(--brand-100); color: var(--ink-700); }
+
+/* --------------------------- demo accounts -------------------------- */
+.login-demo { margin-top: 26px; padding-top: 22px; border-top: 1px solid var(--line-soft); }
+.section-label {
+  font-size: 0.72rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--ink-500); margin-bottom: 8px;
+}
+.demo-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 12px; }
+.demo-chip {
+  display: flex; flex-direction: column; gap: 2px; align-items: flex-start;
+  padding: 9px 12px; text-align: left;
+  background: var(--canvas); border: 1px solid var(--line); border-radius: var(--radius-sm);
+  font: inherit; font-size: 0.84rem; font-weight: 600; color: var(--ink-800); cursor: pointer;
+  transition: border-color 0.15s ease, background-color 0.15s ease;
+}
+.demo-chip:hover { background: var(--brand-050); border-color: var(--brand-100); }
+.demo-chip span { font-size: 0.72rem; font-weight: 500; color: var(--ink-500); }
+
+.login-foot {
+  margin-top: 24px; padding-top: 18px; border-top: 1px solid var(--line-soft);
+  display: flex; justify-content: space-between; gap: 12px; font-size: 0.86rem;
+}
+.login-foot a { text-decoration: none; color: var(--ink-500); }
+.login-foot a:hover { color: var(--brand-600); }
+
+@media (max-width: 900px) {
+  .login-shell { grid-template-columns: 1fr; }
+  .login-aside { padding: 40px 28px; }
+  .login-aside h1 { font-size: 1.6rem; }
+}

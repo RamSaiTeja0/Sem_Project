@@ -12,15 +12,21 @@ const express = require('express');
 const path = require('path');
 
 const config = require('./src/config');
+const session = require('./src/core/session');
 const timetableRoutes = require('./src/routes/timetable');
 const facultyRoutes = require('./src/routes/faculty');
 const availabilityRoutes = require('./src/routes/availability');
 const importRoutes = require('./src/routes/import');
+const authRoutes = require('./src/routes/auth');
 
 const app = express();
 
 app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: true }));
+
+// Reads the signed session cookie and exposes req.session. Mounted before the
+// routes so every handler, page and guard sees the same view of the user.
+app.use(session.middleware);
 
 // Static assets. `index: false` so "/" is routed explicitly to the landing
 // page rather than being served index.html by the static middleware.
@@ -31,22 +37,54 @@ app.get(['/', '/home', '/home.html'], (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'home.html'));
 });
 
-// Dashboard application.
-app.get(['/dashboard', '/app', '/index.html'], (req, res) => {
-    res.sendFile(path.join(__dirname, 'public', 'index.html'));
+// Sign-in page. Always reachable, including when auth is not enforced.
+app.get(['/login', '/login.html'], (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'login.html'));
 });
 
 // Health check, handy for deployment probes.
 app.get('/api/health', (req, res) => {
-    res.json({ status: 'ok', service: 'tecsubstitution', port: config.port, env: config.env });
+    res.json({
+        status: 'ok',
+        service: 'tecsubstitution',
+        port: app.get('activePort') || config.port,
+        env: config.env,
+        authRequired: config.authRequired,
+        authenticated: Boolean(req.session)
+    });
+});
+
+// Authentication is mounted before the guard: signing in must not require
+// being signed in already.
+app.use('/api/auth', authRoutes);
+
+/**
+ * Optional sign-in guard. Off by default (AUTH_REQUIRED=false) so the demo
+ * dataset stays browsable; when on, API calls answer 401 in JSON and page
+ * requests are redirected to /login instead of silently rendering an empty
+ * dashboard.
+ */
+function requireAuth(req, res, next) {
+    if (!config.authRequired || req.session) return next();
+    // originalUrl, not path: inside a mounted router req.path is relative to
+    // the mount point, so "/api/..." would not match.
+    if (req.originalUrl.startsWith('/api/')) {
+        return res.status(401).json({ error: 'Sign in to use this endpoint.', code: 'UNAUTHENTICATED' });
+    }
+    return res.redirect('/login?next=' + encodeURIComponent(req.originalUrl));
+}
+
+// Dashboard application.
+app.get(['/dashboard', '/app', '/index.html'], requireAuth, (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
 // API. The import router is mounted first so /api/timetable/import is not
 // swallowed by the timetable router's own routes.
-app.use('/api/timetable/import', importRoutes);
-app.use('/api/timetable', timetableRoutes);
-app.use('/api/faculty', facultyRoutes);
-app.use('/api/availability', availabilityRoutes);
+app.use('/api/timetable/import', requireAuth, importRoutes);
+app.use('/api/timetable', requireAuth, timetableRoutes);
+app.use('/api/faculty', requireAuth, facultyRoutes);
+app.use('/api/availability', requireAuth, availabilityRoutes);
 
 // Unknown API paths answer in JSON instead of returning the dashboard HTML.
 app.use('/api', (req, res) => {
@@ -54,7 +92,7 @@ app.use('/api', (req, res) => {
 });
 
 // Everything else serves the dashboard, so its in-app views remain linkable.
-app.get('*', (req, res) => {
+app.get('*', requireAuth, (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
@@ -68,10 +106,42 @@ app.use((err, req, res, next) => {
     });
 });
 
-function start(port = config.port) {
-    return app.listen(port, () => {
-        console.log(`TecSubstitution running on http://localhost:${port}`);
+/**
+ * Start listening, falling back to the next configured port when the primary
+ * one is already taken — so a stale server from another project cannot block a
+ * fresh start, and the terminal always says which port actually came up.
+ */
+function start(port = config.port, fallbacks = config.fallbackPorts) {
+    const server = app.listen(port);
+    const queue = (fallbacks || []).slice();
+
+    server.on('listening', () => {
+        const active = server.address().port;
+        app.set('activePort', active);
+        console.log(`TecSubstitution server running on http://localhost:${active}`);
+        if (active !== config.port) {
+            console.log(`(port ${config.port} was busy — fell back to ${active})`);
+        }
+        console.log(config.authRequired
+            ? 'Sign-in required: AUTH_REQUIRED=true'
+            : 'Sign-in optional: visit /login to sign in, or browse as a guest.');
     });
+
+    server.on('error', err => {
+        if (err.code !== 'EADDRINUSE') throw err;
+        const next = queue.shift();
+        if (next == null) {
+            console.error(
+                `Port ${port} is already in use and no fallback port is free.\n` +
+                `  Find the process:  lsof -i :${port}   (or: ss -lptn 'sport = :' ${port})\n` +
+                '  Then stop it, or start this project with a different PORT.');
+            process.exit(1);
+        }
+        console.warn(`Port ${port} is in use — trying ${next}…`);
+        server.listen(next);
+    });
+
+    return server;
 }
 
 if (require.main === module) {

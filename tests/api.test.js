@@ -36,15 +36,26 @@ async function run() {
 
     const home = await get('/');
     const dashboard = await get('/dashboard');
-    check('the landing page is served at / and the dashboard at /dashboard', () => {
+    const login = await get('/login');
+    check('the landing, sign-in and dashboard pages are all served', () => {
         assert.strictEqual(home.status, 200);
-        assert.match(home.raw, /Smart Faculty Substitution Management/);
-        assert.match(home.raw, /id="features"/);
+        assert.match(home.raw, /Smart Faculty Scheduling/);
+        assert.match(home.raw, /Made Simple/);
+        // Every section the landing page promises must actually be present.
+        ['home', 'about', 'features', 'how-it-works'].forEach(id =>
+            assert.match(home.raw, new RegExp(`id="${id}"`), `missing section #${id}`));
+
+        assert.strictEqual(login.status, 200);
+        assert.match(login.raw, /id="loginForm"/);
+
         assert.strictEqual(dashboard.status, 200);
         assert.match(dashboard.raw, /id="view-availability"/);
-        // Both link the same token sheet, so they cannot drift apart visually.
-        assert.match(home.raw, /\/css\/theme\.css/);
-        assert.match(dashboard.raw, /\/css\/theme\.css/);
+        // The sidebar keeps every feature reachable.
+        ['schedule', 'substitute', 'availability', 'import', 'attendance', 'timetable', 'faculty']
+            .forEach(view => assert.match(dashboard.raw, new RegExp(`id="view-${view}"`), `missing #view-${view}`));
+
+        // All three link the same token sheet, so they cannot drift apart visually.
+        [home, dashboard, login].forEach(page => assert.match(page.raw, /\/css\/theme\.css/));
     });
 
     const health = await get('/api/health');

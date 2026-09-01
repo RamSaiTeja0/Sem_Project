@@ -40,6 +40,17 @@ scope — see [Future enhancements](#future-enhancements).
 - **Validation** — invalid days, invalid periods, duplicate entries,
   double-bookings, malformed spreadsheets and empty timetables are all reported
   with clear messages rather than silently accepted.
+- **Quick Paste** — paste rows straight from a printed sheet or an email;
+  tabs, commas and semicolons are all accepted and run through the *same*
+  importer, normalizer and validator as an uploaded file.
+- **Department presets** — starter layouts you can edit before processing.
+- **My Schedule** — one faculty member's own week, defaulting to whoever is
+  signed in, with one click from any of their periods to who could cover it.
+- **Attendance Track** — mark each scheduled period held / not held /
+  substituted. The server has no attendance store, so these marks live in the
+  browser (`localStorage`) and the view says so plainly.
+- **Sign-in** — signed cookie sessions with a demo account directory. Optional
+  by default; set `AUTH_REQUIRED=true` to turn anonymous visitors away.
 
 ---
 
@@ -75,9 +86,11 @@ tested directly and reused unchanged if the storage or transport changes.
 │   ├── core/
 │   │   ├── normalizer.js         source data -> normalized records
 │   │   ├── validator.js          errors and warnings
+│   │   ├── session.js            signed-cookie sessions (no dependency)
 │   │   └── availabilityEngine.js the availability query engine
 │   ├── data/
 │   │   ├── demoTimetable.js      10-faculty demo dataset
+│   │   ├── users.js              demo account directory (faculty-derived)
 │   │   └── store.js              in-memory store (replaceable)
 │   ├── importers/
 │   │   ├── tableParser.js        shared matrix/long-form parser
@@ -88,9 +101,15 @@ tested directly and reused unchanged if the storage or transport changes.
 │       ├── timetable.js          grids, metadata, records
 │       ├── faculty.js            roster and load
 │       ├── availability.js       the read-only availability API
-│       └── import.js             upload endpoints
-├── public/                       dashboard (HTML, CSS, vanilla JS)
-└── tests/                        engine, API and end-to-end suites
+│       ├── import.js             upload endpoints
+│       └── auth.js               sign-in, sign-out, session
+├── public/
+│   ├── home.html                 landing page
+│   ├── login.html                sign-in page
+│   ├── index.html                dashboard shell
+│   ├── css/                      theme tokens + per-page styles
+│   └── js/                       home.js, login.js, app.js (vanilla)
+└── tests/                        engine, API, auth and end-to-end suites
 ```
 
 ---
@@ -133,8 +152,13 @@ Requires Node.js 18 or newer.
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `PORT` | `3001` | Port the server listens on |
+| `FALLBACK_PORTS` | `3002,3003,3004` | Tried in order if `PORT` is already in use |
 | `NODE_ENV` | `development` | Node environment |
 | `MAX_UPLOAD_MB` | `10` | Maximum timetable upload size |
+| `AUTH_REQUIRED` | `false` | `true` turns anonymous visitors away |
+| `SESSION_SECRET` | dev default | HMAC key for session cookies — set this in production |
+| `SESSION_HOURS` | `12` | Session lifetime |
+| `DEMO_PASSWORD` | `tecsub123` | Password shared by every demo account |
 
 `.env` is git-ignored. Never commit it — copy `.env.example` instead.
 
@@ -145,7 +169,36 @@ npm start           # http://localhost:3001
 npm run dev         # same, with auto-restart on file changes
 ```
 
-Open **http://localhost:3001** and the dashboard loads with the demo timetable.
+The terminal prints the port it actually came up on:
+
+```
+TecSubstitution server running on http://localhost:3001
+Sign-in optional: visit /login to sign in, or browse as a guest.
+```
+
+If port 3001 is already taken, the server says so and moves to the next port in
+`FALLBACK_PORTS` rather than dying — the log then reads
+`(port 3001 was busy — fell back to 3002)`. To reclaim 3001 instead, find and
+stop the process holding it (`lsof -i :3001`).
+
+Open **http://localhost:3001** for the landing page, or go straight to
+**/dashboard**, which loads with the demo timetable.
+
+### Signing in
+
+Sign-in is optional by default, so the demo dataset stays browsable. Visit
+**/login** to sign in as:
+
+| Username | Role |
+| --- | --- |
+| `admin` | Timetable coordinator |
+| `anand.rao`, `meera.nair`, … | The faculty in the roster |
+
+Every demo account uses `DEMO_PASSWORD` (default `tecsub123`). This is a college
+project: accounts are derived from the faculty roster and there is no password
+database — `src/data/users.js` is the seam where a real one would go. Set
+`AUTH_REQUIRED=true` and anonymous API calls get a `401` while page requests
+redirect to `/login`.
 
 ---
 
@@ -195,6 +248,10 @@ All responses are JSON.
 | `GET` | `/api/timetable/import/formats` | Supported formats and layouts |
 | `POST` | `/api/timetable/import/preview` | Validate an upload, change nothing |
 | `POST` | `/api/timetable/import` | Load an upload |
+| `GET` | `/api/auth/session` | Who is signed in, and whether sign-in is enforced |
+| `GET` | `/api/auth/accounts` | The demo account directory (never passwords) |
+| `POST` | `/api/auth/login` | Start a session |
+| `POST` | `/api/auth/logout` | End a session |
 
 ### The core call
 
@@ -258,17 +315,24 @@ operation, and the tests assert that.
 npm test              # all suites
 npm run test:engine   # normalizer, validator, availability engine
 npm run test:api      # every endpoint, including Excel and CSV import
+npm run test:auth     # sessions, sign-in, and the AUTH_REQUIRED guard
 npm run test:e2e      # click -> API -> engine -> displayed result
 ```
 
 The end-to-end suite runs in headless Chromium when Playwright is installed and
 falls back to exercising the same path over HTTP when it is not — it reports
-which mode it used rather than skipping silently.
+which mode it used rather than skipping silently. It finds a browser via
+`CHROMIUM_PATH`, then `PLAYWRIGHT_BROWSERS_PATH`, then Playwright's own build.
+
+The auth suite starts two servers, one in each configuration, so the
+`AUTH_REQUIRED` guard is proved to actually turn anonymous callers away rather
+than being taken on trust.
 
 Coverage includes Monday P2 and Tuesday P1 availability, busy-faculty
 exclusion, free-faculty detection, invalid days and periods, empty timetables,
-duplicate records, Excel and CSV import, API response shapes, and an assertion
-that a full sweep of availability calls mutates nothing.
+duplicate records, Excel and CSV import, Quick Paste and department presets,
+API response shapes, sign-in and session handling, and an assertion that a full
+sweep of availability calls mutates nothing.
 
 ---
 

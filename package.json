@@ -9,9 +9,12 @@
     "test": "node tests/run.js",
     "test:engine": "node tests/engine.test.js",
     "test:api": "node tests/api.test.js",
+    "test:auth": "node tests/auth.test.js",
     "test:e2e": "node tests/e2e.test.js"
   },
-  "engines": { "node": ">=18" },
+  "engines": {
+    "node": ">=18"
+  },
   "dependencies": {
     "dotenv": "^16.4.5",
     "exceljs": "^4.4.0",

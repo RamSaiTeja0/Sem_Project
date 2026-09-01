@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Sign in — TecSubstitution</title>
+  <link rel="stylesheet" href="/css/theme.css" />
+  <link rel="stylesheet" href="/css/login.css" />
+</head>
+<body class="login-page">
+
+<div class="login-shell">
+
+  <!-- Left: brand panel -->
+  <aside class="login-aside">
+    <a class="brand" href="/">
+      <span class="brand-mark">TS</span>
+      <span class="brand-text">TecSubstitution</span>
+    </a>
+    <h1>Smart Faculty Scheduling<br />Made Simple</h1>
+    <p>
+      Sign in to open your own schedule, check faculty availability for any period,
+      and manage the department timetable.
+    </p>
+    <ul class="login-points">
+      <li><span class="tick">✓</span> Centralized Master Timetable</li>
+      <li><span class="tick">✓</span> 1-Click Substitute Finding</li>
+      <li><span class="tick">✓</span> AI-Assisted Paper Extraction</li>
+    </ul>
+  </aside>
+
+  <!-- Right: the form -->
+  <main class="login-main">
+    <div class="login-card">
+      <h2>Sign in</h2>
+      <p class="muted">Use a faculty account, or the coordinator account for full access.</p>
+
+      <form id="loginForm" novalidate>
+        <label class="field">
+          <span>Username</span>
+          <input type="text" id="username" name="username" autocomplete="username"
+                 placeholder="e.g. admin" required />
+        </label>
+        <label class="field">
+          <span>Password</span>
+          <input type="password" id="password" name="password" autocomplete="current-password"
+                 placeholder="Your password" required />
+        </label>
+
+        <div id="loginMessage" class="login-message" role="status" aria-live="polite"></div>
+
+        <button type="submit" class="btn login-submit" id="loginSubmit">Sign in</button>
+      </form>
+
+      <div class="login-demo">
+        <div class="section-label">Demo accounts</div>
+        <p class="muted">This is a college project: every demo account shares one password.</p>
+        <div class="demo-grid">
+          <button type="button" class="demo-chip" data-user="admin">admin<span>Coordinator</span></button>
+          <button type="button" class="demo-chip" data-user="anand.rao">anand.rao<span>CSE faculty</span></button>
+          <button type="button" class="demo-chip" data-user="meera.nair">meera.nair<span>CSE faculty</span></button>
+          <button type="button" class="demo-chip" data-user="deepa.iyer">deepa.iyer<span>ECE faculty</span></button>
+        </div>
+        <p class="muted" style="margin-top:10px;">
+          Password: <span class="mono" id="demoPassword">tecsub123</span>
+        </p>
+      </div>
+
+      <p class="login-foot">
+        <a href="/">← Back to home</a>
+        <a href="/dashboard" id="guestLink">Continue as guest →</a>
+      </p>
+    </div>
+  </main>
+
+</div>
+
+<script src="/js/login.js"></script>
+</body>
+</html>

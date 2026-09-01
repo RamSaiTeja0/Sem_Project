@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>TecSubstitution — Faculty Availability Finder</title>
+  <title>Dashboard — TecSubstitution</title>
   <link rel="stylesheet" href="/css/theme.css" />
   <link rel="stylesheet" href="/css/app.css" />
 </head>
@@ -11,41 +11,55 @@
 <div class="app">
 
   <!-- ============================ SIDEBAR ============================ -->
-  <aside class="sidebar">
-    <a class="brand" href="/" title="Back to the home page">
-      <span class="brand-mark">TS</span>
-      <span class="brand-text">TecSubstitution</span>
-    </a>
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-head">
+      <a class="brand" href="/" title="Back to the home page">
+        <span class="brand-mark">TS</span>
+        <span class="brand-text">TecSubstitution</span>
+      </a>
+    </div>
 
     <nav class="nav" id="nav">
-      <div class="nav-label">Overview</div>
+      <a class="nav-item nav-link" href="/">Home</a>
       <button type="button" class="nav-item is-active" data-view="dashboard">Dashboard</button>
-
-      <div class="nav-label">Timetable</div>
-      <button type="button" class="nav-item" data-view="timetable">Primary Timetable</button>
+      <button type="button" class="nav-item" data-view="schedule">My Schedule</button>
+      <button type="button" class="nav-item" data-view="substitute">Adjust / Substitute</button>
       <button type="button" class="nav-item" data-view="availability">Faculty Availability</button>
-      <button type="button" class="nav-item" data-view="substitute">Substitute / Adjustment</button>
+      <button type="button" class="nav-item" data-view="import">Upload Paper Sheet</button>
+      <button type="button" class="nav-item" data-view="attendance">Attendance Track</button>
 
-      <div class="nav-label">Data</div>
-      <button type="button" class="nav-item" data-view="import">Timetable Import</button>
-      <button type="button" class="nav-item" data-view="faculty">Faculty Management</button>
-
-      <div class="nav-label">Analysis</div>
+      <div class="nav-label">Manage</div>
+      <button type="button" class="nav-item" data-view="timetable">Master Timetable</button>
+      <button type="button" class="nav-item" data-view="faculty">Faculty Directory</button>
       <button type="button" class="nav-item" data-view="reports">Availability Summary</button>
       <button type="button" class="nav-item" data-view="about">Settings / About</button>
     </nav>
 
     <div class="sidebar-foot">
-      <a href="/">← Home</a><br />
-      Read-only availability finder. No substitute is assigned or saved.
+      <button type="button" class="nav-item nav-logout" id="sidebarLogout">Logout</button>
+      <p class="sidebar-note">Read-only availability finder. No substitution is assigned or saved.</p>
     </div>
   </aside>
 
   <!-- ============================== MAIN ============================== -->
   <div class="main">
     <header class="topbar">
-      <h1 id="viewTitle">Dashboard</h1>
-      <div class="topbar-meta" id="topbarMeta">Loading…</div>
+      <button type="button" class="sidebar-toggle" id="sidebarToggle" aria-label="Menu">☰</button>
+
+      <div class="topbar-title">
+        <h1 id="viewTitle">Dashboard</h1>
+        <p id="topbarMeta">Loading…</p>
+      </div>
+
+      <div class="topbar-user">
+        <div class="user-info">
+          <span class="user-name" id="userName">Guest</span>
+          <span class="user-role" id="userRole">Not signed in</span>
+        </div>
+        <div class="avatar" id="userAvatar" aria-hidden="true">G</div>
+        <a class="btn btn-secondary btn-sm" id="loginLink" href="/login">Login</a>
+        <button type="button" class="btn btn-secondary btn-sm" id="logoutBtn" hidden>Logout</button>
+      </div>
     </header>
 
     <div class="content">
@@ -54,74 +68,22 @@
       <section class="view is-active" id="view-dashboard">
         <div class="stats" id="dashboardStats"></div>
 
-        <div class="card" style="margin-top:18px;">
-          <div class="card-head">
-            <div>
-              <h2>Check a slot</h2>
-              <p>Pick a day and period to see who is free. Nothing is assigned or saved.</p>
-            </div>
-          </div>
-          <div class="card-body">
-            <div class="controls">
-              <label class="field"><span>Day</span><select id="dashDay"></select></label>
-              <label class="field"><span>Period</span><select id="dashPeriod"></select></label>
-              <button type="button" class="btn" id="dashCheck">Check availability</button>
-            </div>
-            <div id="dashResult" style="margin-top:16px;"></div>
-          </div>
-        </div>
-
-        <div class="card">
-          <div class="card-head">
-            <div>
-              <h2>Loaded timetable</h2>
-              <p>Where the current data came from, and anything the validator flagged.</p>
-            </div>
-          </div>
-          <div class="card-body" id="dashSource"></div>
-        </div>
-      </section>
-
-      <!-- ---------------------- PRIMARY TIMETABLE -------------------- -->
-      <section class="view" id="view-timetable">
-        <div class="card">
-          <div class="card-head">
-            <div>
-              <h2>Primary Timetable</h2>
-              <p>Every cell is clickable. Clicking sends its day and period to the availability engine.</p>
-            </div>
-          </div>
-          <div class="card-body">
-            <div class="controls" style="margin-bottom:14px;">
-              <label class="field"><span>View</span><select id="ttView"></select></label>
-            </div>
-            <div class="table-scroll">
-              <table class="timetable">
-                <thead id="ttHead"></thead>
-                <tbody id="ttBody"></tbody>
-              </table>
-            </div>
-            <div id="ttState" class="notice notice-info" style="margin-top:12px;">Loading timetable…</div>
-          </div>
-        </div>
-      </section>
-
-      <!-- --------------------- FACULTY AVAILABILITY ------------------ -->
-      <section class="view" id="view-availability">
         <div class="grid-2">
           <div class="card">
             <div class="card-head">
               <div>
-                <h2>Timetable</h2>
-                <p>Click the period the absent faculty was teaching.</p>
+                <h2>Check a slot</h2>
+                <p>Pick a day and period to see who is free. Nothing is assigned or saved.</p>
               </div>
             </div>
             <div class="card-body">
-              <div class="table-scroll">
-                <table class="timetable">
-                  <thead id="availHead"></thead>
-                  <tbody id="availBody"></tbody>
-                </table>
+              <div class="controls">
+                <label class="field"><span>Day</span><select id="dashDay"></select></label>
+                <label class="field"><span>Period</span><select id="dashPeriod"></select></label>
+                <button type="button" class="btn" id="dashCheck">Check availability</button>
+              </div>
+              <div id="dashResult" class="result-panel">
+                <p class="muted">Choose a day and period, then check availability.</p>
               </div>
             </div>
           </div>
@@ -129,30 +91,86 @@
           <div class="card">
             <div class="card-head">
               <div>
-                <h2>Available Faculty</h2>
-                <p>Displayed only — read-only result.</p>
+                <h2>Recent activity</h2>
+                <p>What this session has looked up. Held in the browser only.</p>
               </div>
+              <button type="button" class="btn btn-secondary btn-sm" id="clearActivity">Clear</button>
             </div>
             <div class="card-body">
-              <div class="controls" style="margin-bottom:12px;">
-                <label class="field"><span>Department</span><select id="availDept"></select></label>
-                <label class="field"><span>Search</span><input type="text" id="availSearch" placeholder="Faculty name" /></label>
+              <ul class="activity" id="activityList">
+                <li class="activity-empty muted">No activity yet in this session.</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+
+        <div class="grid-2">
+          <div class="card">
+            <div class="card-head">
+              <div>
+                <h2>Faculty workload</h2>
+                <p>Busiest first, from the loaded timetable.</p>
               </div>
-              <div id="availResult">
-                <p class="muted">Select a period from the timetable.</p>
+            </div>
+            <div class="card-body" id="workloadCard"></div>
+          </div>
+
+          <div class="card">
+            <div class="card-head">
+              <div>
+                <h2>Loaded timetable</h2>
+                <p>Where the current data came from, and anything the validator flagged.</p>
               </div>
+            </div>
+            <div class="card-body" id="dashSource"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ------------------------ MY SCHEDULE ------------------------ -->
+      <section class="view" id="view-schedule">
+        <div class="card">
+          <div class="card-head">
+            <div>
+              <h2>My Schedule</h2>
+              <p>One faculty member's own week. Click any period to see who could cover it.</p>
+            </div>
+            <label class="field inline"><span>Faculty</span><select id="schedFaculty"></select></label>
+          </div>
+          <div class="card-body">
+            <div class="stats compact" id="schedStats"></div>
+            <div class="table-scroll">
+              <table class="timetable">
+                <thead id="schedHead"></thead>
+                <tbody id="schedBody"></tbody>
+              </table>
+            </div>
+            <div id="schedState" class="notice notice-info" style="margin-top:12px;">Loading schedule…</div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head">
+            <div>
+              <h2>Cover for the selected period</h2>
+              <p>Read-only result from the availability engine.</p>
+            </div>
+          </div>
+          <div class="card-body">
+            <div id="schedResult" class="result-panel">
+              <p class="muted">Select a period from the schedule above.</p>
             </div>
           </div>
         </div>
       </section>
 
-      <!-- ------------------- SUBSTITUTE / ADJUSTMENT ----------------- -->
+      <!-- ------------------- ADJUST / SUBSTITUTE --------------------- -->
       <section class="view" id="view-substitute">
         <div class="card">
           <div class="card-head">
             <div>
-              <h2>Substitute / Adjustment</h2>
-              <p>Find cover for an absent faculty member. The result is informational.</p>
+              <h2>Adjust / Substitute</h2>
+              <p>Find cover for an absent faculty member across a whole day. The result is informational.</p>
             </div>
           </div>
           <div class="card-body">
@@ -161,32 +179,129 @@
               <label class="field"><span>Day</span><select id="subDay"></select></label>
               <button type="button" class="btn" id="subFind">Find cover</button>
             </div>
-            <div id="subResult" style="margin-top:16px;">
+            <div id="subResult" style="margin-top:18px;">
               <p class="muted">Choose a faculty member and a day to list their periods and who could cover each.</p>
             </div>
           </div>
         </div>
       </section>
 
-      <!-- ------------------------ DATA IMPORT ------------------------ -->
+      <!-- --------------------- FACULTY AVAILABILITY ------------------ -->
+      <section class="view" id="view-availability">
+        <div class="grid-2 wide-left">
+          <div class="card">
+            <div class="card-head">
+              <div>
+                <h2>Timetable</h2>
+                <p>Click the period the absent faculty was teaching. Every cell is clickable.</p>
+              </div>
+              <label class="field inline"><span>Class</span><select id="availClass"></select></label>
+            </div>
+            <div class="card-body">
+              <div class="table-scroll">
+                <table class="timetable">
+                  <thead id="availHead"></thead>
+                  <tbody id="availBody"></tbody>
+                </table>
+              </div>
+              <div class="legend">
+                <span><i class="swatch swatch-busy"></i> Scheduled period</span>
+                <span><i class="swatch swatch-free"></i> Free period</span>
+                <span><i class="swatch swatch-sel"></i> Selected</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-head">
+              <div>
+                <h2>Availability</h2>
+                <p>Displayed only — read-only result.</p>
+              </div>
+            </div>
+            <div class="card-body">
+              <div class="controls" style="margin-bottom:14px;">
+                <label class="field"><span>Department</span><select id="availDept"></select></label>
+                <label class="field"><span>Search</span><input type="text" id="availSearch" placeholder="Faculty name" /></label>
+              </div>
+              <div id="availResult" class="result-panel">
+                <p class="muted">Select a period from the timetable.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- --------------------- UPLOAD PAPER SHEET -------------------- -->
       <section class="view" id="view-import">
         <div class="card">
           <div class="card-head">
             <div>
-              <h2>Timetable Import</h2>
-              <p>Upload Excel (.xlsx) or CSV. Review the preview, then confirm to load it.</p>
+              <h2>Upload Paper Sheet</h2>
+              <p>Bring a timetable in from a spreadsheet, a printed sheet or a department preset.</p>
             </div>
           </div>
           <div class="card-body">
-            <div class="controls">
-              <label class="field" style="flex:2 1 260px;"><span>Timetable file</span>
-                <input type="file" id="importFile" accept=".xlsx,.xlsm,.csv" /></label>
-              <label class="field"><span>Class name (optional)</span>
-                <input type="text" id="importClass" placeholder="e.g. CSE-A" /></label>
-              <button type="button" class="btn" id="importPreview">Preview</button>
+            <ol class="workflow" id="importWorkflow">
+              <li class="wf-step is-active" data-step="upload"><span>1</span>Upload</li>
+              <li class="wf-step" data-step="process"><span>2</span>Process</li>
+              <li class="wf-step" data-step="validate"><span>3</span>Validate</li>
+              <li class="wf-step" data-step="preview"><span>4</span>Preview</li>
+              <li class="wf-step" data-step="confirm"><span>5</span>Confirm</li>
+              <li class="wf-step" data-step="generate"><span>6</span>Generate Timetable</li>
+            </ol>
+
+            <div class="tabs" id="importTabs">
+              <button type="button" class="tab is-active" data-tab="file">Upload a file</button>
+              <button type="button" class="tab" data-tab="paste">Quick Paste</button>
+              <button type="button" class="tab" data-tab="preset">Department presets</button>
             </div>
 
-            <div class="notice notice-info" style="margin-top:14px;">
+            <!-- file -->
+            <div class="tab-panel is-active" id="tab-file">
+              <div class="dropzone" id="dropzone">
+                <strong>Drop a timetable file here</strong>
+                <span class="muted">or choose one below</span>
+                <input type="file" id="importFile" accept=".xlsx,.xlsm,.csv,.pdf,.png,.jpg,.jpeg,.webp" />
+              </div>
+              <div class="controls" style="margin-top:14px;">
+                <label class="field"><span>Class name (optional)</span>
+                  <input type="text" id="importClass" placeholder="e.g. CSE-A" /></label>
+                <button type="button" class="btn" id="importPreview">Process &amp; preview</button>
+              </div>
+              <p class="muted" id="formatNote" style="margin-top:10px;"></p>
+            </div>
+
+            <!-- quick paste -->
+            <div class="tab-panel" id="tab-paste">
+              <p class="muted" style="margin-bottom:10px;">
+                Paste rows copied from a spreadsheet, a printed sheet or an email.
+                Tabs, commas and semicolons are all accepted; the same importer and
+                validator run on the result.
+              </p>
+              <label class="field">
+                <span>Pasted timetable</span>
+                <textarea id="pasteText" placeholder="Faculty, Monday P1, Monday P2, Tuesday P1
+Dr. Anand Rao, DBMS, FREE, DBMS
+Dr. Meera Nair, FREE, OS, OS"></textarea>
+              </label>
+              <div class="controls" style="margin-top:12px;">
+                <label class="field"><span>Class name (optional)</span>
+                  <input type="text" id="pasteClass" placeholder="e.g. CSE-A" /></label>
+                <button type="button" class="btn" id="pastePreview">Process &amp; preview</button>
+                <button type="button" class="btn btn-secondary" id="pasteClear">Clear</button>
+              </div>
+            </div>
+
+            <!-- presets -->
+            <div class="tab-panel" id="tab-preset">
+              <p class="muted" style="margin-bottom:12px;">
+                Start from a department layout, edit it in Quick Paste, then process it.
+              </p>
+              <div class="preset-grid" id="presetGrid"></div>
+            </div>
+
+            <div class="notice notice-info" style="margin-top:18px;">
               <strong>Expected layout (matrix):</strong>
               <div class="mono" style="margin-top:6px;">
                 Faculty | Monday P1 | Monday P2 | Tuesday P1 | …<br />
@@ -194,36 +309,97 @@
               </div>
               <div style="margin-top:6px;">
                 A cell reading <strong>FREE</strong>, <strong>-</strong> or blank means the faculty is not teaching.
-                Long-form columns (<span class="mono">Faculty, Day, Period, Subject</span>) are also accepted.
+                Long-form columns (<span class="mono">Faculty, Day, Period, Subject, Class, Room</span>) are also accepted.
               </div>
             </div>
 
-            <div id="importResult" style="margin-top:16px;"></div>
+            <div id="importResult" style="margin-top:18px;"></div>
           </div>
         </div>
       </section>
 
-      <!-- -------------------- FACULTY MANAGEMENT --------------------- -->
+      <!-- ---------------------- ATTENDANCE TRACK --------------------- -->
+      <section class="view" id="view-attendance">
+        <div class="card">
+          <div class="card-head">
+            <div>
+              <h2>Attendance Track</h2>
+              <p>Mark whether each scheduled period was taken. Kept in this browser only.</p>
+            </div>
+            <div class="head-actions">
+              <label class="field inline"><span>Day</span><select id="attDay"></select></label>
+              <label class="field inline"><span>Class</span><select id="attClass"></select></label>
+            </div>
+          </div>
+          <div class="card-body">
+            <div class="notice notice-warn">
+              <strong>Local tracking.</strong> The server has no attendance store, so these marks are
+              saved in this browser (localStorage) and are never sent anywhere or written to a timetable.
+            </div>
+            <div class="stats compact" id="attStats" style="margin-top:16px;"></div>
+            <div class="table-scroll" style="margin-top:8px;">
+              <table class="data" id="attTable">
+                <thead>
+                  <tr><th>Period</th><th>Subject</th><th>Faculty</th><th>Room</th><th>Status</th><th>Mark</th></tr>
+                </thead>
+                <tbody id="attBody"></tbody>
+              </table>
+            </div>
+            <div class="controls" style="margin-top:14px;">
+              <button type="button" class="btn btn-secondary" id="attReset">Reset this day</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ---------------------- MASTER TIMETABLE --------------------- -->
+      <section class="view" id="view-timetable">
+        <div class="card">
+          <div class="card-head">
+            <div>
+              <h2>Master Timetable</h2>
+              <p>Every cell is clickable. Clicking sends its day and period to the availability engine.</p>
+            </div>
+            <label class="field inline"><span>View</span><select id="ttView"></select></label>
+          </div>
+          <div class="card-body">
+            <div class="table-scroll">
+              <table class="timetable">
+                <thead id="ttHead"></thead>
+                <tbody id="ttBody"></tbody>
+              </table>
+            </div>
+            <div class="legend">
+              <span><i class="swatch swatch-busy"></i> Scheduled period</span>
+              <span><i class="swatch swatch-free"></i> Free period</span>
+              <span><i class="swatch swatch-sel"></i> Selected</span>
+            </div>
+            <div id="ttState" class="notice notice-info" style="margin-top:12px;">Loading timetable…</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- --------------------- FACULTY DIRECTORY --------------------- -->
       <section class="view" id="view-faculty">
         <div class="card">
           <div class="card-head">
             <div>
-              <h2>Faculty Management</h2>
+              <h2>Faculty Directory</h2>
               <p>Roster with teaching load. Free periods are what availability draws on.</p>
+            </div>
+            <div class="head-actions">
+              <label class="field inline"><span>Department</span><select id="facDept"></select></label>
+              <label class="field inline"><span>Search</span><input type="text" id="facSearch" placeholder="Name or ID" /></label>
             </div>
           </div>
           <div class="card-body">
-            <div class="controls" style="margin-bottom:14px;">
-              <label class="field"><span>Department</span><select id="facDept"></select></label>
-              <label class="field"><span>Search</span><input type="text" id="facSearch" placeholder="Name or ID" /></label>
-            </div>
             <div class="table-scroll">
               <table class="data">
                 <thead>
                   <tr>
                     <th>Faculty ID</th><th>Name</th><th>Department</th>
                     <th class="num">Busy</th><th class="num">Free</th><th class="num">Total</th>
-                    <th>Subjects</th><th>Classes</th>
+                    <th>Load</th><th>Subjects</th><th>Classes</th>
                   </tr>
                 </thead>
                 <tbody id="facBody"></tbody>
@@ -266,6 +442,8 @@
               <span class="detail-value" id="aboutOrigin">—</span></div>
             <div class="detail-row"><span class="detail-label">Loaded at</span>
               <span class="detail-value" id="aboutLoaded">—</span></div>
+            <div class="detail-row"><span class="detail-label">Sign-in</span>
+              <span class="detail-value" id="aboutAuth">—</span></div>
 
             <div class="section-label">Read-only guarantee</div>
             <p class="muted" style="margin:0;">
@@ -283,10 +461,15 @@
                   <tr><td class="mono">GET</td><td class="mono">/api/timetable/meta</td><td>Days, periods, classes</td></tr>
                   <tr><td class="mono">GET</td><td class="mono">/api/timetable/records</td><td>Normalized records</td></tr>
                   <tr><td class="mono">GET</td><td class="mono">/api/faculty</td><td>Roster with load</td></tr>
+                  <tr><td class="mono">GET</td><td class="mono">/api/faculty/departments</td><td>Department list</td></tr>
                   <tr><td class="mono">POST</td><td class="mono">/api/availability</td><td>Free faculty for a slot</td></tr>
                   <tr><td class="mono">GET</td><td class="mono">/api/availability/summary</td><td>Dashboard totals</td></tr>
+                  <tr><td class="mono">GET</td><td class="mono">/api/timetable/import/formats</td><td>Accepted upload formats</td></tr>
                   <tr><td class="mono">POST</td><td class="mono">/api/timetable/import/preview</td><td>Validate an upload</td></tr>
                   <tr><td class="mono">POST</td><td class="mono">/api/timetable/import</td><td>Load an upload</td></tr>
+                  <tr><td class="mono">GET</td><td class="mono">/api/auth/session</td><td>Who is signed in</td></tr>
+                  <tr><td class="mono">POST</td><td class="mono">/api/auth/login</td><td>Start a session</td></tr>
+                  <tr><td class="mono">POST</td><td class="mono">/api/auth/logout</td><td>End a session</td></tr>
                 </tbody>
               </table>
             </div>
