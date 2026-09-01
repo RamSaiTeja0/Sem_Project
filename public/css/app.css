@@ -104,6 +104,11 @@
 
 .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; align-items: start; }
 .grid-2.wide-left { grid-template-columns: 1.35fr 1fr; }
+/* Grid items default to min-width:auto, so a wide child (the timetable, whose
+   slots carry a min-width) pushes its column past its track instead of letting
+   its own .table-scroll take over. Allowing the column to shrink hands the
+   overflow back to that scroller. */
+.grid-2 > * { min-width: 0; }
 
 /* =============================== stat cards =========================== */
 .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(178px, 1fr)); gap: 14px; }
