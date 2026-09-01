@@ -20,6 +20,9 @@
         importPreview: '/api/timetable/import/preview',
         importCommit: '/api/timetable/import',
         importFormats: '/api/timetable/import/formats',
+        entries: '/api/timetable/entries',
+        entryReference: '/api/timetable/entries/reference',
+        storage: '/api/storage',
         health: '/api/health',
         session: '/api/auth/session',
         logout: '/api/auth/logout'
@@ -34,6 +37,8 @@
         importFile: null,   // the File that Preview/Confirm will send
         faculty: [],
         formats: null,
+        reference: null,     // form options for Add Timetable
+        editingId: null,     // entry currently loaded into the form
         activity: [],
         attendance: {}
     };
@@ -62,12 +67,13 @@
         });
     }
 
-    function postJson(url, payload) {
-        return fetch(url, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload)
-        }).then(function (res) {
+    function postJson(url, payload, method) {
+        var options = { method: method || 'POST' };
+        if (payload != null) {
+            options.headers = { 'Content-Type': 'application/json' };
+            options.body = JSON.stringify(payload);
+        }
+        return fetch(url, options).then(function (res) {
             return res.json().catch(function () { return null; })
                 .then(function (body) { return { ok: res.ok, status: res.status, body: body }; });
         });
@@ -123,6 +129,7 @@
         import: 'Upload Paper Sheet',
         attendance: 'Attendance Track',
         timetable: 'Master Timetable',
+        manage: 'Add Timetable',
         faculty: 'Faculty Directory',
         reports: 'Availability Summary',
         about: 'Settings / About'
@@ -149,6 +156,7 @@
         if (name === 'reports') loadReports();
         if (name === 'attendance') loadAttendance();
         if (name === 'schedule') loadSchedule();
+        if (name === 'manage') loadManage();
 
         var sidebar = el('sidebar');
         if (sidebar) sidebar.classList.remove('is-open');
@@ -394,10 +402,20 @@
      */
     function loadDashboard(day, period) {
         var query = (day && period) ? '?day=' + encodeURIComponent(day) + '&period=' + encodeURIComponent(period) : '';
-        return Promise.all([getJson(API.summary + query), getJson(API.meta)])
+        return Promise.all([
+            getJson(API.summary + query),
+            getJson(API.meta),
+            // Distinct subjects actually on the timetable, counted from the
+            // records rather than assumed from the roster.
+            getJson(API.timetable + '/records?status=busy')
+        ])
             .then(function (results) {
                 var summary = results[0];
                 var meta = results[1];
+                var subjectCount = Object.keys((results[2].records || []).reduce(function (seen, r) {
+                    if (r.subject) seen[r.subject] = true;
+                    return seen;
+                }, {})).length;
                 var selected = summary.selected;
                 var tightest = summary.slots.slice().sort(function (a, b) {
                     return a.available - b.available;
@@ -411,6 +429,10 @@
                       note: selected ? 'free at ' + selected.day + ' P' + selected.period : 'pick a slot', tone: 'ok' },
                     { label: 'Busy faculty', value: selected ? selected.busy : '—',
                       note: selected ? 'teaching at that slot' : 'pick a slot', tone: 'busy' },
+                    { label: 'Total classes', value: summary.classes.length,
+                      note: summary.classes.slice(0, 3).join(', ') +
+                            (summary.classes.length > 3 ? ' + ' + (summary.classes.length - 3) + ' more' : '') },
+                    { label: 'Total subjects', value: subjectCount, note: 'taught this semester' },
                     { label: 'Timetable slots', value: summary.days.length * summary.periods.length,
                       note: summary.days.length + ' days × ' + summary.periods.length + ' periods' },
                     { label: 'Scheduled periods', value: scheduled, note: 'across ' + summary.classes.length + ' class(es)' },
@@ -706,28 +728,28 @@
             className: 'CSE-A',
             text: [
                 'Faculty,Monday P1,Monday P2,Monday P3,Tuesday P1,Tuesday P2,Tuesday P3',
-                'Dr. Anand Rao,DBMS,FREE,FREE,FREE,DBMS,FREE',
-                'Dr. Meera Nair,FREE,OS,FREE,FREE,FREE,OS',
-                'Prof. Kiran Kumar,FREE,FREE,CN,CN,FREE,FREE',
-                'Prof. Priya Sharma,FREE,FREE,FREE,FREE,FREE,FREE'
+                'Dr. Arjun Rao,Data Structures,FREE,FREE,FREE,Data Structures,FREE',
+                'Dr. Priya Sharma,FREE,Database Management Systems,FREE,FREE,FREE,Database Management Systems',
+                'Prof. Kiran Reddy,FREE,FREE,Operating Systems,Operating Systems,FREE,FREE',
+                'Dr. Ananya Iyer,FREE,FREE,FREE,FREE,FREE,FREE'
             ].join('\n')
         },
         'ECE — Semester III': {
             className: 'ECE-A',
             text: [
                 'Faculty,Monday P1,Monday P2,Tuesday P1,Tuesday P2',
-                'Dr. Deepa Iyer,Signals,FREE,FREE,Signals',
+                'Dr. Anitha Menon,Signals and Systems,FREE,FREE,Signals and Systems',
                 'Prof. Naveen Reddy,FREE,Digital Electronics,Digital Electronics,FREE',
-                'Dr. Latha Menon,FREE,FREE,EMT,FREE'
+                'Dr. Kavya Rao,FREE,FREE,Microprocessors,FREE'
             ].join('\n')
         },
         'Long-form (Day / Period rows)': {
             className: 'CSE-B',
             text: [
                 'Faculty,Day,Period,Subject,Class,Room',
-                'Dr. Anand Rao,Monday,1,DBMS,CSE-B,B-201',
-                'Dr. Meera Nair,Monday,2,OS,CSE-B,B-201',
-                'Prof. Kiran Kumar,Tuesday,1,CN,CSE-B,B-201'
+                'Dr. Arjun Rao,Monday,1,Database Management Systems,CSE-B,B-201',
+                'Prof. Meera Joshi,Monday,2,Data Structures,CSE-B,B-201',
+                'Prof. Kiran Reddy,Tuesday,1,Computer Networks,CSE-B,B-201'
             ].join('\n')
         }
     };
@@ -957,6 +979,12 @@
         return value ? '?class=' + encodeURIComponent(value) : '';
     }
 
+    /** The Master Timetable's current view, as a /api/timetable query string. */
+    function ttQuery() {
+        var value = (el('ttView') && el('ttView').value) || '';
+        return value.indexOf('class:') === 0 ? '?class=' + encodeURIComponent(value.slice(6)) : '';
+    }
+
     function onAvailabilitySelect(cell) {
         checkAvailability(cell, 'availResult', {
             department: el('availDept').value,
@@ -1026,9 +1054,7 @@
             fillSelect(el('facDept'), [{ value: '', label: 'All departments' }].concat(departments));
             fillSelect(el('availDept'), [{ value: '', label: 'All departments' }].concat(departments));
 
-            var viewValue = el('ttView').value || '';
-            var query = viewValue.indexOf('class:') === 0
-                ? '?class=' + encodeURIComponent(viewValue.slice(6)) : '';
+            var query = ttQuery();
 
             var note = el('formatNote');
             if (note && state.formats) {
@@ -1051,6 +1077,247 @@
                 box.textContent = 'Could not load the timetable: ' + err.message;
             }
         });
+    }
+
+    // ------------------------------------------------- add / edit timetable
+    /**
+     * The Add Timetable view. Reads its options from the server rather than
+     * hard-coding them, so the form always offers exactly what the database
+     * knows about. Saving is disabled — with an explanation — when no database
+     * is configured, because an edit that vanished on restart would mislead.
+     */
+    function manageNote(message, kind) {
+        var box = el('manageResult');
+        if (!box) return;
+        box.innerHTML = message
+            ? '<div class="notice notice-' + (kind || 'info') + '">' + message + '</div>'
+            : '';
+    }
+
+    function setManageEditable(reference, storage) {
+        var chip = el('manageBackend');
+        var note = el('manageStorageNote');
+        var editable = Boolean(reference && reference.editable);
+
+        if (chip) {
+            chip.textContent = editable ? 'Saving to PostgreSQL' : 'Read-only — no database';
+            chip.className = 'pill ' + (editable ? 'pill-ok' : 'pill-warn');
+        }
+        if (note) {
+            note.innerHTML = editable
+                ? ''
+                : '<div class="notice notice-warn">Entries cannot be saved because no database is ' +
+                  'configured. Set <code>DATABASE_URL</code> to your Neon connection string and restart ' +
+                  'the server. Everything else — the timetable, availability and imports — keeps working ' +
+                  'on the bundled demo data.' +
+                  (storage && storage.error ? ' <br />Reported: ' + esc(storage.error) : '') + '</div>';
+        }
+        var save = el('manageSave');
+        if (save) save.disabled = !editable;
+        return editable;
+    }
+
+    /**
+     * Load an entry into the form, or reset it when passed null. An empty
+     * string is not a valid option for the required selects, so those fall
+     * back to their first option rather than rendering blank.
+     */
+    function fillManageForm(entry) {
+        function set(id, value, fallbackToFirst) {
+            var select = el(id);
+            select.value = value == null ? '' : String(value);
+            if (select.value === '' && fallbackToFirst && select.options.length) {
+                select.value = select.options[0].value;
+            }
+        }
+        state.editingId = entry ? entry.id : null;
+        el('manageId').value = entry ? entry.id : '';
+        set('manageClass', entry && entry.className, true);
+        set('manageDay', entry && entry.day, true);
+        set('managePeriod', entry && entry.period, true);
+        set('manageSubject', entry && entry.subject, true);
+        set('manageFaculty', entry && entry.faculty, true);
+        set('manageRoom', entry && entry.room, false);
+        set('manageType', entry ? entry.type : 'theory', true);
+        el('manageSave').textContent = entry ? 'Update entry' : 'Save entry';
+
+        Array.prototype.forEach.call(document.querySelectorAll('#manageList tr'), function (row) {
+            row.classList.toggle('is-editing', entry && row.dataset.id === String(entry.id));
+        });
+    }
+
+    function renderManageList(entries) {
+        var box = el('manageList');
+        if (!box) return;
+        if (!entries.length) {
+            box.innerHTML = '<p class="muted">No entries stored for this filter.</p>';
+            return;
+        }
+        var rows = entries.map(function (e) {
+            return '<tr data-id="' + e.id + '">' +
+                '<td>' + esc(e.className) + '</td>' +
+                '<td>' + esc(e.day) + '</td>' +
+                '<td>P' + esc(e.period) + '</td>' +
+                '<td>' + esc(e.subject) + '</td>' +
+                '<td>' + esc(e.faculty) + '</td>' +
+                '<td>' + esc(e.room || '—') + '</td>' +
+                '<td>' + esc(e.type === 'lab' ? 'Lab' : 'Theory') + '</td>' +
+                '<td><div class="row-actions">' +
+                    '<button type="button" class="btn btn-sm btn-secondary" data-edit="' + e.id + '">Edit</button>' +
+                    '<button type="button" class="btn btn-sm btn-ghost" data-delete="' + e.id + '">Delete</button>' +
+                '</div></td></tr>';
+        }).join('');
+
+        box.innerHTML = '<p class="muted" style="margin-bottom:10px;">' + entries.length +
+            ' scheduled period' + (entries.length === 1 ? '' : 's') + '.</p>' +
+            '<div class="table-scroll entry-scroll"><table class="data"><thead><tr>' +
+            '<th>Class</th><th>Day</th><th>Period</th><th>Subject</th>' +
+            '<th>Faculty</th><th>Room</th><th>Type</th><th></th>' +
+            '</tr></thead><tbody>' + rows + '</tbody></table></div>';
+
+        Array.prototype.forEach.call(box.querySelectorAll('[data-edit]'), function (button) {
+            button.addEventListener('click', function () {
+                var entry = entries.filter(function (e) { return String(e.id) === button.dataset.edit; })[0];
+                if (!entry) return;
+                fillManageForm(entry);
+                manageNote('Editing ' + esc(entry.className) + ' ' + esc(entry.day) +
+                    ' P' + esc(entry.period) + '. Change the fields above and press Update entry.', 'info');
+                el('manageClass').focus();
+            });
+        });
+        Array.prototype.forEach.call(box.querySelectorAll('[data-delete]'), function (button) {
+            button.addEventListener('click', function () { deleteEntry(button.dataset.delete); });
+        });
+    }
+
+    function loadManageList() {
+        var filter = el('manageFilterClass').value;
+        var url = API.entries + (filter ? '?class=' + encodeURIComponent(filter) : '');
+        return getJson(url)
+            .then(function (data) { renderManageList(data.entries || []); })
+            .catch(function (err) {
+                el('manageList').innerHTML =
+                    '<p class="muted">Entries are unavailable: ' + esc(err.message) + '</p>';
+            });
+    }
+
+    function loadManage() {
+        return Promise.all([
+            getJson(API.entryReference),
+            getJson(API.storage).catch(function () { return null; })
+        ]).then(function (results) {
+            var reference = results[0];
+            state.reference = reference;
+
+            fillSelect(el('manageClass'), reference.classes.map(function (c) { return c.code; }));
+            fillSelect(el('manageDay'), reference.days);
+            fillSelect(el('managePeriod'), reference.periods.map(function (p) {
+                return { value: p, label: 'Period ' + p };
+            }));
+            fillSelect(el('manageSubject'), reference.subjects.map(function (s) { return s.name; }));
+            fillSelect(el('manageFaculty'), reference.faculty.map(function (f) { return f.name; }));
+            fillSelect(el('manageRoom'), [{ value: '', label: '— none —' }].concat(
+                reference.rooms.map(function (r) { return r.code; })));
+
+            var filter = el('manageFilterClass');
+            var previous = filter.value;
+            fillSelect(filter, [{ value: '', label: 'All classes' }].concat(
+                reference.classes.map(function (c) { return c.code; })), previous);
+
+            // A lab subject implies a lab session; the user can still override.
+            el('manageSubject').onchange = function () {
+                var chosen = reference.subjects.filter(function (s) {
+                    return s.name === el('manageSubject').value;
+                })[0];
+                if (chosen && chosen.type) el('manageType').value = chosen.type;
+            };
+
+            if (!setManageEditable(reference, results[1])) {
+                el('manageList').innerHTML =
+                    '<p class="muted">Stored entries are listed here once a database is configured.</p>';
+                return null;
+            }
+            fillManageForm(null);
+            return loadManageList();
+        }).catch(function (err) {
+            manageNote('Could not load the form: ' + esc(err.message), 'error');
+        });
+    }
+
+    function saveEntry(event) {
+        event.preventDefault();
+        var id = el('manageId').value;
+        var payload = {
+            class: el('manageClass').value,
+            day: el('manageDay').value,
+            period: el('managePeriod').value,
+            subject: el('manageSubject').value,
+            faculty: el('manageFaculty').value,
+            room: el('manageRoom').value || null,
+            type: el('manageType').value
+        };
+        var button = el('manageSave');
+        button.disabled = true;
+        manageNote('Saving…', 'info');
+
+        postJson(id ? API.entries + '/' + id : API.entries, payload, id ? 'PUT' : 'POST')
+            .then(function (res) {
+                button.disabled = false;
+                if (res.status >= 400) {
+                    var body = res.body || {};
+                    var detail = (body.problems || (body.conflicts || []).map(function (c) { return c.message; }) || []);
+                    manageNote('<strong>Not saved.</strong> ' + esc(body.error || 'Request failed') +
+                        (detail.length > 1
+                            ? '<ul style="margin:8px 0 0 18px;">' + detail.map(function (d) {
+                                return '<li>' + esc(d) + '</li>';
+                            }).join('') + '</ul>'
+                            : ''), 'error');
+                    return;
+                }
+                var entry = res.body.entry;
+                manageNote('Saved — ' + esc(entry.className) + ' ' + esc(entry.day) + ' P' + esc(entry.period) +
+                    ': ' + esc(entry.subject) + ' with ' + esc(entry.faculty) + '.', 'ok');
+                logActivity((id ? 'Updated ' : 'Added ') + entry.className + ' ' + entry.day + ' P' + entry.period);
+                fillManageForm(null);
+                refreshAfterChange();
+            })
+            .catch(function (err) {
+                button.disabled = false;
+                manageNote('Could not save: ' + esc(err.message), 'error');
+            });
+    }
+
+    function deleteEntry(id) {
+        var entry = null;
+        var row = document.querySelector('#manageList tr[data-id="' + id + '"]');
+        if (row) {
+            var cells = row.querySelectorAll('td');
+            entry = cells[0].textContent + ' ' + cells[1].textContent + ' ' + cells[2].textContent;
+        }
+        if (!window.confirm('Delete this timetable entry' + (entry ? ' (' + entry + ')' : '') +
+            '?\n\nThis removes it from the database and cannot be undone.')) return;
+
+        postJson(API.entries + '/' + id, null, 'DELETE')
+            .then(function (res) {
+                if (res.status >= 400) {
+                    manageNote('Could not delete: ' + esc((res.body && res.body.error) || res.status), 'error');
+                    return;
+                }
+                manageNote('Entry deleted.' + (entry ? ' (' + esc(entry) + ')' : ''), 'ok');
+                logActivity('Deleted timetable entry ' + (entry || id));
+                if (String(state.editingId) === String(id)) fillManageForm(null);
+                refreshAfterChange();
+            })
+            .catch(function (err) { manageNote('Could not delete: ' + esc(err.message), 'error'); });
+    }
+
+    /** After a write, every view reading the timetable must be re-fetched. */
+    function refreshAfterChange() {
+        loadManageList();
+        loadDashboard();
+        loadGrid(availabilityQuery(), 'availHead', 'availBody', onAvailabilitySelect);
+        loadGrid(ttQuery(), 'ttHead', 'ttBody', jumpToAvailability);
+        loadFacultyTable();
     }
 
     // ------------------------------------------------------------ wiring
@@ -1090,10 +1357,16 @@
         });
 
         // --- master timetable
+        // --- add / edit timetable
+        el('manageForm').addEventListener('submit', saveEntry);
+        el('manageReset').addEventListener('click', function () {
+            fillManageForm(null);
+            manageNote('');
+        });
+        el('manageFilterClass').addEventListener('change', loadManageList);
+
         el('ttView').addEventListener('change', function () {
-            var value = el('ttView').value;
-            var query = value.indexOf('class:') === 0 ? '?class=' + encodeURIComponent(value.slice(6)) : '';
-            loadGrid(query, 'ttHead', 'ttBody', jumpToAvailability);
+            loadGrid(ttQuery(), 'ttHead', 'ttBody', jumpToAvailability);
         });
 
         // --- availability

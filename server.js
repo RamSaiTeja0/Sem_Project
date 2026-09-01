@@ -13,10 +13,12 @@ const path = require('path');
 
 const config = require('./src/config');
 const session = require('./src/core/session');
+const store = require('./src/data/store');
 const timetableRoutes = require('./src/routes/timetable');
 const facultyRoutes = require('./src/routes/faculty');
 const availabilityRoutes = require('./src/routes/availability');
 const importRoutes = require('./src/routes/import');
+const entryRoutes = require('./src/routes/entries');
 const authRoutes = require('./src/routes/auth');
 
 const app = express();
@@ -50,7 +52,27 @@ app.get('/api/health', (req, res) => {
         port: app.get('activePort') || config.port,
         env: config.env,
         authRequired: config.authRequired,
-        authenticated: Boolean(req.session)
+        authenticated: Boolean(req.session),
+        storage: store.usingDatabase ? 'postgres' : 'in-memory'
+    });
+});
+
+/**
+ * Where the timetable is being served from. Lets the dashboard say plainly
+ * whether it is on Neon or on the bundled demo dataset, and why.
+ */
+app.get('/api/storage', (req, res) => {
+    res.json({
+        backend: store.usingDatabase ? 'postgres' : 'in-memory',
+        databaseConfigured: store.databaseConfigured,
+        target: store.usingDatabase ? require('./src/db/pool').describeTarget() : null,
+        origin: store.origin,
+        loadedAt: store.loadedAt,
+        editable: store.usingDatabase,
+        error: store.databaseError,
+        note: store.usingDatabase
+            ? 'Timetable data is stored in PostgreSQL.'
+            : 'Running on the bundled demo dataset. Set DATABASE_URL to persist changes.'
     });
 });
 
@@ -82,6 +104,7 @@ app.get(['/dashboard', '/app', '/index.html'], requireAuth, (req, res) => {
 // API. The import router is mounted first so /api/timetable/import is not
 // swallowed by the timetable router's own routes.
 app.use('/api/timetable/import', requireAuth, importRoutes);
+app.use('/api/timetable/entries', requireAuth, entryRoutes);
 app.use('/api/timetable', requireAuth, timetableRoutes);
 app.use('/api/faculty', requireAuth, facultyRoutes);
 app.use('/api/availability', requireAuth, availabilityRoutes);
@@ -144,8 +167,26 @@ function start(port = config.port, fallbacks = config.fallbackPorts) {
     return server;
 }
 
-if (require.main === module) {
-    start();
+/**
+ * Connect the database (create tables, seed when empty) and then listen. A
+ * database failure is reported but never blocks startup: the app falls back to
+ * the bundled demo dataset so a demonstration is always possible.
+ */
+async function bootstrap() {
+    const result = await store.initFromDatabase();
+    if (result.enabled) {
+        console.log(`Database: connected to ${result.target}` +
+            (result.seeded ? ' (demo data seeded)' : ' (existing data kept)'));
+    } else if (result.error) {
+        console.warn(`Database: ${result.error}\n  Falling back to the bundled demo dataset.`);
+    } else {
+        console.log(`Database: ${result.reason}`);
+    }
+    return start();
 }
 
-module.exports = { app, start, config };
+if (require.main === module) {
+    bootstrap();
+}
+
+module.exports = { app, start, bootstrap, config };

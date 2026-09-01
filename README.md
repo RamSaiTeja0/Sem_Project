@@ -34,6 +34,13 @@ scope — see [Future enhancements](#future-enhancements).
 - **Excel import (.xlsx)** — the primary structured input. Upload, preview,
   validate, then confirm.
 - **CSV import** — the same normalization pipeline, same result.
+- **Add Timetable** — create, edit and delete a scheduled period from the
+  dashboard. Faculty clashes, room clashes, duplicate slots and missing fields
+  are all rejected with a message naming the problem, and valid entries are
+  saved to PostgreSQL.
+- **PostgreSQL / Neon storage** — optional. Set `DATABASE_URL` and the
+  timetable is stored, with tables created and demo data seeded automatically.
+  Without it the app runs on the bundled demo dataset exactly as before.
 - **Faculty management** — roster with busy/free period counts per faculty.
 - **Availability summary** — free faculty for every slot across the week.
 - **Filters** — by day, period, department and faculty name.
@@ -89,9 +96,14 @@ tested directly and reused unchanged if the storage or transport changes.
 │   │   ├── session.js            signed-cookie sessions (no dependency)
 │   │   └── availabilityEngine.js the availability query engine
 │   ├── data/
-│   │   ├── demoTimetable.js      10-faculty demo dataset
+│   │   ├── demoTimetable.js      12-faculty demo dataset (generated)
 │   │   ├── users.js              demo account directory (faculty-derived)
-│   │   └── store.js              in-memory store (replaceable)
+│   │   └── store.js              store: PostgreSQL, or in-memory fallback
+│   ├── db/
+│   │   ├── schema.sql            tables, keys and no-double-booking constraints
+│   │   ├── pool.js               Neon connection pool (optional)
+│   │   ├── repository.js         every SQL statement; entry CRUD
+│   │   └── seed.js               create tables, seed demo data when empty
 │   ├── importers/
 │   │   ├── tableParser.js        shared matrix/long-form parser
 │   │   ├── excelImporter.js      .xlsx via exceljs
@@ -99,6 +111,7 @@ tested directly and reused unchanged if the storage or transport changes.
 │   │   └── index.js              preview / commit orchestration
 │   └── routes/
 │       ├── timetable.js          grids, metadata, records
+│       ├── entries.js            add / edit / delete a timetable entry
 │       ├── faculty.js            roster and load
 │       ├── availability.js       the read-only availability API
 │       ├── import.js             upload endpoints
@@ -109,7 +122,11 @@ tested directly and reused unchanged if the storage or transport changes.
 │   ├── index.html                dashboard shell
 │   ├── css/                      theme tokens + per-page styles
 │   └── js/                       home.js, login.js, app.js (vanilla)
-└── tests/                        engine, API, auth and end-to-end suites
+├── scripts/
+│   └── setupDatabase.js          npm run db:setup
+├── tools/
+│   └── generateDemoTimetable.js  regenerates the demo dataset
+└── tests/                        engine, API, auth, database and e2e suites
 ```
 
 ---
@@ -119,16 +136,22 @@ tested directly and reused unchanged if the storage or transport changes.
 Everything reduces to one record shape:
 
 ```json
-{ "faculty": "Dr. Anand Rao", "day": "Monday", "period": 1,
-  "subject": "DBMS", "className": "CSE-A", "room": "A-101", "status": "busy" }
+{ "faculty": "Dr. Arjun Rao", "day": "Monday", "period": 1,
+  "subject": "Data Structures", "className": "CSE-A", "room": "A-101",
+  "type": "theory", "status": "busy" }
 ```
 
 A free slot carries the same shape with nulls:
 
 ```json
-{ "faculty": "Dr. Anand Rao", "day": "Monday", "period": 2,
-  "subject": null, "className": null, "room": null, "status": "free" }
+{ "faculty": "Dr. Arjun Rao", "day": "Monday", "period": 2,
+  "subject": null, "className": null, "room": null,
+  "type": null, "status": "free" }
 ```
+
+`type` is `theory` or `lab`. A source may state it per entry; when it does not,
+it is inferred from the subject name, so timetables written before this field
+existed keep working unchanged.
 
 A record exists for every faculty × day × period combination, so availability
 is a direct lookup rather than a scan across timetables. Multi-period labs
@@ -159,8 +182,17 @@ Requires Node.js 18 or newer.
 | `SESSION_SECRET` | dev default | HMAC key for session cookies — set this in production |
 | `SESSION_HOURS` | `12` | Session lifetime |
 | `DEMO_PASSWORD` | `tecsub123` | Password shared by every demo account |
+| `DATABASE_URL` | _(unset)_ | Neon/PostgreSQL connection string. Unset = in-memory demo data |
+| `DB_POOL_MAX` | `5` | Connection pool size |
+| `DB_CONNECT_TIMEOUT_MS` | `10000` | Connection timeout |
+| `DB_AUTO_SEED` | `true` | Seed demo data at startup when the timetable is empty |
 
 `.env` is git-ignored. Never commit it — copy `.env.example` instead.
+
+`DATABASE_URL` contains a password. Keep it out of commits, screenshots and
+chat logs; if one leaks, reset it in the Neon console. The application never
+logs the connection string — diagnostics print only the host and database
+name.
 
 ## How to run
 
@@ -192,7 +224,7 @@ Sign-in is optional by default, so the demo dataset stays browsable. Visit
 | Username | Role |
 | --- | --- |
 | `admin` | Timetable coordinator |
-| `anand.rao`, `meera.nair`, … | The faculty in the roster |
+| `arjun.rao`, `priya.sharma`, … | The faculty in the roster |
 
 Every demo account uses `DEMO_PASSWORD` (default `tecsub123`). This is a college
 project: accounts are derived from the faculty roster and there is no password
@@ -210,14 +242,14 @@ Two layouts are accepted, and both are detected automatically.
 
 | Faculty | Department | Monday P1 | Monday P2 | Tuesday P1 |
 | --- | --- | --- | --- | --- |
-| Dr. Anand Rao | CSE | DBMS | FREE | OS |
-| Dr. Meera Nair | CSE | FREE | OS | CN |
+| Dr. Arjun Rao | CSE | Data Structures | FREE | Data Structures |
+| Dr. Priya Sharma | CSE | FREE | DBMS | DBMS |
 
 **Long form** — one row per scheduled period:
 
 | Faculty | Day | Period | Subject | Class | Room |
 | --- | --- | --- | --- | --- | --- |
-| Dr. Anand Rao | Monday | 1 | DBMS | CSE-A | A-101 |
+| Dr. Arjun Rao | Monday | 1 | Data Structures | CSE-A | A-101 |
 
 A cell reading `FREE`, `-`, or left blank means the faculty is not teaching
 then. Days accept `Monday` or `Mon`; periods accept `P1` or `1`.
@@ -225,6 +257,37 @@ then. Days accept `Monday` or `Mon`; periods accept `P1` or `1`.
 Steps in the app: **Timetable Import → choose file → Preview → review the
 validation report and preview table → Load this timetable.** Nothing changes
 until you confirm, and a failed import leaves the current timetable in place.
+
+PDF and image uploads are **not** extracted: there is no OCR in this project.
+The upload view accepts those extensions only so it can say so plainly and
+point you at Quick Paste, rather than failing with an unexplained error.
+
+---
+
+## Adding, editing and deleting entries
+
+**Add Timetable** in the sidebar creates a single scheduled period. Pick the
+class, day, period, subject, faculty, room and type, then save. Existing
+entries are listed below the form with Edit and Delete beside each.
+
+Every save is checked before it is written, and all problems are reported at
+once rather than one at a time:
+
+| Rejected | Message |
+| --- | --- |
+| The class already has a period there | `CSE-A already has Operating Systems at Monday P2` |
+| The faculty is teaching elsewhere then | `Dr. Priya Sharma already teaches DBMS (CSE-B) at Monday P2` |
+| The room is already in use | `Room A-101 is already used by CSE-A at Monday P2` |
+| A missing or invalid field | `Day is missing or invalid. Valid days: Monday, …` |
+| An unknown class, subject, faculty or room | `Unknown subject "Astral Projection"` |
+
+Saving needs `DATABASE_URL`. Without it the form explains that entries cannot
+be persisted and the Save button is disabled — an edit that vanished on the
+next restart would be worse than refusing it. Everything else on the page keeps
+working on the demo dataset.
+
+A deletion asks for confirmation and removes only that one entry. Imports are
+unchanged: they still replace the live dataset only after an explicit confirm.
 
 ---
 
@@ -237,7 +300,7 @@ All responses are JSON.
 | `GET` | `/api/health` | Service status |
 | `GET` | `/api/timetable` | Primary class grid |
 | `GET` | `/api/timetable?class=CSE-B` | Another class grid |
-| `GET` | `/api/timetable?faculty=Dr.%20Anand%20Rao` | One faculty's week |
+| `GET` | `/api/timetable?faculty=Dr.%20Arjun%20Rao` | One faculty's week |
 | `GET` | `/api/timetable/meta` | Days, periods, classes, timings |
 | `GET` | `/api/timetable/records` | Normalized records (`day`, `period`, `faculty`, `status` filters) |
 | `GET` | `/api/faculty` | Roster with busy/free counts (`department`, `search` filters) |
@@ -248,6 +311,12 @@ All responses are JSON.
 | `GET` | `/api/timetable/import/formats` | Supported formats and layouts |
 | `POST` | `/api/timetable/import/preview` | Validate an upload, change nothing |
 | `POST` | `/api/timetable/import` | Load an upload |
+| `GET` | `/api/storage` | Whether the timetable is served from PostgreSQL or memory |
+| `GET` | `/api/timetable/entries` | Stored entries (`class`, `day`, `period`, `faculty` filters) |
+| `GET` | `/api/timetable/entries/reference` | Options for the Add Timetable form |
+| `POST` | `/api/timetable/entries` | **Add an entry** (validated, then saved) |
+| `PUT` | `/api/timetable/entries/:id` | **Edit an entry** |
+| `DELETE` | `/api/timetable/entries/:id` | **Delete an entry** |
 | `GET` | `/api/auth/session` | Who is signed in, and whether sign-in is enforced |
 | `GET` | `/api/auth/accounts` | The demo account directory (never passwords) |
 | `POST` | `/api/auth/login` | Start a session |
@@ -267,12 +336,12 @@ curl -X POST http://localhost:3001/api/availability \
   "period": 2,
   "subject": null,
   "availableFaculty": [
-    "Dr. Anand Rao", "Prof. Kiran Kumar", "Prof. Priya Sharma",
-    "Dr. Suresh Babu", "Prof. Arun Prasad", "Dr. Deepa Iyer",
-    "Dr. Latha Menon", "Mr. Sai Kishore"
+    "Dr. Arjun Rao", "Dr. Ananya Iyer", "Prof. Sneha Nair",
+    "Dr. Vikram Kumar", "Prof. Meera Joshi", "Prof. Naveen Reddy",
+    "Dr. Kavya Rao", "Dr. Anitha Menon"
   ],
   "totalAvailable": 8,
-  "totalBusy": 2,
+  "totalBusy": 4,
   "readOnly": true
 }
 ```
@@ -316,8 +385,19 @@ npm test              # all suites
 npm run test:engine   # normalizer, validator, availability engine
 npm run test:api      # every endpoint, including Excel and CSV import
 npm run test:auth     # sessions, sign-in, and the AUTH_REQUIRED guard
+npm run test:db       # schema, seeding, round-trip and entry CRUD
 npm run test:e2e      # click -> API -> engine -> displayed result
 ```
+
+The database suite needs a scratch PostgreSQL database and **writes to it**:
+
+```bash
+TEST_DATABASE_URL=postgresql://user:pass@host/scratch_db npm run test:db
+```
+
+With no connection string it skips itself rather than failing, so `npm test`
+stays green on a machine without a database — the application is designed to
+run without one. Point it at a scratch database, never one holding real data.
 
 The end-to-end suite runs in headless Chromium when Playwright is installed and
 falls back to exercising the same path over HTTP when it is not — it reports
@@ -330,23 +410,98 @@ than being taken on trust.
 
 Coverage includes Monday P2 and Tuesday P1 availability, busy-faculty
 exclusion, free-faculty detection, invalid days and periods, empty timetables,
-duplicate records, Excel and CSV import, Quick Paste and department presets,
-API response shapes, sign-in and session handling, and an assertion that a full
-sweep of availability calls mutates nothing.
+duplicate records, faculty and room double-booking, Excel and CSV import, Quick
+Paste and department presets, API response shapes, sign-in and session
+handling, and an assertion that a full sweep of availability calls mutates
+nothing.
+
+The database suite additionally covers schema creation, idempotent seeding (no
+duplicate demo records on a second run), an exact round trip from the demo
+dataset through PostgreSQL and back, rejection of a double-booked slot by the
+schema itself, and every add / edit / delete path including each conflict
+case.
 
 ---
 
 ## Database
 
-The current version keeps the normalized timetable in memory, seeded from
-`src/data/demoTimetable.js` and replaceable by an import at runtime. This is
-deliberate: the core workflow matters more than storage infrastructure.
+The timetable can be stored in **PostgreSQL (Neon)**, or held in memory. Both
+paths produce the same source shape, so the normalizer, validator, availability
+engine, API and dashboard behave identically either way — `src/data/store.js`
+is the seam that makes that true.
 
-`src/data/store.js` is the seam. To move to PostgreSQL/Neon, replace its
-`loadSource()` with a query returning the same source shape. The normalizer,
-validator, availability engine, API and dashboard are unaffected.
+| | `DATABASE_URL` set | `DATABASE_URL` unset |
+| --- | --- | --- |
+| Timetable data | PostgreSQL | bundled demo dataset |
+| Add / edit / delete entries | yes, persisted | refused with an explanation |
+| Everything else | works | works |
 
-Note that imports are in-memory: a restart returns to the demo dataset.
+The in-memory fallback is never removed. If the database is unreachable at
+startup the server still comes up on the demo dataset and says so, rather than
+failing to boot.
+
+### Setting it up
+
+1. Create a project at [neon.tech](https://neon.tech) and copy the connection
+   string from the dashboard.
+2. `cp .env.example .env` and set `DATABASE_URL` to that string.
+3. `npm run db:setup`
+
+`db:setup` creates the tables and inserts the demo data. It is safe to run
+repeatedly: tables are created only if absent, and the demo rows are inserted
+only when the timetable is empty. The server performs the same steps
+automatically at startup.
+
+### Tables
+
+| Table | Holds |
+| --- | --- |
+| `departments` | CSE, ECE |
+| `rooms` | classrooms and labs, with capacity |
+| `faculty` | the roster, each in a department |
+| `subjects` | theory and lab subjects, each in a department |
+| `classes` | CSE-A/B/C, ECE-A/B, each with a home room |
+| `periods` | period numbers and their start/end times |
+| `timetable` | one row per class + day + period |
+| `users` | sign-in accounts (the coordinator plus one per faculty) |
+| `substitutions` | a recorded substitution — never written by the availability lookup |
+| `attendance` | held / not held / substituted, per entry per date |
+
+Primary keys are on every table and foreign keys tie the timetable to its
+class, subject, faculty and room. The two rules the application enforces are
+also enforced by the schema itself:
+
+```sql
+CONSTRAINT timetable_class_slot_unique   UNIQUE (class_id, day_of_week, period)
+CONSTRAINT timetable_faculty_slot_unique UNIQUE (faculty_id, day_of_week, period)
+CREATE UNIQUE INDEX timetable_room_slot_unique ON timetable (room_id, day_of_week, period)
+    WHERE room_id IS NOT NULL;
+```
+
+so a double-booked faculty member or room is rejected by PostgreSQL even if
+something other than this application tries to insert one.
+
+### Demo data
+
+`src/data/demoTimetable.js` holds 12 fictional faculty across CSE and ECE, 5
+classes, 22 subjects (theory and lab), 10 rooms, and a full Monday–Friday
+P1–P7 week of 152 scheduled periods.
+
+It is a **generated file**. `tools/generateDemoTimetable.js` searches for a
+schedule that satisfies every constraint and writes the result out as plain
+data; the app never runs the generator. To change the demo timetable, edit the
+teaching plan in that script and re-run it:
+
+```bash
+node tools/generateDemoTimetable.js
+```
+
+The generator is what guarantees the properties the demonstration depends on:
+no faculty member is ever in two classes at once, no room hosts two classes at
+once, and every faculty member has both busy and free periods — so the
+substitution lookup always has something to show.
+
+All names are fictional and exist only for this demonstration.
 
 ---
 

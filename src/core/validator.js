@@ -38,6 +38,25 @@ function validate(normalized) {
         }
     });
 
+    // A room cannot host two classes in the same slot. Two entries for the same
+    // class in one room are a class-level clash the faculty check already
+    // reports, so only cross-class collisions are raised here.
+    const byRoom = new Map();
+    busy.forEach(record => {
+        if (!record.room) return;
+        const key = `${record.room}|${record.day}|${record.period}`;
+        const existing = byRoom.get(key);
+        if (existing && existing.className !== record.className) {
+            errors.push({
+                code: 'ROOM_DOUBLE_BOOKING',
+                message: `Room ${record.room} is booked by two classes at ${record.day} P${record.period} (${existing.className} / ${record.className})`,
+                context: { room: record.room, day: record.day, period: record.period }
+            });
+        } else if (!existing) {
+            byRoom.set(key, record);
+        }
+    });
+
     // Slots the primary class does not cover — informational, never invented.
     if (meta.primaryClass && days.length && periods.length) {
         const covered = new Set(busy
@@ -68,6 +87,8 @@ function validate(normalized) {
             periods: periods.length,
             classes: (meta.classes || []).length,
             busySlots: busy.length,
+            theorySlots: busy.filter(r => r.type === 'theory').length,
+            labSlots: busy.filter(r => r.type === 'lab').length,
             totalRecords: (normalized.records || []).length,
             freeSlots: (normalized.records || []).filter(r => r.status === 'free').length
         }

@@ -2,7 +2,9 @@
 const { spawnSync } = require('child_process');
 const path = require('path');
 
-const suites = ['engine.test.js', 'api.test.js', 'auth.test.js', 'e2e.test.js'];
+// database.test.js skips itself when no connection string is set, so this list
+// is the same whether or not a PostgreSQL database is available.
+const suites = ['engine.test.js', 'api.test.js', 'auth.test.js', 'database.test.js', 'e2e.test.js'];
 let failures = 0;
 
 suites.forEach(suite => {

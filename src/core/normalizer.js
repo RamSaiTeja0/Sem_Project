@@ -1,7 +1,10 @@
 /**
  * Normalizer — turns any timetable source into the single internal record shape.
  *
- *   { faculty, facultyId, day, period, subject, className, room, status }
+ *   { faculty, facultyId, day, period, subject, className, room, type, status }
+ *
+ * `type` is 'theory' or 'lab'. A source may state it per entry; when it does
+ * not, it is inferred from the subject name so older sources keep working.
  *
  * status is 'busy' when the faculty is teaching that slot, 'free' otherwise.
  * Free records are materialized for every faculty x day x period combination
@@ -36,6 +39,26 @@ function text(value) {
 function isFreeToken(value) {
     const raw = text(value);
     return raw === null || FREE_TOKENS.has(raw.toUpperCase());
+}
+
+/** Session kinds a source may state directly. */
+const TYPE_ALIASES = {
+    LAB: 'lab', LABORATORY: 'lab', PRACTICAL: 'lab', PRAC: 'lab',
+    THEORY: 'theory', LECTURE: 'theory', LEC: 'theory', CLASS: 'theory'
+};
+
+/**
+ * Resolve a session type. An explicit value wins; otherwise a subject reading
+ * like "DBMS Lab" is a lab, and everything else is theory. Inferring keeps
+ * sources written before this field existed working unchanged.
+ */
+function classifySessionType(declared, subject) {
+    const raw = text(declared);
+    if (raw) {
+        const known = TYPE_ALIASES[raw.toUpperCase()];
+        if (known) return known;
+    }
+    return /\b(lab|laboratory|practical)\b/i.test(String(subject || '')) ? 'lab' : 'theory';
 }
 
 function normalizeDayName(input, allowedDays = DEFAULT_DAYS) {
@@ -138,7 +161,7 @@ function normalize(source) {
     const busyRecords = [];
     const seen = new Map();
 
-    function pushBusy(member, day, period, subject, className, room, context) {
+    function pushBusy(member, day, period, subject, className, room, type, context) {
         const key = `${member.name}|${day}|${period}`;
         if (seen.has(key)) {
             const prev = seen.get(key);
@@ -156,6 +179,7 @@ function normalize(source) {
             subject,
             className: className || null,
             room: room || null,
+            type: classifySessionType(type, subject),
             status: 'busy'
         };
         seen.set(key, record);
@@ -185,7 +209,8 @@ function normalize(source) {
             add('error', 'MISSING_FACULTY', `Entry ${index + 1}: no faculty name`, line);
             return;
         }
-        pushBusy(member, day, period, text(entry.subject), text(entry.class || entry.className), text(entry.room), line);
+        pushBusy(member, day, period, text(entry.subject), text(entry.class || entry.className),
+            text(entry.room), entry.type, line);
     });
 
     // --- shape B: per-class grids ---
@@ -234,7 +259,7 @@ function normalize(source) {
                 // so every coordinate is independently addressable.
                 for (let p = start; p <= end; p++) {
                     pushBusy(member, day, p, text(cell.subject), className, text(cell.room) || defaultRoom,
-                        { className, day, period: p });
+                        cell.type, { className, day, period: p });
                 }
             });
         });
@@ -255,6 +280,7 @@ function normalize(source) {
                     subject: null,
                     className: null,
                     room: null,
+                    type: null,
                     status: 'free'
                 });
             });
@@ -286,6 +312,7 @@ function normalize(source) {
 
 module.exports = {
     normalize,
+    classifySessionType,
     normalizeDayName,
     normalizePeriodNumber,
     parseSlotHeader,

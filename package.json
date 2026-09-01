@@ -1,7 +1,7 @@
 {
   "name": "tecsubstitution",
   "version": "1.0.0",
-  "description": "TecSubstitution — Faculty Substitution / Availability Finder",
+  "description": "TecSubstitution \u2014 Faculty Substitution / Availability Finder",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
@@ -10,7 +10,9 @@
     "test:engine": "node tests/engine.test.js",
     "test:api": "node tests/api.test.js",
     "test:auth": "node tests/auth.test.js",
-    "test:e2e": "node tests/e2e.test.js"
+    "test:e2e": "node tests/e2e.test.js",
+    "test:db": "node tests/database.test.js",
+    "db:setup": "node scripts/setupDatabase.js"
   },
   "engines": {
     "node": ">=18"
@@ -19,7 +21,8 @@
     "dotenv": "^16.4.5",
     "exceljs": "^4.4.0",
     "express": "^4.19.2",
-    "multer": "^1.4.5-lts.1"
+    "multer": "^1.4.5-lts.1",
+    "pg": "^8.23.0"
   },
   "license": "MIT"
 }

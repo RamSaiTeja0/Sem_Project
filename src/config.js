@@ -39,7 +39,18 @@ const config = {
     sessionSecret: process.env.SESSION_SECRET || 'tecsubstitution-dev-secret',
     sessionHours: intOr(process.env.SESSION_HOURS, 12),
     /** Password every demo account signs in with. Override in .env. */
-    demoPassword: process.env.DEMO_PASSWORD || 'tecsub123'
+    demoPassword: process.env.DEMO_PASSWORD || 'tecsub123',
+
+    /**
+     * PostgreSQL (Neon). Entirely optional: with no DATABASE_URL the app runs
+     * on the bundled demo dataset held in memory, exactly as before. The value
+     * is a secret — it is never logged, and .env is git-ignored.
+     */
+    databaseUrl: (process.env.DATABASE_URL || '').trim() || null,
+    dbPoolMax: intOr(process.env.DB_POOL_MAX, 5),
+    dbConnectTimeoutMs: intOr(process.env.DB_CONNECT_TIMEOUT_MS, 10000),
+    /** Create tables and insert the demo rows on startup when the DB is empty. */
+    dbAutoSeed: boolOr(process.env.DB_AUTO_SEED, true)
 };
 
 module.exports = config;

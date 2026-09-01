@@ -138,16 +138,16 @@ async function browserRun(playwright) {
             assert.match(await page.locator('#loginMessage').textContent(), /Incorrect username or password/);
 
             // The demo chip fills the form; the right password signs in.
-            await page.click('.demo-chip[data-user="meera.nair"]');
+            await page.click('.demo-chip[data-user="kiran.reddy"]');
             await page.click('#loginSubmit');
             await page.waitForURL(/\/dashboard/);
             await page.waitForSelector('#ttBody .slot-btn', { state: 'attached' });
         });
 
         await checkAsync('the top bar shows who is signed in, with a logout control', async () => {
-            assert.strictEqual(await page.locator('#userName').textContent(), 'Dr. Meera Nair');
+            assert.strictEqual(await page.locator('#userName').textContent(), 'Prof. Kiran Reddy');
             assert.match(await page.locator('#userRole').textContent(), /Faculty · CSE/);
-            assert.strictEqual(await page.locator('#userAvatar').textContent(), 'MN');
+            assert.strictEqual(await page.locator('#userAvatar').textContent(), 'KR');
             assert.ok(await page.locator('#logoutBtn').isVisible(), 'the logout button is shown');
             assert.ok(!(await page.locator('#loginLink').isVisible()), 'the login link is hidden');
         });
@@ -158,7 +158,8 @@ async function browserRun(playwright) {
             assert.deepStrictEqual(items, [
                 'Dashboard', 'My Schedule', 'Adjust / Substitute', 'Faculty Availability',
                 'Upload Paper Sheet', 'Attendance Track',
-                'Master Timetable', 'Faculty Directory', 'Availability Summary', 'Settings / About'
+                'Master Timetable', 'Add Timetable', 'Faculty Directory',
+                'Availability Summary', 'Settings / About'
             ]);
             assert.strictEqual(await page.locator('.nav a[href="/"]').count(), 1, 'a Home link');
             assert.strictEqual(await page.locator('#sidebarLogout').count(), 1, 'a Logout control');
@@ -171,7 +172,7 @@ async function browserRun(playwright) {
                 .map(t => t.trim());
             ['Total faculty', 'Available faculty', 'Busy faculty', 'Timetable slots', 'Conflicts']
                 .forEach(label => assert.ok(labels.includes(label), 'missing stat card: ' + label));
-            assert.match(await page.locator('#topbarMeta').textContent(), /10 faculty/);
+            assert.match(await page.locator('#topbarMeta').textContent(), /12 faculty/);
             assert.ok((await page.locator('#workloadCard table.data tbody tr').count()) > 0, 'workload rows');
         });
 
@@ -202,8 +203,8 @@ async function browserRun(playwright) {
                 .evaluate(el => ({ ...el.dataset }));
             assert.strictEqual(meta.day, 'Monday');
             assert.strictEqual(meta.period, '2');
-            assert.strictEqual(meta.subject, 'OS');
-            assert.strictEqual(meta.faculty, 'Dr. Meera Nair');
+            assert.strictEqual(meta.subject, 'Operating Systems');
+            assert.strictEqual(meta.faculty, 'Prof. Kiran Reddy');
             assert.strictEqual(meta.class, 'CSE-A');
             assert.strictEqual(meta.status, 'busy');
         });
@@ -221,13 +222,13 @@ async function browserRun(playwright) {
             const sent = JSON.parse(posted.body);
             assert.strictEqual(sent.day, 'Monday');
             assert.strictEqual(sent.period, 2);
-            assert.strictEqual(sent.subject, 'OS');
+            assert.strictEqual(sent.subject, 'Operating Systems');
 
             const shown = (await page.locator('#availResult ul.faculty-list:not(.busy-list) li').allTextContents())
                 .map(t => t.replace(/✓/g, '').trim());
             assert.strictEqual(shown.length, 8);
-            assert.ok(!shown.some(t => t.startsWith('Dr. Meera Nair')), 'the teaching faculty is excluded');
-            assert.ok(!shown.some(t => t.startsWith('Prof. Naveen Reddy')), 'busy elsewhere, excluded');
+            assert.ok(!shown.some(t => t.startsWith('Prof. Kiran Reddy')), 'the teaching faculty is excluded');
+            assert.ok(!shown.some(t => t.startsWith('Dr. Priya Sharma')), 'busy elsewhere, excluded');
 
             assert.strictEqual(await page.locator('#availBody .slot-btn.is-selected').count(), 1);
             assert.match(await page.locator('#availResult .slot-title').textContent(), /Monday — Period 2/);
@@ -235,14 +236,15 @@ async function browserRun(playwright) {
             // The selected cell is described in full.
             const panel = await page.locator('#availResult').textContent();
             assert.match(panel, /Class\s*CSE-A/);
-            assert.match(panel, /Subject\s*OS/);
-            assert.match(panel, /Current Faculty\s*Dr\. Meera Nair/);
+            assert.match(panel, /Subject\s*Operating Systems/);
+            assert.match(panel, /Current Faculty\s*Prof\. Kiran Reddy/);
 
             // Busy faculty are listed alongside the free ones.
             const busy = (await page.locator('#availResult .busy-list li').allTextContents())
                 .map(t => t.replace(/✗/g, '').trim());
-            assert.strictEqual(busy.length, 1, 'Prof. Naveen Reddy is busy elsewhere');
-            assert.ok(busy[0].startsWith('Prof. Naveen Reddy'));
+            // Three others teach at Monday P2, in CSE-B, CSE-C and ECE-A.
+            assert.strictEqual(busy.length, 3, 'three faculty are busy elsewhere');
+            busy.forEach(entry => assert.ok(!shown.includes(entry), 'busy faculty are never listed free'));
 
             // The read-only guarantee is stated where the result is read.
             assert.strictEqual(
@@ -291,7 +293,7 @@ async function browserRun(playwright) {
         await checkAsync('My Schedule shows the signed-in faculty\'s own week', async () => {
             await page.click('.nav-item[data-view="schedule"]');
             await page.waitForSelector('#schedBody .slot-btn');
-            assert.strictEqual(await page.locator('#schedFaculty').inputValue(), 'Dr. Meera Nair');
+            assert.strictEqual(await page.locator('#schedFaculty').inputValue(), 'Prof. Kiran Reddy');
             assert.strictEqual(await page.locator('#schedBody .slot-btn').count(), 35);
             assert.ok((await page.locator('#schedStats .stat').count()) >= 4, 'schedule stat cards');
 
@@ -299,13 +301,14 @@ async function browserRun(playwright) {
             await page.click('#schedBody .slot-btn[data-day="Monday"][data-period="2"]');
             await page.waitForSelector('#schedResult ul.faculty-list:not(.busy-list)');
             const shown = await page.locator('#schedResult ul.faculty-list:not(.busy-list) li').allTextContents();
-            assert.ok(!shown.some(t => t.includes('Dr. Meera Nair')), 'she cannot cover for herself');
+            assert.ok(!shown.some(t => t.includes('Prof. Kiran Reddy')),
+                'the teaching faculty cannot cover for themselves');
         });
 
         // ------------------------------------------------ adjust / substitute
         await checkAsync('Adjust / Substitute lists cover for a whole day', async () => {
             await page.click('.nav-item[data-view="substitute"]');
-            await page.selectOption('#subFaculty', 'Dr. Anand Rao');
+            await page.selectOption('#subFaculty', 'Dr. Arjun Rao');
             await page.selectOption('#subDay', 'Monday');
             await page.click('#subFind');
             await page.waitForSelector('#subResult table.data tbody tr');
@@ -317,12 +320,12 @@ async function browserRun(playwright) {
         await checkAsync('faculty directory and reports render, with working filters', async () => {
             await page.click('.nav-item[data-view="faculty"]');
             await page.waitForSelector('#facBody tr');
-            assert.strictEqual(await page.locator('#facBody tr').count(), 10);
+            assert.strictEqual(await page.locator('#facBody tr').count(), 12);
 
             await page.selectOption('#facDept', 'ECE');
-            await page.waitForFunction(() => document.querySelectorAll('#facBody tr').length === 3);
+            await page.waitForFunction(() => document.querySelectorAll('#facBody tr').length === 4);
 
-            await page.fill('#facSearch', 'deepa');
+            await page.fill('#facSearch', 'anitha');
             await page.waitForFunction(() => document.querySelectorAll('#facBody tr').length === 1);
             await page.fill('#facSearch', '');
             await page.selectOption('#facDept', '');
@@ -389,7 +392,7 @@ async function browserRun(playwright) {
             await page.click('.tab[data-tab="preset"]');
             await page.click('.preset[data-preset="ECE — Semester III"]');
             await page.waitForSelector('#tab-paste.is-active');
-            assert.match(await page.locator('#pasteText').inputValue(), /Dr\. Deepa Iyer/);
+            assert.match(await page.locator('#pasteText').inputValue(), /Dr\. Anitha Menon/);
             assert.strictEqual(await page.locator('#pasteClass').inputValue(), 'ECE-A');
 
             await page.click('#pastePreview');

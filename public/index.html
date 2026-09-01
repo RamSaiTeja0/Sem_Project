@@ -30,6 +30,7 @@
 
       <div class="nav-label">Manage</div>
       <button type="button" class="nav-item" data-view="timetable">Master Timetable</button>
+      <button type="button" class="nav-item" data-view="manage">Add Timetable</button>
       <button type="button" class="nav-item" data-view="faculty">Faculty Directory</button>
       <button type="button" class="nav-item" data-view="reports">Availability Summary</button>
       <button type="button" class="nav-item" data-view="about">Settings / About</button>
@@ -165,6 +166,53 @@
       </section>
 
       <!-- ------------------- ADJUST / SUBSTITUTE --------------------- -->
+      <!-- ----------------------- ADD TIMETABLE ----------------------- -->
+      <section class="view" id="view-manage">
+        <div class="card">
+          <div class="card-head">
+            <div>
+              <h2>Add Timetable Entry</h2>
+              <p>Create, edit or remove a scheduled period. Saved to the database.</p>
+            </div>
+            <span class="pill" id="manageBackend">Checking storage…</span>
+          </div>
+          <div class="card-body">
+            <div id="manageStorageNote"></div>
+            <form id="manageForm" autocomplete="off">
+              <input type="hidden" id="manageId" value="" />
+              <div class="controls">
+                <label class="field"><span>Class</span><select id="manageClass" required></select></label>
+                <label class="field"><span>Day</span><select id="manageDay" required></select></label>
+                <label class="field"><span>Period</span><select id="managePeriod" required></select></label>
+                <label class="field"><span>Subject</span><select id="manageSubject" required></select></label>
+                <label class="field"><span>Faculty</span><select id="manageFaculty" required></select></label>
+                <label class="field"><span>Room</span><select id="manageRoom"></select></label>
+                <label class="field"><span>Type</span><select id="manageType">
+                  <option value="theory">Theory</option>
+                  <option value="lab">Laboratory</option>
+                </select></label>
+                <button type="submit" class="btn" id="manageSave">Save entry</button>
+                <button type="button" class="btn btn-ghost" id="manageReset">Clear</button>
+              </div>
+            </form>
+            <div id="manageResult" style="margin-top:16px;"></div>
+          </div>
+        </div>
+
+        <div class="card" style="margin-top:20px;">
+          <div class="card-head">
+            <div>
+              <h2>Existing entries</h2>
+              <p>Every scheduled period currently stored. Edit or delete one from here.</p>
+            </div>
+            <label class="field inline"><span>Class</span><select id="manageFilterClass"></select></label>
+          </div>
+          <div class="card-body">
+            <div id="manageList"><p class="muted">Loading entries…</p></div>
+          </div>
+        </div>
+      </section>
+
       <section class="view" id="view-substitute">
         <div class="card">
           <div class="card-head">
@@ -282,8 +330,8 @@
               <label class="field">
                 <span>Pasted timetable</span>
                 <textarea id="pasteText" placeholder="Faculty, Monday P1, Monday P2, Tuesday P1
-Dr. Anand Rao, DBMS, FREE, DBMS
-Dr. Meera Nair, FREE, OS, OS"></textarea>
+Dr. Arjun Rao, Data Structures, FREE, Data Structures
+Dr. Priya Sharma, FREE, DBMS, DBMS"></textarea>
               </label>
               <div class="controls" style="margin-top:12px;">
                 <label class="field"><span>Class name (optional)</span>

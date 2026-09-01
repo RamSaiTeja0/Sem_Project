@@ -25,12 +25,48 @@ const names = list => list.slice().sort();
 console.log('TecSubstitution — engine tests');
 console.log('\n[1] Normalized data model');
 
-check('demo data yields 10 faculty over 5 days x 7 periods', () => {
+const ROSTER = demo.faculty.length;   // 12 in the demo dataset
+
+check('demo data yields the whole roster over 5 days x 7 periods', () => {
     const meta = engine.getMeta();
-    assert.strictEqual(meta.facultyCount, 10);
+    assert.strictEqual(meta.facultyCount, ROSTER);
     assert.strictEqual(meta.days.length, 5);
     assert.strictEqual(meta.periods.length, 7);
-    assert.strictEqual(engine.getRecords().length, 10 * 5 * 7);
+    assert.strictEqual(meta.classes.length, 5);
+    assert.strictEqual(engine.getRecords().length, ROSTER * 5 * 7);
+});
+
+check('the demo dataset never double-books a faculty member or a room', () => {
+    const faculty = new Map();
+    const rooms = new Map();
+    normalize(demo).busyRecords.forEach(r => {
+        const fk = `${r.faculty}|${r.day}|${r.period}`;
+        assert.ok(!faculty.has(fk), `${r.faculty} is double-booked at ${r.day} P${r.period}`);
+        faculty.set(fk, r);
+        if (!r.room) return;
+        const rk = `${r.room}|${r.day}|${r.period}`;
+        const clash = rooms.get(rk);
+        assert.ok(!clash || clash.className === r.className,
+            `room ${r.room} is double-booked at ${r.day} P${r.period}`);
+        rooms.set(rk, r);
+    });
+});
+
+check('every faculty member has both busy and free periods', () => {
+    // Without this the substitution lookup would have nothing to demonstrate.
+    engine.getFacultyStats().forEach(f => {
+        assert.ok(f.busyPeriods > 0, `${f.name} teaches nothing`);
+        assert.ok(f.freePeriods > 0, `${f.name} is never free`);
+    });
+});
+
+check('every scheduled period is classified theory or lab', () => {
+    const busy = engine.getRecords().filter(r => r.status === 'busy');
+    busy.forEach(r => assert.ok(r.type === 'theory' || r.type === 'lab', `bad type ${r.type}`));
+    assert.ok(busy.some(r => r.type === 'lab'), 'the demo data must contain lab sessions');
+    assert.ok(busy.some(r => r.type === 'theory'), 'the demo data must contain theory sessions');
+    engine.getRecords().filter(r => r.status === 'free')
+        .forEach(r => assert.strictEqual(r.type, null, 'a free slot has no session type'));
 });
 
 check('every record has the documented shape and a busy/free status', () => {
@@ -49,12 +85,14 @@ check('every record has the documented shape and a busy/free status', () => {
 });
 
 check('a multi-period lab marks every period it spans', () => {
-    // CSE-A Wednesday P5-P7 is Dr. Anand Rao's DBMS Lab.
+    // CSE-A Monday P5-P7 is Dr. Priya Sharma's DBMS Lab in CS-LAB-1.
     [5, 6, 7].forEach(period => {
-        const slot = engine.getSlot('Wednesday', period);
-        const busy = slot.busy.filter(r => r.faculty === 'Dr. Anand Rao');
-        assert.strictEqual(busy.length, 1, `Anand Rao must be busy Wednesday P${period}`);
+        const slot = engine.getSlot('Monday', period);
+        const busy = slot.busy.filter(r => r.faculty === 'Dr. Priya Sharma');
+        assert.strictEqual(busy.length, 1, `Dr. Priya Sharma must be busy Monday P${period}`);
         assert.strictEqual(busy[0].subject, 'DBMS Lab');
+        assert.strictEqual(busy[0].type, 'lab');
+        assert.strictEqual(busy[0].room, 'CS-LAB-1');
     });
 });
 
@@ -62,24 +100,26 @@ console.log('\n[2] Availability');
 
 check('[test 1] Monday P2 returns the correct free faculty', () => {
     const result = engine.getAvailability('Monday', 2);
-    // Busy: Dr. Meera Nair (CSE-A OS), Prof. Naveen Reddy (CSE-B Java).
-    assert.deepStrictEqual(names(result.busy.map(b => b.faculty)),
-        names(['Dr. Meera Nair', 'Prof. Naveen Reddy']));
+    // Busy: Kiran Reddy (CSE-A OS), Priya Sharma (CSE-B OS),
+    //       Rahul Varma (CSE-C DS), Ravi Teja (ECE-A Communication Systems).
+    assert.deepStrictEqual(names(result.busy.map(b => b.faculty)), names([
+        'Prof. Kiran Reddy', 'Dr. Priya Sharma', 'Dr. Rahul Varma', 'Prof. Ravi Teja'
+    ]));
+    assert.strictEqual(result.totalBusy, 4);
     assert.strictEqual(result.totalAvailable, 8);
-    assert.strictEqual(result.totalBusy, 2);
     assert.deepStrictEqual(names(result.availableFaculty), names([
-        'Dr. Anand Rao', 'Prof. Kiran Kumar', 'Prof. Priya Sharma', 'Dr. Suresh Babu',
-        'Prof. Arun Prasad', 'Dr. Deepa Iyer', 'Dr. Latha Menon', 'Mr. Sai Kishore'
+        'Dr. Arjun Rao', 'Dr. Ananya Iyer', 'Prof. Sneha Nair', 'Dr. Vikram Kumar',
+        'Prof. Meera Joshi', 'Prof. Naveen Reddy', 'Dr. Kavya Rao', 'Dr. Anitha Menon'
     ]));
 });
 
 check('[test 2] Tuesday P1 returns the correct free faculty', () => {
     const result = engine.getAvailability('Tuesday', 1);
-    // Busy: Prof. Kiran Kumar (CSE-A CN), Prof. Naveen Reddy (CSE-B Java).
-    assert.deepStrictEqual(names(result.busy.map(b => b.faculty)),
-        names(['Prof. Kiran Kumar', 'Prof. Naveen Reddy']));
+    assert.deepStrictEqual(names(result.busy.map(b => b.faculty)), names([
+        'Prof. Sneha Nair', 'Dr. Vikram Kumar', 'Prof. Meera Joshi', 'Dr. Kavya Rao'
+    ]));
     assert.strictEqual(result.totalAvailable, 8);
-    assert.ok(!result.availableFaculty.includes('Prof. Kiran Kumar'));
+    assert.ok(!result.availableFaculty.includes('Prof. Sneha Nair'));
 });
 
 check('[test 3] busy faculty are excluded at every slot', () => {
@@ -99,7 +139,7 @@ check('[test 4] free faculty are detected and free + busy covers the roster', ()
     engine.getDays().forEach(day => {
         engine.getPeriods().forEach(period => {
             const result = engine.getAvailability(day, period);
-            assert.strictEqual(result.totalAvailable + result.totalBusy, 10,
+            assert.strictEqual(result.totalAvailable + result.totalBusy, ROSTER,
                 `${day} P${period}: free + busy must equal the roster`);
             const overlap = result.availableFaculty
                 .filter(name => result.busy.some(b => b.faculty === name));
@@ -109,11 +149,11 @@ check('[test 4] free faculty are detected and free + busy covers the roster', ()
 });
 
 check('the clicked cell faculty can be excluded explicitly', () => {
-    const withMeera = engine.getAvailability('Monday', 3);
-    assert.ok(withMeera.availableFaculty.includes('Dr. Meera Nair'));
-    const without = engine.getAvailability('Monday', 3, { exclude: 'Dr. Meera Nair' });
-    assert.ok(!without.availableFaculty.includes('Dr. Meera Nair'));
-    assert.strictEqual(without.totalAvailable, withMeera.totalAvailable - 1);
+    const before = engine.getAvailability('Monday', 2);
+    const target = before.availableFaculty[0];
+    const without = engine.getAvailability('Monday', 2, { exclude: target });
+    assert.ok(!without.availableFaculty.includes(target));
+    assert.strictEqual(without.totalAvailable, before.totalAvailable - 1);
 });
 
 check('department and search filters narrow the result', () => {
@@ -122,8 +162,8 @@ check('department and search filters narrow the result', () => {
     assert.ok(ece.totalAvailable < all.totalAvailable);
     ece.available.forEach(f => assert.strictEqual(f.department, 'ECE'));
 
-    const search = engine.getAvailability('Monday', 2, { search: 'kiran' });
-    assert.deepStrictEqual(search.availableFaculty, ['Prof. Kiran Kumar']);
+    const search = engine.getAvailability('Monday', 2, { search: 'arjun' });
+    assert.deepStrictEqual(search.availableFaculty, ['Dr. Arjun Rao']);
 });
 
 console.log('\n[3] Invalid input and validation');
@@ -223,16 +263,17 @@ check('the class grid covers every day and period', () => {
     const grid = engine.getClassGrid('CSE-A');
     assert.strictEqual(grid.cells.length, 35);
     const mondayP2 = grid.cells.find(c => c.day === 'Monday' && c.period === 2);
-    assert.strictEqual(mondayP2.subject, 'OS');
-    assert.strictEqual(mondayP2.faculty, 'Dr. Meera Nair');
+    assert.strictEqual(mondayP2.subject, 'Operating Systems');
+    assert.strictEqual(mondayP2.faculty, 'Prof. Kiran Reddy');
     assert.strictEqual(mondayP2.className, 'CSE-A');
+    assert.strictEqual(mondayP2.room, 'A-101');
 });
 
 check('a faculty grid shows that faculty\'s own week', () => {
-    const grid = engine.getFacultyGrid('Dr. Anand Rao');
+    const grid = engine.getFacultyGrid('Dr. Arjun Rao');
     assert.strictEqual(grid.cells.length, 35);
     const busy = grid.cells.filter(c => c.status === 'busy');
-    assert.strictEqual(busy.length, 6);
+    assert.strictEqual(busy.length, 12);
     assert.strictEqual(engine.getFacultyGrid('Nobody At All'), null);
 });
 
