@@ -226,7 +226,7 @@ async function browserRun(playwright) {
 
             const shown = (await page.locator('#availResult ul.faculty-list:not(.busy-list) li').allTextContents())
                 .map(t => t.replace(/✓/g, '').trim());
-            assert.strictEqual(shown.length, 17);
+            assert.strictEqual(shown.length, 13);
             assert.ok(!shown.some(t => t.startsWith('Prof. Kiran Reddy')), 'the teaching faculty is excluded');
             assert.ok(!shown.some(t => t.startsWith('Prof. Lakshmi Devi')), 'busy elsewhere, excluded');
 
@@ -242,8 +242,8 @@ async function browserRun(playwright) {
             // Busy faculty are listed alongside the free ones.
             const busy = (await page.locator('#availResult .busy-list li').allTextContents())
                 .map(t => t.replace(/✗/g, '').trim());
-            // Three others teach at Monday P2, in other classes and branches.
-            assert.strictEqual(busy.length, 3, 'three faculty are busy elsewhere');
+            // Seven others teach at Monday P2, in other classes and branches.
+            assert.strictEqual(busy.length, 7, 'seven faculty are busy elsewhere');
             busy.forEach(entry => assert.ok(!shown.includes(entry), 'busy faculty are never listed free'));
 
             // The read-only guarantee is stated where the result is read.
@@ -472,7 +472,7 @@ async function httpRun() {
             faculty: cell.faculty, class: cell.className
         });
         assert.strictEqual(res.status, 200);
-        assert.strictEqual(res.body.totalAvailable, 17);
+        assert.strictEqual(res.body.totalAvailable, 13);
         assert.ok(!res.body.availableFaculty.includes(cell.faculty));
     });
 

@@ -100,7 +100,7 @@ async function run() {
     check('the grid can be viewed by class or by faculty', () => {
         assert.strictEqual(otherClass.body.name, 'CSE-B');
         assert.strictEqual(facultyGrid.body.view, 'faculty');
-        assert.strictEqual(facultyGrid.body.cells.filter(c => c.status === 'busy').length, 12);
+        assert.strictEqual(facultyGrid.body.cells.filter(c => c.status === 'busy').length, 13);
     });
 
     const missingClass = await get('/api/timetable?class=NOPE');
@@ -167,7 +167,7 @@ async function run() {
         assert.strictEqual(atSlot.status, 200);
         assert.deepStrictEqual(atSlot.body.slot, { day: 'Monday', period: 2 });
         const busy = atSlot.body.faculty.filter(f => f.availability.status === 'busy');
-        assert.strictEqual(busy.length, 4);
+        assert.strictEqual(busy.length, 8);
         busy.forEach(f => assert.ok(f.availability.subject));
     });
 
@@ -187,7 +187,7 @@ async function run() {
     const records = await get('/api/timetable/records?day=Monday&period=2&status=busy');
     check('GET /api/timetable/records filters normalized records', () => {
         assert.strictEqual(records.status, 200);
-        assert.strictEqual(records.body.count, 4);
+        assert.strictEqual(records.body.count, 8);
         records.body.records.forEach(r => {
             assert.strictEqual(r.day, 'Monday');
             assert.strictEqual(r.period, 2);
@@ -204,7 +204,7 @@ async function run() {
         assert.strictEqual(availability.body.day, 'Monday');
         assert.strictEqual(availability.body.period, 2);
         assert.strictEqual(availability.body.subject, 'Operating Systems');
-        assert.strictEqual(availability.body.totalAvailable, 17);
+        assert.strictEqual(availability.body.totalAvailable, 13);
         assert.ok(Array.isArray(availability.body.availableFaculty));
         assert.strictEqual(availability.body.readOnly, true);
     });
@@ -212,7 +212,8 @@ async function run() {
     check('busy faculty never appear in availableFaculty', () => {
         const busy = availability.body.busy.map(b => b.faculty);
         assert.deepStrictEqual(busy.sort(), [
-            'Dr. Meera Joshi', 'Prof. Kiran Reddy', 'Prof. Lakshmi Devi', 'Prof. Ravi Teja'
+            'Dr. Anitha Menon', 'Dr. Meera Joshi', 'Dr. Neha Kulkarni', 'Dr. Rahul Varma',
+            'Dr. Rajesh Pillai', 'Prof. Kiran Reddy', 'Prof. Lakshmi Devi', 'Prof. Naveen Reddy'
         ]);
         busy.forEach(name => assert.ok(!availability.body.availableFaculty.includes(name)));
     });
@@ -239,8 +240,8 @@ async function run() {
     check('GET /api/availability/summary reports totals for a slot', () => {
         assert.strictEqual(summary.status, 200);
         assert.strictEqual(summary.body.totalFaculty, 21);
-        assert.strictEqual(summary.body.selected.available, 17);
-        assert.strictEqual(summary.body.selected.busy, 4);
+        assert.strictEqual(summary.body.selected.available, 13);
+        assert.strictEqual(summary.body.selected.busy, 8);
         assert.strictEqual(summary.body.slots.length, 35);
     });
 

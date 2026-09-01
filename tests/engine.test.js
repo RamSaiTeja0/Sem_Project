@@ -125,10 +125,11 @@ console.log('\n[2] Availability');
 check('[test 1] Monday P2 returns the correct free faculty', () => {
     const result = engine.getAvailability('Monday', 2);
     assert.deepStrictEqual(names(result.busy.map(b => b.faculty)), names([
-        'Prof. Kiran Reddy', 'Dr. Meera Joshi', 'Prof. Lakshmi Devi', 'Prof. Ravi Teja'
+        'Dr. Anitha Menon', 'Dr. Meera Joshi', 'Dr. Neha Kulkarni', 'Dr. Rahul Varma',
+        'Dr. Rajesh Pillai', 'Prof. Kiran Reddy', 'Prof. Lakshmi Devi', 'Prof. Naveen Reddy'
     ]));
-    assert.strictEqual(result.totalBusy, 4);
-    assert.strictEqual(result.totalAvailable, ROSTER - 4);
+    assert.strictEqual(result.totalBusy, 8);
+    assert.strictEqual(result.totalAvailable, ROSTER - 8);
     // Free + busy is the whole roster, and the two lists never overlap.
     result.busy.forEach(b =>
         assert.ok(!result.availableFaculty.includes(b.faculty), b.faculty + ' is in both lists'));
@@ -137,11 +138,12 @@ check('[test 1] Monday P2 returns the correct free faculty', () => {
 check('[test 2] Tuesday P1 returns the correct free faculty', () => {
     const result = engine.getAvailability('Tuesday', 1);
     assert.deepStrictEqual(names(result.busy.map(b => b.faculty)), names([
-        'Dr. Anitha Menon', 'Dr. Kavya Rao', 'Dr. Priya Sharma',
-        'Dr. Rahul Varma', 'Dr. Rajesh Pillai', 'Prof. Deepak Sinha'
+        'Dr. Ananya Iyer', 'Dr. Anitha Menon', 'Dr. Arjun Rao', 'Dr. Mahesh Gupta',
+        'Dr. Neha Kulkarni', 'Dr. Rajesh Pillai', 'Dr. Sneha Nair', 'Prof. Naveen Reddy'
     ]));
-    assert.strictEqual(result.totalAvailable, ROSTER - 6);
-    assert.ok(!result.availableFaculty.includes('Dr. Priya Sharma'));
+    assert.strictEqual(result.totalBusy, 8);
+    assert.strictEqual(result.totalAvailable, ROSTER - 8);
+    assert.ok(!result.availableFaculty.includes('Dr. Arjun Rao'));
 });
 
 check('[test 3] busy faculty are excluded at every slot', () => {
@@ -295,7 +297,7 @@ check('a faculty grid shows that faculty\'s own week', () => {
     const grid = engine.getFacultyGrid('Dr. Arjun Rao');
     assert.strictEqual(grid.cells.length, 35);
     const busy = grid.cells.filter(c => c.status === 'busy');
-    assert.strictEqual(busy.length, 12);
+    assert.strictEqual(busy.length, 13);
     busy.forEach(c => assert.strictEqual(c.faculty, 'Dr. Arjun Rao'));
     assert.strictEqual(engine.getFacultyGrid('Nobody At All'), null);
 });

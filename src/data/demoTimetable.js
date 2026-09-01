@@ -1,7 +1,7 @@
 /**
  * Demo academic dataset — realistic fictional data for demonstrating the app.
  *
- * 21 faculty across 6 branches, 8 classes, 34 subjects,
+ * 21 faculty across 6 branches, 8 classes, 50 subjects,
  * 16 rooms, Monday-Friday, periods 1-7.
  *
  * GENERATED FILE — produced by tools/generateDemoTimetable.js and committed as
@@ -68,6 +68,7 @@ module.exports = {
         { code: "CS503", name: "Operating Systems", department: "CSE", type: "theory" },
         { code: "CS504", name: "Computer Networks", department: "CSE", type: "theory" },
         { code: "CS505", name: "Web Technologies", department: "CSE", type: "theory" },
+        { code: "CS506", name: "Software Engineering", department: "CSE", type: "theory" },
         { code: "CS551", name: "Data Structures Lab", department: "CSE", type: "lab" },
         { code: "CS552", name: "DBMS Lab", department: "CSE", type: "lab" },
         { code: "CS553", name: "Web Technologies Lab", department: "CSE", type: "lab" },
@@ -75,26 +76,41 @@ module.exports = {
         { code: "EC502", name: "Signals and Systems", department: "ECE", type: "theory" },
         { code: "EC503", name: "Microprocessors", department: "ECE", type: "theory" },
         { code: "EC504", name: "Communication Systems", department: "ECE", type: "theory" },
+        { code: "EC505", name: "VLSI Design", department: "ECE", type: "theory" },
+        { code: "EC506", name: "Linear Control Systems", department: "ECE", type: "theory" },
         { code: "EC551", name: "Digital Electronics Lab", department: "ECE", type: "lab" },
         { code: "EC552", name: "Microprocessors Lab", department: "ECE", type: "lab" },
+        { code: "EC553", name: "Communication Systems Lab", department: "ECE", type: "lab" },
         { code: "EE501", name: "Power Systems", department: "EEE", type: "theory" },
         { code: "EE502", name: "Electrical Machines", department: "EEE", type: "theory" },
         { code: "EE503", name: "Control Systems", department: "EEE", type: "theory" },
+        { code: "EE504", name: "Power Electronics", department: "EEE", type: "theory" },
+        { code: "EE505", name: "Electromagnetic Fields", department: "EEE", type: "theory" },
+        { code: "EE506", name: "Transmission and Distribution", department: "EEE", type: "theory" },
         { code: "EE551", name: "Electrical Machines Lab", department: "EEE", type: "lab" },
         { code: "EE552", name: "Power Systems Lab", department: "EEE", type: "lab" },
         { code: "CM501", name: "Computer Architecture", department: "CME", type: "theory" },
         { code: "CM502", name: "Programming", department: "CME", type: "theory" },
         { code: "CM503", name: "Software Engineering", department: "CME", type: "theory" },
+        { code: "CM504", name: "Embedded Systems", department: "CME", type: "theory" },
+        { code: "CM505", name: "Object Oriented Analysis & Design", department: "CME", type: "theory" },
+        { code: "CM506", name: "Cloud Computing", department: "CME", type: "theory" },
         { code: "CM551", name: "Programming Lab", department: "CME", type: "lab" },
         { code: "CM552", name: "Computer Architecture Lab", department: "CME", type: "lab" },
         { code: "ME501", name: "Engineering Mechanics", department: "MEC", type: "theory" },
         { code: "ME502", name: "Thermodynamics", department: "MEC", type: "theory" },
         { code: "ME503", name: "Manufacturing Technology", department: "MEC", type: "theory" },
+        { code: "ME504", name: "Fluid Mechanics", department: "MEC", type: "theory" },
+        { code: "ME505", name: "Kinematics of Machinery", department: "MEC", type: "theory" },
+        { code: "ME506", name: "Material Science", department: "MEC", type: "theory" },
         { code: "ME551", name: "Manufacturing Technology Lab", department: "MEC", type: "lab" },
         { code: "ME552", name: "Thermodynamics Lab", department: "MEC", type: "lab" },
         { code: "CV501", name: "Structural Engineering", department: "CIVIL", type: "theory" },
         { code: "CV502", name: "Surveying", department: "CIVIL", type: "theory" },
         { code: "CV503", name: "Concrete Technology", department: "CIVIL", type: "theory" },
+        { code: "CV504", name: "Geotechnical Engineering", department: "CIVIL", type: "theory" },
+        { code: "CV505", name: "Fluid Mechanics & Hydraulics", department: "CIVIL", type: "theory" },
+        { code: "CV506", name: "Environmental Engineering", department: "CIVIL", type: "theory" },
         { code: "CV551", name: "Surveying Lab", department: "CIVIL", type: "lab" },
         { code: "CV552", name: "Concrete Technology Lab", department: "CIVIL", type: "lab" }
     ],
@@ -298,39 +314,49 @@ module.exports = {
             room: "A-101",
             rows: {
                 Monday: [
-                    { period: 1, subject: "Web Technologies", faculty: "Dr. Rahul Varma", room: "A-101", type: "theory" },
+                    { period: 1, subject: "Computer Networks", faculty: "Dr. Ananya Iyer", room: "A-101", type: "theory" },
                     { period: 2, subject: "Operating Systems", faculty: "Prof. Kiran Reddy", room: "A-101", type: "theory" },
-                    { period: 4, subject: "Database Management Systems", faculty: "Dr. Priya Sharma", room: "A-101", type: "theory" },
-                    { period: 5, subject: "Data Structures", faculty: "Dr. Arjun Rao", room: "A-101", type: "theory" },
-                    { period: 7, subject: "Computer Networks", faculty: "Dr. Ananya Iyer", room: "A-101", type: "theory" }
+                    { period: 3, subject: "Software Engineering", faculty: "Prof. Kiran Reddy", room: "A-101", type: "theory" },
+                    { period: 4, subject: "Data Structures", faculty: "Dr. Arjun Rao", room: "A-101", type: "theory" },
+                    { period: 5, subject: "Computer Networks", faculty: "Dr. Ananya Iyer", room: "A-101", type: "theory" },
+                    { period: 6, spanTo: 7, subject: "Web Technologies", faculty: "Dr. Rahul Varma", room: "A-101", type: "theory" }
                 ],
                 Tuesday: [
-                    { period: 1, subject: "Web Technologies", faculty: "Dr. Rahul Varma", room: "A-101", type: "theory" },
-                    { period: 2, subject: "Data Structures", faculty: "Dr. Arjun Rao", room: "A-101", type: "theory" },
-                    { period: 3, subject: "Computer Networks", faculty: "Dr. Ananya Iyer", room: "A-101", type: "theory" },
-                    { period: 4, subject: "Operating Systems", faculty: "Prof. Kiran Reddy", room: "A-101", type: "theory" },
-                    { period: 7, subject: "Database Management Systems", faculty: "Dr. Priya Sharma", room: "A-101", type: "theory" }
+                    { period: 1, subject: "Data Structures", faculty: "Dr. Arjun Rao", room: "A-101", type: "theory" },
+                    { period: 2, subject: "Web Technologies", faculty: "Dr. Rahul Varma", room: "A-101", type: "theory" },
+                    { period: 3, subject: "Operating Systems", faculty: "Prof. Kiran Reddy", room: "A-101", type: "theory" },
+                    { period: 4, subject: "Software Engineering", faculty: "Prof. Kiran Reddy", room: "A-101", type: "theory" },
+                    { period: 5, subject: "Computer Networks", faculty: "Dr. Ananya Iyer", room: "A-101", type: "theory" },
+                    {
+                        period: 6,
+                        spanTo: 7,
+                        subject: "Database Management Systems",
+                        faculty: "Dr. Priya Sharma",
+                        room: "A-101",
+                        type: "theory"
+                    }
                 ],
                 Wednesday: [
-                    { period: 1, subject: "Computer Networks", faculty: "Dr. Ananya Iyer", room: "A-101", type: "theory" },
-                    { period: 2, subject: "Data Structures", faculty: "Dr. Arjun Rao", room: "A-101", type: "theory" },
-                    { period: 3, subject: "Web Technologies", faculty: "Dr. Rahul Varma", room: "A-101", type: "theory" },
-                    { period: 5, subject: "Database Management Systems", faculty: "Dr. Priya Sharma", room: "A-101", type: "theory" },
-                    { period: 7, subject: "Operating Systems", faculty: "Prof. Kiran Reddy", room: "A-101", type: "theory" }
-                ],
-                Thursday: [
-                    { period: 1, subject: "Web Technologies", faculty: "Dr. Rahul Varma", room: "A-101", type: "theory" },
-                    { period: 2, subject: "Database Management Systems", faculty: "Dr. Priya Sharma", room: "A-101", type: "theory" },
-                    { period: 3, subject: "Data Structures", faculty: "Dr. Arjun Rao", room: "A-101", type: "theory" },
-                    { period: 4, subject: "Operating Systems", faculty: "Prof. Kiran Reddy", room: "A-101", type: "theory" },
+                    { period: 1, subject: "Database Management Systems", faculty: "Dr. Priya Sharma", room: "A-101", type: "theory" },
+                    { period: 2, subject: "Operating Systems", faculty: "Prof. Kiran Reddy", room: "A-101", type: "theory" },
+                    { period: 3, subject: "Software Engineering", faculty: "Prof. Kiran Reddy", room: "A-101", type: "theory" },
+                    { period: 4, subject: "Data Structures", faculty: "Dr. Arjun Rao", room: "A-101", type: "theory" },
                     { period: 5, spanTo: 7, subject: "Data Structures Lab", faculty: "Dr. Arjun Rao", room: "CS-LAB-1", type: "lab" }
                 ],
-                Friday: [
-                    { period: 1, subject: "Operating Systems", faculty: "Prof. Kiran Reddy", room: "A-101", type: "theory" },
-                    { period: 2, subject: "Computer Networks", faculty: "Dr. Ananya Iyer", room: "A-101", type: "theory" },
-                    { period: 3, subject: "Database Management Systems", faculty: "Dr. Priya Sharma", room: "A-101", type: "theory" },
+                Thursday: [
+                    { period: 1, subject: "Computer Networks", faculty: "Dr. Ananya Iyer", room: "A-101", type: "theory" },
+                    { period: 2, subject: "Database Management Systems", faculty: "Dr. Priya Sharma", room: "A-101", type: "theory" },
+                    { period: 3, subject: "Operating Systems", faculty: "Prof. Kiran Reddy", room: "A-101", type: "theory" },
                     { period: 4, subject: "Data Structures", faculty: "Dr. Arjun Rao", room: "A-101", type: "theory" },
                     { period: 5, spanTo: 7, subject: "DBMS Lab", faculty: "Dr. Priya Sharma", room: "CS-LAB-1", type: "lab" }
+                ],
+                Friday: [
+                    { period: 1, spanTo: 2, subject: "Web Technologies", faculty: "Dr. Rahul Varma", room: "A-101", type: "theory" },
+                    { period: 3, subject: "Software Engineering", faculty: "Prof. Kiran Reddy", room: "A-101", type: "theory" },
+                    { period: 4, subject: "Database Management Systems", faculty: "Dr. Priya Sharma", room: "A-101", type: "theory" },
+                    { period: 5, subject: "Operating Systems", faculty: "Prof. Kiran Reddy", room: "A-101", type: "theory" },
+                    { period: 6, subject: "Computer Networks", faculty: "Dr. Ananya Iyer", room: "A-101", type: "theory" },
+                    { period: 7, subject: "Data Structures", faculty: "Dr. Arjun Rao", room: "A-101", type: "theory" }
                 ]
             }
         },
@@ -342,30 +368,25 @@ module.exports = {
             room: "A-102",
             rows: {
                 Monday: [
-                    { period: 3, subject: "Computer Networks", faculty: "Dr. Arjun Rao", room: "A-102", type: "theory" },
-                    { period: 4, subject: "Operating Systems", faculty: "Dr. Rahul Varma", room: "A-102", type: "theory" },
-                    { period: 5, subject: "Web Technologies", faculty: "Prof. Kiran Reddy", room: "A-102", type: "theory" },
-                    { period: 6, subject: "Database Management Systems", faculty: "Dr. Ananya Iyer", room: "A-102", type: "theory" },
+                    { period: 1, subject: "Software Engineering", faculty: "Dr. Rahul Varma", room: "A-102", type: "theory" },
+                    { period: 2, subject: "Operating Systems", faculty: "Dr. Rahul Varma", room: "A-102", type: "theory" },
+                    { period: 3, subject: "Data Structures", faculty: "Dr. Priya Sharma", room: "A-102", type: "theory" },
+                    { period: 4, subject: "Database Management Systems", faculty: "Dr. Ananya Iyer", room: "A-102", type: "theory" },
+                    { period: 5, subject: "Computer Networks", faculty: "Dr. Arjun Rao", room: "A-102", type: "theory" },
+                    { period: 6, subject: "Web Technologies", faculty: "Prof. Kiran Reddy", room: "A-102", type: "theory" },
                     { period: 7, subject: "Data Structures", faculty: "Dr. Priya Sharma", room: "A-102", type: "theory" }
                 ],
                 Tuesday: [
-                    { period: 1, subject: "Data Structures", faculty: "Dr. Priya Sharma", room: "A-102", type: "theory" },
-                    { period: 2, subject: "Operating Systems", faculty: "Dr. Rahul Varma", room: "A-102", type: "theory" },
-                    { period: 3, subject: "Web Technologies", faculty: "Prof. Kiran Reddy", room: "A-102", type: "theory" },
-                    { period: 4, subject: "Database Management Systems", faculty: "Dr. Ananya Iyer", room: "A-102", type: "theory" },
-                    { period: 5, spanTo: 7, subject: "DBMS Lab", faculty: "Dr. Ananya Iyer", room: "CS-LAB-2", type: "lab" }
-                ],
-                Wednesday: [
-                    { period: 3, subject: "Data Structures", faculty: "Dr. Priya Sharma", room: "A-102", type: "theory" },
-                    { period: 4, subject: "Operating Systems", faculty: "Dr. Rahul Varma", room: "A-102", type: "theory" },
-                    { period: 5, subject: "Database Management Systems", faculty: "Dr. Ananya Iyer", room: "A-102", type: "theory" },
-                    { period: 7, subject: "Computer Networks", faculty: "Dr. Arjun Rao", room: "A-102", type: "theory" }
-                ],
-                Thursday: [
-                    { period: 1, subject: "Computer Networks", faculty: "Dr. Arjun Rao", room: "A-102", type: "theory" },
-                    { period: 2, subject: "Database Management Systems", faculty: "Dr. Ananya Iyer", room: "A-102", type: "theory" },
-                    { period: 3, subject: "Web Technologies", faculty: "Prof. Kiran Reddy", room: "A-102", type: "theory" },
-                    { period: 4, subject: "Data Structures", faculty: "Dr. Priya Sharma", room: "A-102", type: "theory" },
+                    {
+                        period: 1,
+                        spanTo: 2,
+                        subject: "Database Management Systems",
+                        faculty: "Dr. Ananya Iyer",
+                        room: "A-102",
+                        type: "theory"
+                    },
+                    { period: 3, subject: "Computer Networks", faculty: "Dr. Arjun Rao", room: "A-102", type: "theory" },
+                    { period: 4, subject: "Software Engineering", faculty: "Dr. Rahul Varma", room: "A-102", type: "theory" },
                     {
                         period: 5,
                         spanTo: 7,
@@ -375,12 +396,30 @@ module.exports = {
                         type: "lab"
                     }
                 ],
-                Friday: [
-                    { period: 1, subject: "Computer Networks", faculty: "Dr. Arjun Rao", room: "A-102", type: "theory" },
+                Wednesday: [
+                    { period: 1, subject: "Web Technologies", faculty: "Prof. Kiran Reddy", room: "A-102", type: "theory" },
                     { period: 2, subject: "Operating Systems", faculty: "Dr. Rahul Varma", room: "A-102", type: "theory" },
+                    { period: 3, subject: "Data Structures", faculty: "Dr. Priya Sharma", room: "A-102", type: "theory" },
+                    { period: 4, subject: "Software Engineering", faculty: "Dr. Rahul Varma", room: "A-102", type: "theory" },
+                    { period: 5, spanTo: 7, subject: "DBMS Lab", faculty: "Dr. Ananya Iyer", room: "CS-LAB-2", type: "lab" }
+                ],
+                Thursday: [
+                    { period: 1, subject: "Computer Networks", faculty: "Dr. Arjun Rao", room: "A-102", type: "theory" },
+                    { period: 2, subject: "Software Engineering", faculty: "Dr. Rahul Varma", room: "A-102", type: "theory" },
+                    { period: 3, subject: "Data Structures", faculty: "Dr. Priya Sharma", room: "A-102", type: "theory" },
+                    { period: 4, subject: "Operating Systems", faculty: "Dr. Rahul Varma", room: "A-102", type: "theory" },
+                    { period: 5, subject: "Web Technologies", faculty: "Prof. Kiran Reddy", room: "A-102", type: "theory" },
+                    { period: 6, subject: "Computer Networks", faculty: "Dr. Arjun Rao", room: "A-102", type: "theory" },
+                    { period: 7, subject: "Operating Systems", faculty: "Dr. Rahul Varma", room: "A-102", type: "theory" }
+                ],
+                Friday: [
+                    { period: 1, subject: "Database Management Systems", faculty: "Dr. Ananya Iyer", room: "A-102", type: "theory" },
+                    { period: 2, subject: "Web Technologies", faculty: "Prof. Kiran Reddy", room: "A-102", type: "theory" },
                     { period: 3, subject: "Database Management Systems", faculty: "Dr. Ananya Iyer", room: "A-102", type: "theory" },
-                    { period: 4, subject: "Data Structures", faculty: "Dr. Priya Sharma", room: "A-102", type: "theory" },
-                    { period: 6, subject: "Web Technologies", faculty: "Prof. Kiran Reddy", room: "A-102", type: "theory" }
+                    { period: 4, subject: "Web Technologies", faculty: "Prof. Kiran Reddy", room: "A-102", type: "theory" },
+                    { period: 5, subject: "Computer Networks", faculty: "Dr. Arjun Rao", room: "A-102", type: "theory" },
+                    { period: 6, subject: "Data Structures", faculty: "Dr. Priya Sharma", room: "A-102", type: "theory" },
+                    { period: 7, subject: "Operating Systems", faculty: "Dr. Rahul Varma", room: "A-102", type: "theory" }
                 ]
             }
         },
@@ -393,9 +432,9 @@ module.exports = {
             rows: {
                 Monday: [
                     { period: 1, subject: "Signals and Systems", faculty: "Dr. Kavya Rao", room: "E-201", type: "theory" },
-                    { period: 2, subject: "Communication Systems", faculty: "Prof. Ravi Teja", room: "E-201", type: "theory" },
-                    { period: 3, subject: "Digital Electronics", faculty: "Prof. Naveen Reddy", room: "E-201", type: "theory" },
-                    { period: 4, subject: "Microprocessors", faculty: "Dr. Anitha Menon", room: "E-201", type: "theory" },
+                    { period: 2, subject: "Linear Control Systems", faculty: "Prof. Naveen Reddy", room: "E-201", type: "theory" },
+                    { period: 3, subject: "Communication Systems", faculty: "Prof. Ravi Teja", room: "E-201", type: "theory" },
+                    { period: 4, subject: "Digital Electronics", faculty: "Prof. Naveen Reddy", room: "E-201", type: "theory" },
                     {
                         period: 5,
                         spanTo: 7,
@@ -406,16 +445,10 @@ module.exports = {
                     }
                 ],
                 Tuesday: [
-                    { period: 1, subject: "Microprocessors", faculty: "Dr. Anitha Menon", room: "E-201", type: "theory" },
-                    { period: 2, subject: "Signals and Systems", faculty: "Dr. Kavya Rao", room: "E-201", type: "theory" },
-                    { period: 3, subject: "Digital Electronics", faculty: "Prof. Naveen Reddy", room: "E-201", type: "theory" },
-                    { period: 4, subject: "Communication Systems", faculty: "Prof. Ravi Teja", room: "E-201", type: "theory" }
-                ],
-                Wednesday: [
-                    { period: 1, subject: "Digital Electronics", faculty: "Prof. Naveen Reddy", room: "E-201", type: "theory" },
-                    { period: 2, subject: "Signals and Systems", faculty: "Dr. Kavya Rao", room: "E-201", type: "theory" },
-                    { period: 3, subject: "Microprocessors", faculty: "Dr. Anitha Menon", room: "E-201", type: "theory" },
-                    { period: 4, subject: "Communication Systems", faculty: "Prof. Ravi Teja", room: "E-201", type: "theory" },
+                    { period: 1, subject: "Linear Control Systems", faculty: "Prof. Naveen Reddy", room: "E-201", type: "theory" },
+                    { period: 2, subject: "Digital Electronics", faculty: "Prof. Naveen Reddy", room: "E-201", type: "theory" },
+                    { period: 3, subject: "VLSI Design", faculty: "Dr. Kavya Rao", room: "E-201", type: "theory" },
+                    { period: 4, subject: "Signals and Systems", faculty: "Dr. Kavya Rao", room: "E-201", type: "theory" },
                     {
                         period: 5,
                         spanTo: 7,
@@ -425,17 +458,29 @@ module.exports = {
                         type: "lab"
                     }
                 ],
+                Wednesday: [
+                    { period: 1, subject: "Microprocessors", faculty: "Dr. Anitha Menon", room: "E-201", type: "theory" },
+                    { period: 2, subject: "Digital Electronics", faculty: "Prof. Naveen Reddy", room: "E-201", type: "theory" },
+                    { period: 3, subject: "Signals and Systems", faculty: "Dr. Kavya Rao", room: "E-201", type: "theory" },
+                    { period: 4, subject: "Communication Systems", faculty: "Prof. Ravi Teja", room: "E-201", type: "theory" },
+                    { period: 5, spanTo: 6, subject: "VLSI Design", faculty: "Dr. Kavya Rao", room: "E-201", type: "theory" },
+                    { period: 7, subject: "Digital Electronics", faculty: "Prof. Naveen Reddy", room: "E-201", type: "theory" }
+                ],
                 Thursday: [
-                    { period: 1, subject: "Digital Electronics", faculty: "Prof. Naveen Reddy", room: "E-201", type: "theory" },
-                    { period: 2, subject: "Signals and Systems", faculty: "Dr. Kavya Rao", room: "E-201", type: "theory" },
-                    { period: 3, subject: "Microprocessors", faculty: "Dr. Anitha Menon", room: "E-201", type: "theory" },
-                    { period: 7, subject: "Communication Systems", faculty: "Prof. Ravi Teja", room: "E-201", type: "theory" }
+                    { period: 1, subject: "Linear Control Systems", faculty: "Prof. Naveen Reddy", room: "E-201", type: "theory" },
+                    { period: 2, subject: "VLSI Design", faculty: "Dr. Kavya Rao", room: "E-201", type: "theory" },
+                    { period: 3, subject: "Communication Systems", faculty: "Prof. Ravi Teja", room: "E-201", type: "theory" },
+                    { period: 4, subject: "VLSI Design", faculty: "Dr. Kavya Rao", room: "E-201", type: "theory" },
+                    { period: 5, subject: "Microprocessors", faculty: "Dr. Anitha Menon", room: "E-201", type: "theory" },
+                    { period: 6, subject: "Communication Systems", faculty: "Prof. Ravi Teja", room: "E-201", type: "theory" },
+                    { period: 7, subject: "Microprocessors", faculty: "Dr. Anitha Menon", room: "E-201", type: "theory" }
                 ],
                 Friday: [
-                    { period: 2, subject: "Digital Electronics", faculty: "Prof. Naveen Reddy", room: "E-201", type: "theory" },
-                    { period: 4, subject: "Signals and Systems", faculty: "Dr. Kavya Rao", room: "E-201", type: "theory" },
-                    { period: 5, subject: "Communication Systems", faculty: "Prof. Ravi Teja", room: "E-201", type: "theory" },
-                    { period: 7, subject: "Microprocessors", faculty: "Dr. Anitha Menon", room: "E-201", type: "theory" }
+                    { period: 1, subject: "Communication Systems", faculty: "Prof. Ravi Teja", room: "E-201", type: "theory" },
+                    { period: 2, spanTo: 3, subject: "Microprocessors", faculty: "Dr. Anitha Menon", room: "E-201", type: "theory" },
+                    { period: 4, subject: "Linear Control Systems", faculty: "Prof. Naveen Reddy", room: "E-201", type: "theory" },
+                    { period: 5, spanTo: 6, subject: "Signals and Systems", faculty: "Dr. Kavya Rao", room: "E-201", type: "theory" },
+                    { period: 7, subject: "Digital Electronics", faculty: "Prof. Naveen Reddy", room: "E-201", type: "theory" }
                 ]
             }
         },
@@ -447,35 +492,49 @@ module.exports = {
             room: "E-202",
             rows: {
                 Monday: [
-                    { period: 4, subject: "Signals and Systems", faculty: "Prof. Naveen Reddy", room: "E-202", type: "theory" },
-                    { period: 5, subject: "Microprocessors", faculty: "Prof. Ravi Teja", room: "E-202", type: "theory" },
-                    { period: 6, subject: "Communication Systems", faculty: "Dr. Anitha Menon", room: "E-202", type: "theory" },
-                    { period: 7, subject: "Digital Electronics", faculty: "Dr. Kavya Rao", room: "E-202", type: "theory" }
+                    { period: 1, subject: "Signals and Systems", faculty: "Prof. Naveen Reddy", room: "E-202", type: "theory" },
+                    { period: 2, subject: "Communication Systems", faculty: "Dr. Anitha Menon", room: "E-202", type: "theory" },
+                    { period: 3, subject: "Linear Control Systems", faculty: "Dr. Anitha Menon", room: "E-202", type: "theory" },
+                    { period: 4, subject: "Microprocessors", faculty: "Prof. Ravi Teja", room: "E-202", type: "theory" },
+                    { period: 5, subject: "VLSI Design", faculty: "Prof. Ravi Teja", room: "E-202", type: "theory" },
+                    { period: 6, subject: "Digital Electronics", faculty: "Dr. Kavya Rao", room: "E-202", type: "theory" },
+                    { period: 7, subject: "VLSI Design", faculty: "Prof. Ravi Teja", room: "E-202", type: "theory" }
                 ],
                 Tuesday: [
-                    { period: 1, subject: "Digital Electronics", faculty: "Dr. Kavya Rao", room: "E-202", type: "theory" },
-                    { period: 2, subject: "Microprocessors", faculty: "Prof. Ravi Teja", room: "E-202", type: "theory" },
-                    { period: 3, subject: "Communication Systems", faculty: "Dr. Anitha Menon", room: "E-202", type: "theory" },
+                    { period: 1, subject: "Linear Control Systems", faculty: "Dr. Anitha Menon", room: "E-202", type: "theory" },
+                    { period: 2, subject: "Digital Electronics", faculty: "Dr. Kavya Rao", room: "E-202", type: "theory" },
+                    { period: 3, subject: "Microprocessors", faculty: "Prof. Ravi Teja", room: "E-202", type: "theory" },
                     { period: 4, subject: "Signals and Systems", faculty: "Prof. Naveen Reddy", room: "E-202", type: "theory" },
-                    {
-                        period: 5,
-                        spanTo: 7,
-                        subject: "Microprocessors Lab",
-                        faculty: "Prof. Ravi Teja",
-                        room: "EC-LAB-2",
-                        type: "lab"
-                    }
+                    { period: 5, subject: "Microprocessors", faculty: "Prof. Ravi Teja", room: "E-202", type: "theory" },
+                    { period: 6, subject: "Signals and Systems", faculty: "Prof. Naveen Reddy", room: "E-202", type: "theory" },
+                    { period: 7, subject: "VLSI Design", faculty: "Prof. Ravi Teja", room: "E-202", type: "theory" }
                 ],
                 Wednesday: [
-                    { period: 1, subject: "Microprocessors", faculty: "Prof. Ravi Teja", room: "E-202", type: "theory" },
+                    { period: 1, subject: "VLSI Design", faculty: "Prof. Ravi Teja", room: "E-202", type: "theory" },
+                    {
+                        period: 2,
+                        spanTo: 3,
+                        subject: "Communication Systems",
+                        faculty: "Dr. Anitha Menon",
+                        room: "E-202",
+                        type: "theory"
+                    },
                     { period: 4, subject: "Digital Electronics", faculty: "Dr. Kavya Rao", room: "E-202", type: "theory" },
-                    { period: 7, subject: "Signals and Systems", faculty: "Prof. Naveen Reddy", room: "E-202", type: "theory" }
+                    { period: 5, subject: "Microprocessors", faculty: "Prof. Ravi Teja", room: "E-202", type: "theory" },
+                    { period: 6, subject: "Linear Control Systems", faculty: "Dr. Anitha Menon", room: "E-202", type: "theory" },
+                    { period: 7, subject: "VLSI Design", faculty: "Prof. Ravi Teja", room: "E-202", type: "theory" }
                 ],
                 Thursday: [
-                    { period: 1, subject: "Digital Electronics", faculty: "Dr. Kavya Rao", room: "E-202", type: "theory" },
-                    { period: 2, subject: "Microprocessors", faculty: "Prof. Ravi Teja", room: "E-202", type: "theory" },
+                    {
+                        period: 1,
+                        spanTo: 2,
+                        subject: "Communication Systems",
+                        faculty: "Dr. Anitha Menon",
+                        room: "E-202",
+                        type: "theory"
+                    },
                     { period: 3, subject: "Signals and Systems", faculty: "Prof. Naveen Reddy", room: "E-202", type: "theory" },
-                    { period: 4, subject: "Communication Systems", faculty: "Dr. Anitha Menon", room: "E-202", type: "theory" },
+                    { period: 4, subject: "Linear Control Systems", faculty: "Dr. Anitha Menon", room: "E-202", type: "theory" },
                     {
                         period: 5,
                         spanTo: 7,
@@ -486,10 +545,18 @@ module.exports = {
                     }
                 ],
                 Friday: [
-                    { period: 1, subject: "Communication Systems", faculty: "Dr. Anitha Menon", room: "E-202", type: "theory" },
-                    { period: 3, subject: "Digital Electronics", faculty: "Dr. Kavya Rao", room: "E-202", type: "theory" },
-                    { period: 4, subject: "Signals and Systems", faculty: "Prof. Naveen Reddy", room: "E-202", type: "theory" },
-                    { period: 6, subject: "Microprocessors", faculty: "Prof. Ravi Teja", room: "E-202", type: "theory" }
+                    { period: 1, subject: "Signals and Systems", faculty: "Prof. Naveen Reddy", room: "E-202", type: "theory" },
+                    { period: 2, subject: "Digital Electronics", faculty: "Dr. Kavya Rao", room: "E-202", type: "theory" },
+                    { period: 3, subject: "Microprocessors", faculty: "Prof. Ravi Teja", room: "E-202", type: "theory" },
+                    { period: 4, subject: "Digital Electronics", faculty: "Dr. Kavya Rao", room: "E-202", type: "theory" },
+                    {
+                        period: 5,
+                        spanTo: 7,
+                        subject: "Microprocessors Lab",
+                        faculty: "Prof. Ravi Teja",
+                        room: "EC-LAB-2",
+                        type: "lab"
+                    }
                 ]
             }
         },
@@ -501,30 +568,77 @@ module.exports = {
             room: "P-301",
             rows: {
                 Monday: [
-                    { period: 1, subject: "Power Systems", faculty: "Dr. Suresh Babu", room: "P-301", type: "theory" },
-                    { period: 2, subject: "Electrical Machines", faculty: "Prof. Lakshmi Devi", room: "P-301", type: "theory" },
-                    { period: 7, subject: "Control Systems", faculty: "Dr. Mahesh Gupta", room: "P-301", type: "theory" }
-                ],
-                Tuesday: [
-                    { period: 2, subject: "Power Systems", faculty: "Dr. Suresh Babu", room: "P-301", type: "theory" },
-                    { period: 3, subject: "Electrical Machines", faculty: "Prof. Lakshmi Devi", room: "P-301", type: "theory" },
-                    { period: 4, subject: "Control Systems", faculty: "Dr. Mahesh Gupta", room: "P-301", type: "theory" },
+                    { period: 1, subject: "Control Systems", faculty: "Dr. Mahesh Gupta", room: "P-301", type: "theory" },
+                    {
+                        period: 2,
+                        spanTo: 3,
+                        subject: "Electrical Machines",
+                        faculty: "Prof. Lakshmi Devi",
+                        room: "P-301",
+                        type: "theory"
+                    },
+                    { period: 4, subject: "Power Electronics", faculty: "Dr. Suresh Babu", room: "P-301", type: "theory" },
                     { period: 5, spanTo: 7, subject: "Power Systems Lab", faculty: "Dr. Suresh Babu", room: "EE-LAB-1", type: "lab" }
                 ],
-                Wednesday: [
-                    { period: 2, subject: "Control Systems", faculty: "Dr. Mahesh Gupta", room: "P-301", type: "theory" },
+                Tuesday: [
+                    { period: 1, subject: "Control Systems", faculty: "Dr. Mahesh Gupta", room: "P-301", type: "theory" },
+                    { period: 2, subject: "Electromagnetic Fields", faculty: "Prof. Lakshmi Devi", room: "P-301", type: "theory" },
                     { period: 3, subject: "Electrical Machines", faculty: "Prof. Lakshmi Devi", room: "P-301", type: "theory" },
-                    { period: 6, subject: "Power Systems", faculty: "Dr. Suresh Babu", room: "P-301", type: "theory" }
+                    { period: 4, subject: "Control Systems", faculty: "Dr. Mahesh Gupta", room: "P-301", type: "theory" },
+                    { period: 5, spanTo: 6, subject: "Power Systems", faculty: "Dr. Suresh Babu", room: "P-301", type: "theory" },
+                    {
+                        period: 7,
+                        subject: "Transmission and Distribution",
+                        faculty: "Dr. Mahesh Gupta",
+                        room: "P-301",
+                        type: "theory"
+                    }
+                ],
+                Wednesday: [
+                    { period: 1, spanTo: 2, subject: "Power Systems", faculty: "Dr. Suresh Babu", room: "P-301", type: "theory" },
+                    { period: 3, subject: "Electromagnetic Fields", faculty: "Prof. Lakshmi Devi", room: "P-301", type: "theory" },
+                    { period: 4, subject: "Power Electronics", faculty: "Dr. Suresh Babu", room: "P-301", type: "theory" },
+                    {
+                        period: 5,
+                        subject: "Transmission and Distribution",
+                        faculty: "Dr. Mahesh Gupta",
+                        room: "P-301",
+                        type: "theory"
+                    },
+                    { period: 6, subject: "Power Electronics", faculty: "Dr. Suresh Babu", room: "P-301", type: "theory" },
+                    { period: 7, subject: "Electrical Machines", faculty: "Prof. Lakshmi Devi", room: "P-301", type: "theory" }
                 ],
                 Thursday: [
                     { period: 1, subject: "Power Systems", faculty: "Dr. Suresh Babu", room: "P-301", type: "theory" },
-                    { period: 2, subject: "Electrical Machines", faculty: "Prof. Lakshmi Devi", room: "P-301", type: "theory" },
-                    { period: 4, subject: "Control Systems", faculty: "Dr. Mahesh Gupta", room: "P-301", type: "theory" }
+                    { period: 2, subject: "Power Electronics", faculty: "Dr. Suresh Babu", room: "P-301", type: "theory" },
+                    {
+                        period: 3,
+                        spanTo: 4,
+                        subject: "Electromagnetic Fields",
+                        faculty: "Prof. Lakshmi Devi",
+                        room: "P-301",
+                        type: "theory"
+                    },
+                    { period: 5, subject: "Power Electronics", faculty: "Dr. Suresh Babu", room: "P-301", type: "theory" },
+                    {
+                        period: 6,
+                        subject: "Transmission and Distribution",
+                        faculty: "Dr. Mahesh Gupta",
+                        room: "P-301",
+                        type: "theory"
+                    },
+                    { period: 7, subject: "Electrical Machines", faculty: "Prof. Lakshmi Devi", room: "P-301", type: "theory" }
                 ],
                 Friday: [
-                    { period: 1, subject: "Power Systems", faculty: "Dr. Suresh Babu", room: "P-301", type: "theory" },
-                    { period: 2, subject: "Electrical Machines", faculty: "Prof. Lakshmi Devi", room: "P-301", type: "theory" },
-                    { period: 4, subject: "Control Systems", faculty: "Dr. Mahesh Gupta", room: "P-301", type: "theory" },
+                    { period: 1, spanTo: 2, subject: "Control Systems", faculty: "Dr. Mahesh Gupta", room: "P-301", type: "theory" },
+                    {
+                        period: 3,
+                        subject: "Transmission and Distribution",
+                        faculty: "Dr. Mahesh Gupta",
+                        room: "P-301",
+                        type: "theory"
+                    },
+                    { period: 4, subject: "Electromagnetic Fields", faculty: "Prof. Lakshmi Devi", room: "P-301", type: "theory" },
                     {
                         period: 5,
                         spanTo: 7,
@@ -544,32 +658,52 @@ module.exports = {
             room: "C-401",
             rows: {
                 Monday: [
-                    { period: 1, subject: "Programming", faculty: "Prof. Vikram Kumar", room: "C-401", type: "theory" },
-                    { period: 2, subject: "Software Engineering", faculty: "Dr. Meera Joshi", room: "C-401", type: "theory" },
-                    { period: 3, subject: "Computer Architecture", faculty: "Dr. Sneha Nair", room: "C-401", type: "theory" },
                     {
-                        period: 5,
-                        spanTo: 7,
-                        subject: "Programming Lab",
+                        period: 1,
+                        spanTo: 2,
+                        subject: "Software Engineering",
+                        faculty: "Dr. Meera Joshi",
+                        room: "C-401",
+                        type: "theory"
+                    },
+                    { period: 3, subject: "Embedded Systems", faculty: "Dr. Sneha Nair", room: "C-401", type: "theory" },
+                    {
+                        period: 4,
+                        spanTo: 5,
+                        subject: "Object Oriented Analysis & Design",
                         faculty: "Prof. Vikram Kumar",
-                        room: "CM-LAB-1",
-                        type: "lab"
-                    }
+                        room: "C-401",
+                        type: "theory"
+                    },
+                    { period: 6, subject: "Cloud Computing", faculty: "Dr. Meera Joshi", room: "C-401", type: "theory" },
+                    { period: 7, subject: "Programming", faculty: "Prof. Vikram Kumar", room: "C-401", type: "theory" }
                 ],
                 Tuesday: [
-                    { period: 2, subject: "Programming", faculty: "Prof. Vikram Kumar", room: "C-401", type: "theory" },
+                    { period: 1, subject: "Embedded Systems", faculty: "Dr. Sneha Nair", room: "C-401", type: "theory" },
+                    {
+                        period: 2,
+                        subject: "Object Oriented Analysis & Design",
+                        faculty: "Prof. Vikram Kumar",
+                        room: "C-401",
+                        type: "theory"
+                    },
+                    { period: 3, subject: "Cloud Computing", faculty: "Dr. Meera Joshi", room: "C-401", type: "theory" },
                     { period: 4, subject: "Software Engineering", faculty: "Dr. Meera Joshi", room: "C-401", type: "theory" },
-                    { period: 7, subject: "Computer Architecture", faculty: "Dr. Sneha Nair", room: "C-401", type: "theory" }
-                ],
-                Wednesday: [
-                    { period: 4, subject: "Programming", faculty: "Prof. Vikram Kumar", room: "C-401", type: "theory" },
-                    { period: 5, subject: "Computer Architecture", faculty: "Dr. Sneha Nair", room: "C-401", type: "theory" },
+                    { period: 5, subject: "Embedded Systems", faculty: "Dr. Sneha Nair", room: "C-401", type: "theory" },
+                    { period: 6, subject: "Computer Architecture", faculty: "Dr. Sneha Nair", room: "C-401", type: "theory" },
                     { period: 7, subject: "Software Engineering", faculty: "Dr. Meera Joshi", room: "C-401", type: "theory" }
                 ],
-                Thursday: [
-                    { period: 1, subject: "Computer Architecture", faculty: "Dr. Sneha Nair", room: "C-401", type: "theory" },
-                    { period: 3, subject: "Software Engineering", faculty: "Dr. Meera Joshi", room: "C-401", type: "theory" },
-                    { period: 4, subject: "Programming", faculty: "Prof. Vikram Kumar", room: "C-401", type: "theory" },
+                Wednesday: [
+                    {
+                        period: 1,
+                        spanTo: 2,
+                        subject: "Computer Architecture",
+                        faculty: "Dr. Sneha Nair",
+                        room: "C-401",
+                        type: "theory"
+                    },
+                    { period: 3, subject: "Cloud Computing", faculty: "Dr. Meera Joshi", room: "C-401", type: "theory" },
+                    { period: 4, subject: "Embedded Systems", faculty: "Dr. Sneha Nair", room: "C-401", type: "theory" },
                     {
                         period: 5,
                         spanTo: 7,
@@ -579,10 +713,33 @@ module.exports = {
                         type: "lab"
                     }
                 ],
+                Thursday: [
+                    { period: 1, subject: "Computer Architecture", faculty: "Dr. Sneha Nair", room: "C-401", type: "theory" },
+                    {
+                        period: 2,
+                        spanTo: 3,
+                        subject: "Object Oriented Analysis & Design",
+                        faculty: "Prof. Vikram Kumar",
+                        room: "C-401",
+                        type: "theory"
+                    },
+                    { period: 4, spanTo: 5, subject: "Programming", faculty: "Prof. Vikram Kumar", room: "C-401", type: "theory" },
+                    { period: 6, subject: "Computer Architecture", faculty: "Dr. Sneha Nair", room: "C-401", type: "theory" },
+                    { period: 7, subject: "Cloud Computing", faculty: "Dr. Meera Joshi", room: "C-401", type: "theory" }
+                ],
                 Friday: [
                     { period: 1, subject: "Programming", faculty: "Prof. Vikram Kumar", room: "C-401", type: "theory" },
-                    { period: 2, subject: "Computer Architecture", faculty: "Dr. Sneha Nair", room: "C-401", type: "theory" },
-                    { period: 6, subject: "Software Engineering", faculty: "Dr. Meera Joshi", room: "C-401", type: "theory" }
+                    { period: 2, subject: "Software Engineering", faculty: "Dr. Meera Joshi", room: "C-401", type: "theory" },
+                    { period: 3, subject: "Embedded Systems", faculty: "Dr. Sneha Nair", room: "C-401", type: "theory" },
+                    { period: 4, subject: "Programming", faculty: "Prof. Vikram Kumar", room: "C-401", type: "theory" },
+                    {
+                        period: 5,
+                        spanTo: 7,
+                        subject: "Programming Lab",
+                        faculty: "Prof. Vikram Kumar",
+                        room: "CM-LAB-1",
+                        type: "lab"
+                    }
                 ]
             }
         },
@@ -594,19 +751,10 @@ module.exports = {
             room: "M-501",
             rows: {
                 Monday: [
-                    { period: 1, subject: "Manufacturing Technology", faculty: "Dr. Sunita Rani", room: "M-501", type: "theory" },
-                    { period: 4, subject: "Thermodynamics", faculty: "Prof. Harish Chandra", room: "M-501", type: "theory" },
-                    { period: 7, subject: "Engineering Mechanics", faculty: "Dr. Rajesh Pillai", room: "M-501", type: "theory" }
-                ],
-                Tuesday: [
                     { period: 1, subject: "Engineering Mechanics", faculty: "Dr. Rajesh Pillai", room: "M-501", type: "theory" },
-                    { period: 6, subject: "Thermodynamics", faculty: "Prof. Harish Chandra", room: "M-501", type: "theory" },
-                    { period: 7, subject: "Manufacturing Technology", faculty: "Dr. Sunita Rani", room: "M-501", type: "theory" }
-                ],
-                Wednesday: [
-                    { period: 1, subject: "Manufacturing Technology", faculty: "Dr. Sunita Rani", room: "M-501", type: "theory" },
-                    { period: 2, subject: "Thermodynamics", faculty: "Prof. Harish Chandra", room: "M-501", type: "theory" },
-                    { period: 4, subject: "Engineering Mechanics", faculty: "Dr. Rajesh Pillai", room: "M-501", type: "theory" },
+                    { period: 2, subject: "Fluid Mechanics", faculty: "Dr. Rajesh Pillai", room: "M-501", type: "theory" },
+                    { period: 3, subject: "Material Science", faculty: "Dr. Sunita Rani", room: "M-501", type: "theory" },
+                    { period: 4, subject: "Manufacturing Technology", faculty: "Dr. Sunita Rani", room: "M-501", type: "theory" },
                     {
                         period: 5,
                         spanTo: 7,
@@ -616,14 +764,34 @@ module.exports = {
                         type: "lab"
                     }
                 ],
-                Thursday: [
+                Tuesday: [
+                    { period: 1, subject: "Engineering Mechanics", faculty: "Dr. Rajesh Pillai", room: "M-501", type: "theory" },
+                    { period: 2, subject: "Manufacturing Technology", faculty: "Dr. Sunita Rani", room: "M-501", type: "theory" },
+                    { period: 3, subject: "Kinematics of Machinery", faculty: "Prof. Harish Chandra", room: "M-501", type: "theory" },
                     { period: 4, subject: "Engineering Mechanics", faculty: "Dr. Rajesh Pillai", room: "M-501", type: "theory" },
                     { period: 5, subject: "Thermodynamics", faculty: "Prof. Harish Chandra", room: "M-501", type: "theory" },
-                    { period: 7, subject: "Manufacturing Technology", faculty: "Dr. Sunita Rani", room: "M-501", type: "theory" }
+                    { period: 6, subject: "Material Science", faculty: "Dr. Sunita Rani", room: "M-501", type: "theory" },
+                    { period: 7, subject: "Fluid Mechanics", faculty: "Dr. Rajesh Pillai", room: "M-501", type: "theory" }
                 ],
-                Friday: [
+                Wednesday: [
+                    { period: 1, subject: "Kinematics of Machinery", faculty: "Prof. Harish Chandra", room: "M-501", type: "theory" },
                     { period: 2, subject: "Manufacturing Technology", faculty: "Dr. Sunita Rani", room: "M-501", type: "theory" },
-                    { period: 3, subject: "Thermodynamics", faculty: "Prof. Harish Chandra", room: "M-501", type: "theory" },
+                    { period: 3, subject: "Material Science", faculty: "Dr. Sunita Rani", room: "M-501", type: "theory" },
+                    { period: 4, subject: "Manufacturing Technology", faculty: "Dr. Sunita Rani", room: "M-501", type: "theory" },
+                    {
+                        period: 5,
+                        spanTo: 6,
+                        subject: "Thermodynamics",
+                        faculty: "Prof. Harish Chandra",
+                        room: "M-501",
+                        type: "theory"
+                    },
+                    { period: 7, subject: "Fluid Mechanics", faculty: "Dr. Rajesh Pillai", room: "M-501", type: "theory" }
+                ],
+                Thursday: [
+                    { period: 1, subject: "Fluid Mechanics", faculty: "Dr. Rajesh Pillai", room: "M-501", type: "theory" },
+                    { period: 2, subject: "Kinematics of Machinery", faculty: "Prof. Harish Chandra", room: "M-501", type: "theory" },
+                    { period: 3, subject: "Manufacturing Technology", faculty: "Dr. Sunita Rani", room: "M-501", type: "theory" },
                     { period: 4, subject: "Engineering Mechanics", faculty: "Dr. Rajesh Pillai", room: "M-501", type: "theory" },
                     {
                         period: 5,
@@ -633,6 +801,15 @@ module.exports = {
                         room: "ME-WORKSHOP",
                         type: "lab"
                     }
+                ],
+                Friday: [
+                    { period: 1, subject: "Kinematics of Machinery", faculty: "Prof. Harish Chandra", room: "M-501", type: "theory" },
+                    { period: 2, subject: "Thermodynamics", faculty: "Prof. Harish Chandra", room: "M-501", type: "theory" },
+                    { period: 3, subject: "Engineering Mechanics", faculty: "Dr. Rajesh Pillai", room: "M-501", type: "theory" },
+                    { period: 4, subject: "Thermodynamics", faculty: "Prof. Harish Chandra", room: "M-501", type: "theory" },
+                    { period: 5, subject: "Fluid Mechanics", faculty: "Dr. Rajesh Pillai", room: "M-501", type: "theory" },
+                    { period: 6, subject: "Material Science", faculty: "Dr. Sunita Rani", room: "M-501", type: "theory" },
+                    { period: 7, subject: "Kinematics of Machinery", faculty: "Prof. Harish Chandra", room: "M-501", type: "theory" }
                 ]
             }
         },
@@ -644,9 +821,58 @@ module.exports = {
             room: "V-601",
             rows: {
                 Monday: [
+                    { period: 1, subject: "Surveying", faculty: "Prof. Deepak Sinha", room: "V-601", type: "theory" },
+                    {
+                        period: 2,
+                        spanTo: 3,
+                        subject: "Concrete Technology",
+                        faculty: "Dr. Neha Kulkarni",
+                        room: "V-601",
+                        type: "theory"
+                    },
+                    {
+                        period: 4,
+                        spanTo: 5,
+                        subject: "Structural Engineering",
+                        faculty: "Dr. Venkat Prasad",
+                        room: "V-601",
+                        type: "theory"
+                    },
+                    { period: 6, subject: "Geotechnical Engineering", faculty: "Dr. Venkat Prasad", room: "V-601", type: "theory" },
+                    { period: 7, subject: "Environmental Engineering", faculty: "Dr. Neha Kulkarni", room: "V-601", type: "theory" }
+                ],
+                Tuesday: [
                     { period: 1, subject: "Concrete Technology", faculty: "Dr. Neha Kulkarni", room: "V-601", type: "theory" },
-                    { period: 3, subject: "Surveying", faculty: "Prof. Deepak Sinha", room: "V-601", type: "theory" },
-                    { period: 4, subject: "Structural Engineering", faculty: "Dr. Venkat Prasad", room: "V-601", type: "theory" },
+                    { period: 2, subject: "Surveying", faculty: "Prof. Deepak Sinha", room: "V-601", type: "theory" },
+                    { period: 3, subject: "Structural Engineering", faculty: "Dr. Venkat Prasad", room: "V-601", type: "theory" },
+                    { period: 4, subject: "Environmental Engineering", faculty: "Dr. Neha Kulkarni", room: "V-601", type: "theory" },
+                    {
+                        period: 5,
+                        subject: "Fluid Mechanics & Hydraulics",
+                        faculty: "Prof. Deepak Sinha",
+                        room: "V-601",
+                        type: "theory"
+                    },
+                    { period: 6, subject: "Surveying", faculty: "Prof. Deepak Sinha", room: "V-601", type: "theory" },
+                    { period: 7, subject: "Geotechnical Engineering", faculty: "Dr. Venkat Prasad", room: "V-601", type: "theory" }
+                ],
+                Wednesday: [
+                    {
+                        period: 1,
+                        subject: "Fluid Mechanics & Hydraulics",
+                        faculty: "Prof. Deepak Sinha",
+                        room: "V-601",
+                        type: "theory"
+                    },
+                    { period: 2, subject: "Environmental Engineering", faculty: "Dr. Neha Kulkarni", room: "V-601", type: "theory" },
+                    {
+                        period: 3,
+                        spanTo: 4,
+                        subject: "Geotechnical Engineering",
+                        faculty: "Dr. Venkat Prasad",
+                        room: "V-601",
+                        type: "theory"
+                    },
                     {
                         period: 5,
                         spanTo: 7,
@@ -656,26 +882,33 @@ module.exports = {
                         type: "lab"
                     }
                 ],
-                Tuesday: [
-                    { period: 1, subject: "Surveying", faculty: "Prof. Deepak Sinha", room: "V-601", type: "theory" },
-                    { period: 2, subject: "Structural Engineering", faculty: "Dr. Venkat Prasad", room: "V-601", type: "theory" },
-                    { period: 3, subject: "Concrete Technology", faculty: "Dr. Neha Kulkarni", room: "V-601", type: "theory" },
-                    { period: 5, spanTo: 7, subject: "Surveying Lab", faculty: "Prof. Deepak Sinha", room: "CV-LAB-1", type: "lab" }
-                ],
-                Wednesday: [
-                    { period: 4, subject: "Concrete Technology", faculty: "Dr. Neha Kulkarni", room: "V-601", type: "theory" },
-                    { period: 6, subject: "Structural Engineering", faculty: "Dr. Venkat Prasad", room: "V-601", type: "theory" },
-                    { period: 7, subject: "Surveying", faculty: "Prof. Deepak Sinha", room: "V-601", type: "theory" }
-                ],
                 Thursday: [
-                    { period: 4, subject: "Concrete Technology", faculty: "Dr. Neha Kulkarni", room: "V-601", type: "theory" },
-                    { period: 6, subject: "Structural Engineering", faculty: "Dr. Venkat Prasad", room: "V-601", type: "theory" },
+                    {
+                        period: 1,
+                        subject: "Fluid Mechanics & Hydraulics",
+                        faculty: "Prof. Deepak Sinha",
+                        room: "V-601",
+                        type: "theory"
+                    },
+                    { period: 2, subject: "Structural Engineering", faculty: "Dr. Venkat Prasad", room: "V-601", type: "theory" },
+                    { period: 3, subject: "Geotechnical Engineering", faculty: "Dr. Venkat Prasad", room: "V-601", type: "theory" },
+                    { period: 4, subject: "Environmental Engineering", faculty: "Dr. Neha Kulkarni", room: "V-601", type: "theory" },
+                    { period: 5, subject: "Surveying", faculty: "Prof. Deepak Sinha", room: "V-601", type: "theory" },
+                    { period: 6, subject: "Concrete Technology", faculty: "Dr. Neha Kulkarni", room: "V-601", type: "theory" },
                     { period: 7, subject: "Surveying", faculty: "Prof. Deepak Sinha", room: "V-601", type: "theory" }
                 ],
                 Friday: [
-                    { period: 4, subject: "Surveying", faculty: "Prof. Deepak Sinha", room: "V-601", type: "theory" },
-                    { period: 5, subject: "Concrete Technology", faculty: "Dr. Neha Kulkarni", room: "V-601", type: "theory" },
-                    { period: 6, subject: "Structural Engineering", faculty: "Dr. Venkat Prasad", room: "V-601", type: "theory" }
+                    { period: 1, subject: "Concrete Technology", faculty: "Dr. Neha Kulkarni", room: "V-601", type: "theory" },
+                    {
+                        period: 2,
+                        spanTo: 3,
+                        subject: "Fluid Mechanics & Hydraulics",
+                        faculty: "Prof. Deepak Sinha",
+                        room: "V-601",
+                        type: "theory"
+                    },
+                    { period: 4, subject: "Structural Engineering", faculty: "Dr. Venkat Prasad", room: "V-601", type: "theory" },
+                    { period: 5, spanTo: 7, subject: "Surveying Lab", faculty: "Prof. Deepak Sinha", room: "CV-LAB-1", type: "lab" }
                 ]
             }
         }
