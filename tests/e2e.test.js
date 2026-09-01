@@ -459,7 +459,7 @@ async function httpRun() {
         request(BASE, 'GET', '/api/timetable'),
         request(BASE, 'GET', '/api/timetable/meta')
     ]);
-    const rosterCount = meta.body.facultyCount || 12;
+    const rosterCount = meta.body.facultyCount || 21;
 
     await checkAsync('the grid exposes every clickable coordinate', async () => {
         assert.strictEqual(grid.body.cells.length, 35);
@@ -472,7 +472,7 @@ async function httpRun() {
             faculty: cell.faculty, class: cell.className
         });
         assert.strictEqual(res.status, 200);
-        assert.strictEqual(res.body.totalAvailable, 8);
+        assert.strictEqual(res.body.totalAvailable, 17);
         assert.ok(!res.body.availableFaculty.includes(cell.faculty));
     });
 
