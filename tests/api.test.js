@@ -157,6 +157,7 @@ async function run() {
         assert.strictEqual(member.id, 'FAC001');
         assert.strictEqual(member.department, 'CSE');
         assert.ok(member.designation, 'designation is reported');
+        assert.ok(member.phone, 'phone is reported');
         assert.match(member.email, /@/);
         assert.strictEqual(member.status, 'active');
         assert.ok(member.busyPeriods > 0 && member.freePeriods > 0);

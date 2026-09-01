@@ -148,6 +148,9 @@ function parseFaculty(body) {
 
     const designation = text(body.designation) || null;
     const phone = text(body.phone) || null;
+    if (phone && !/^[+0-9\s\-()]{7,25}$/.test(phone)) {
+        errors.push(`"${phone}" is not a valid phone number`);
+    }
 
     let maxWeeklyPeriods = null;
     if (text(body.maxWeeklyPeriods)) {

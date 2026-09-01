@@ -120,6 +120,7 @@ module.exports = {
             name: "Dr. Arjun Rao",
             department: "CSE",
             designation: "Professor",
+            phone: "+91 90000 10001",
             email: "arjun.rao@college.edu",
             status: "active",
             maxWeeklyPeriods: 20
@@ -129,6 +130,7 @@ module.exports = {
             name: "Dr. Priya Sharma",
             department: "CSE",
             designation: "Associate Professor",
+            phone: "+91 90000 10002",
             email: "priya.sharma@college.edu",
             status: "active",
             maxWeeklyPeriods: 20
@@ -138,6 +140,7 @@ module.exports = {
             name: "Prof. Kiran Reddy",
             department: "CSE",
             designation: "Assistant Professor",
+            phone: "+91 90000 10003",
             email: "kiran.reddy@college.edu",
             status: "active",
             maxWeeklyPeriods: 20
@@ -147,6 +150,7 @@ module.exports = {
             name: "Dr. Ananya Iyer",
             department: "CSE",
             designation: "Associate Professor",
+            phone: "+91 90000 10004",
             email: "ananya.iyer@college.edu",
             status: "active",
             maxWeeklyPeriods: 20
@@ -156,6 +160,7 @@ module.exports = {
             name: "Dr. Rahul Varma",
             department: "CSE",
             designation: "Assistant Professor",
+            phone: "+91 90000 10005",
             email: "rahul.varma@college.edu",
             status: "active",
             maxWeeklyPeriods: 20
@@ -165,6 +170,7 @@ module.exports = {
             name: "Prof. Naveen Reddy",
             department: "ECE",
             designation: "Professor",
+            phone: "+91 90000 10006",
             email: "naveen.reddy@college.edu",
             status: "active",
             maxWeeklyPeriods: 20
@@ -174,6 +180,7 @@ module.exports = {
             name: "Dr. Kavya Rao",
             department: "ECE",
             designation: "Associate Professor",
+            phone: "+91 90000 10007",
             email: "kavya.rao@college.edu",
             status: "active",
             maxWeeklyPeriods: 20
@@ -183,6 +190,7 @@ module.exports = {
             name: "Dr. Anitha Menon",
             department: "ECE",
             designation: "Assistant Professor",
+            phone: "+91 90000 10008",
             email: "anitha.menon@college.edu",
             status: "active",
             maxWeeklyPeriods: 20
@@ -192,6 +200,7 @@ module.exports = {
             name: "Prof. Ravi Teja",
             department: "ECE",
             designation: "Assistant Professor",
+            phone: "+91 90000 10009",
             email: "ravi.teja@college.edu",
             status: "active",
             maxWeeklyPeriods: 20
@@ -201,6 +210,7 @@ module.exports = {
             name: "Dr. Suresh Babu",
             department: "EEE",
             designation: "Professor",
+            phone: "+91 90000 10010",
             email: "suresh.babu@college.edu",
             status: "active",
             maxWeeklyPeriods: 20
@@ -210,6 +220,7 @@ module.exports = {
             name: "Prof. Lakshmi Devi",
             department: "EEE",
             designation: "Associate Professor",
+            phone: "+91 90000 10011",
             email: "lakshmi.devi@college.edu",
             status: "active",
             maxWeeklyPeriods: 20
@@ -219,6 +230,7 @@ module.exports = {
             name: "Dr. Mahesh Gupta",
             department: "EEE",
             designation: "Assistant Professor",
+            phone: "+91 90000 10012",
             email: "mahesh.gupta@college.edu",
             status: "active",
             maxWeeklyPeriods: 20
@@ -228,6 +240,7 @@ module.exports = {
             name: "Dr. Sneha Nair",
             department: "CME",
             designation: "Professor",
+            phone: "+91 90000 10013",
             email: "sneha.nair@college.edu",
             status: "active",
             maxWeeklyPeriods: 20
@@ -237,6 +250,7 @@ module.exports = {
             name: "Prof. Vikram Kumar",
             department: "CME",
             designation: "Associate Professor",
+            phone: "+91 90000 10014",
             email: "vikram.kumar@college.edu",
             status: "active",
             maxWeeklyPeriods: 20
@@ -246,6 +260,7 @@ module.exports = {
             name: "Dr. Meera Joshi",
             department: "CME",
             designation: "Assistant Professor",
+            phone: "+91 90000 10015",
             email: "meera.joshi@college.edu",
             status: "active",
             maxWeeklyPeriods: 20
@@ -255,6 +270,7 @@ module.exports = {
             name: "Dr. Rajesh Pillai",
             department: "MEC",
             designation: "Professor",
+            phone: "+91 90000 10016",
             email: "rajesh.pillai@college.edu",
             status: "active",
             maxWeeklyPeriods: 20
@@ -264,6 +280,7 @@ module.exports = {
             name: "Prof. Harish Chandra",
             department: "MEC",
             designation: "Associate Professor",
+            phone: "+91 90000 10017",
             email: "harish.chandra@college.edu",
             status: "active",
             maxWeeklyPeriods: 20
@@ -273,6 +290,7 @@ module.exports = {
             name: "Dr. Sunita Rani",
             department: "MEC",
             designation: "Assistant Professor",
+            phone: "+91 90000 10018",
             email: "sunita.rani@college.edu",
             status: "active",
             maxWeeklyPeriods: 20
@@ -282,6 +300,7 @@ module.exports = {
             name: "Dr. Venkat Prasad",
             department: "CIVIL",
             designation: "Professor",
+            phone: "+91 90000 10019",
             email: "venkat.prasad@college.edu",
             status: "active",
             maxWeeklyPeriods: 20
@@ -291,6 +310,7 @@ module.exports = {
             name: "Prof. Deepak Sinha",
             department: "CIVIL",
             designation: "Associate Professor",
+            phone: "+91 90000 10020",
             email: "deepak.sinha@college.edu",
             status: "active",
             maxWeeklyPeriods: 20
@@ -300,6 +320,7 @@ module.exports = {
             name: "Dr. Neha Kulkarni",
             department: "CIVIL",
             designation: "Assistant Professor",
+            phone: "+91 90000 10021",
             email: "neha.kulkarni@college.edu",
             status: "active",
             maxWeeklyPeriods: 20

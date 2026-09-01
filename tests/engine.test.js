@@ -59,6 +59,7 @@ check('the roster covers all six branches, each with a profile', () => {
     assert.ok(stats.length >= 15 && stats.length <= 25, `roster of ${stats.length} is outside 15-25`);
     stats.forEach(f => {
         assert.ok(f.designation, `${f.name} has no designation`);
+        assert.ok(f.phone, `${f.name} has no phone`);
         assert.match(f.email || '', /^[^\s@]+@[^\s@]+\.[^\s@]+$/, `${f.name} has no valid email`);
         assert.strictEqual(f.status, 'active');
     });

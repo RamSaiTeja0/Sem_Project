@@ -309,7 +309,14 @@
 
         var freeHtml = result.availableFaculty.length
             ? '<ul class="faculty-list">' + result.available.map(function (f) {
-                return '<li><span class="tick">✓</span>' + esc(f.faculty) +
+                var phoneHtml = f.phone
+                    ? '<div class="faculty-phone"><span class="phone-icon">📞</span> ' + esc(f.phone) + '</div>'
+                    : '';
+                return '<li><span class="tick">✓</span>' +
+                    '<div class="faculty-main">' +
+                        '<div class="faculty-name">' + esc(f.faculty) + '</div>' +
+                        phoneHtml +
+                    '</div>' +
                     '<span class="dept">' + esc(f.department || '') + '</span></li>';
             }).join('') + '</ul>'
             : notice('No faculty are free during this period.', 'warn');
@@ -318,9 +325,18 @@
         // result can be checked rather than taken on trust.
         var busyHtml = result.busy.length
             ? '<ul class="faculty-list busy-list">' + result.busy.map(function (f) {
-                var reason = [f.subject, f.className].filter(Boolean).join(' · ');
-                return '<li><span class="cross">✗</span>' + esc(f.faculty) +
-                    '<span class="dept">' + esc(reason || 'teaching') + '</span></li>';
+                var reason = [f.subject, f.className].filter(Boolean).join(' — ');
+                var phoneHtml = f.phone
+                    ? '<div class="faculty-phone"><span class="phone-icon">📞</span> ' + esc(f.phone) + '</div>'
+                    : '';
+                return '<li><span class="cross">✗</span>' +
+                    '<div class="faculty-main">' +
+                        '<div class="faculty-name">' + esc(f.faculty) + '</div>' +
+                        phoneHtml +
+                        '<div class="busy-reason">Busy: ' + esc(reason || 'teaching') + (f.room ? ' (' + esc(f.room) + ')' : '') + '</div>' +
+                    '</div>' +
+                    (f.department ? '<span class="dept">' + esc(f.department) + '</span>' : '') +
+                    '</li>';
             }).join('') + '</ul>'
             : '<p class="muted">Nobody else is teaching this period.</p>';
 
@@ -581,7 +597,7 @@
             }
             if (!data.faculty.length) {
                 el('facBody').innerHTML =
-                    '<tr><td colspan="11" class="muted">No faculty match this filter.</td></tr>';
+                    '<tr><td colspan="13" class="muted">No faculty match this filter.</td></tr>';
                 return;
             }
             el('facBody').innerHTML = data.faculty.map(function (f) {
@@ -598,13 +614,19 @@
                     availability = '<span class="badge badge-busy">' + esc(statusLabel(f.status)) + '</span>';
                 }
 
+                var phoneCell = f.phone
+                    ? '<a href="tel:' + esc(f.phone.replace(/\s+/g, '')) + '" class="phone-link"><span class="phone-icon">📞</span> ' + esc(f.phone) + '</a>'
+                    : '<span class="muted">—</span>';
+
+                var statusBadge = '<span class="badge ' + (f.status === 'active' ? 'badge-free' : 'badge-busy') + '">' +
+                    esc(statusLabel(f.status)) + '</span>';
+
                 return '<tr>' +
                     '<td class="mono">' + esc(f.id) + '</td>' +
-                    '<td>' + esc(f.name) +
-                        (f.status && f.status !== 'active'
-                            ? ' <span class="muted">(' + esc(statusLabel(f.status)) + ')</span>' : '') + '</td>' +
+                    '<td><strong>' + esc(f.name) + '</strong></td>' +
                     '<td>' + esc(f.department) + '</td>' +
                     '<td>' + esc(f.designation || '—') + '</td>' +
+                    '<td>' + phoneCell + '</td>' +
                     '<td>' + (f.email
                         ? '<a href="mailto:' + esc(f.email) + '">' + esc(f.email) + '</a>'
                         : '<span class="muted">—</span>') + '</td>' +
@@ -618,6 +640,7 @@
                         esc(f.subjects.join(', ') || '—') + '</td>' +
                     '<td class="list" title="' + esc(f.classes.join(', ')) + '">' +
                         esc(f.classes.join(', ') || '—') + '</td>' +
+                    '<td>' + statusBadge + '</td>' +
                     '</tr>';
             }).join('');
         });

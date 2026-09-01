@@ -57,13 +57,14 @@ function createEngine(normalized) {
                     subject: record.subject,
                     faculty: record.faculty,
                     facultyId: record.facultyId,
+                    phone: record.phone || null,
                     className: record.className,
                     room: record.room,
                     status: 'busy'
                 }
                 : {
                     day, period,
-                    subject: null, faculty: null, facultyId: null,
+                    subject: null, faculty: null, facultyId: null, phone: null,
                     className: target, room: null,
                     status: 'free'
                 });
@@ -88,11 +89,13 @@ function createEngine(normalized) {
                 ? {
                     day, period,
                     subject: record.subject, faculty: member.name, facultyId: member.id,
+                    phone: member.phone || null,
                     className: record.className, room: record.room, status: 'busy'
                 }
                 : {
                     day, period,
                     subject: null, faculty: member.name, facultyId: member.id,
+                    phone: member.phone || null,
                     className: null, room: null, status: 'free'
                 });
         }));
@@ -189,10 +192,12 @@ function createEngine(normalized) {
                 period,
                 availableFaculty: free.map(r => r.faculty),
                 available: free.map(r => ({
-                    faculty: r.faculty, facultyId: r.facultyId, department: r.department, status: 'free'
+                    faculty: r.faculty, facultyId: r.facultyId, department: r.department,
+                    phone: r.phone || null, status: 'free'
                 })),
                 busy: busy.map(r => ({
                     faculty: r.faculty, facultyId: r.facultyId, department: r.department,
+                    phone: r.phone || null,
                     subject: r.subject, className: r.className, room: r.room, status: 'busy'
                 })),
                 totalAvailable: free.length,

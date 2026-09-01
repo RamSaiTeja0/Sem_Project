@@ -31,32 +31,32 @@ function rng(seed) {
 
 const FACULTY = [
     // CSE
-    { id: 'FAC001', name: 'Dr. Arjun Rao', department: 'CSE', designation: 'Professor' },
-    { id: 'FAC002', name: 'Dr. Priya Sharma', department: 'CSE', designation: 'Associate Professor' },
-    { id: 'FAC003', name: 'Prof. Kiran Reddy', department: 'CSE', designation: 'Assistant Professor' },
-    { id: 'FAC004', name: 'Dr. Ananya Iyer', department: 'CSE', designation: 'Associate Professor' },
-    { id: 'FAC005', name: 'Dr. Rahul Varma', department: 'CSE', designation: 'Assistant Professor' },
+    { id: 'FAC001', name: 'Dr. Arjun Rao', department: 'CSE', designation: 'Professor', phone: '+91 90000 10001' },
+    { id: 'FAC002', name: 'Dr. Priya Sharma', department: 'CSE', designation: 'Associate Professor', phone: '+91 90000 10002' },
+    { id: 'FAC003', name: 'Prof. Kiran Reddy', department: 'CSE', designation: 'Assistant Professor', phone: '+91 90000 10003' },
+    { id: 'FAC004', name: 'Dr. Ananya Iyer', department: 'CSE', designation: 'Associate Professor', phone: '+91 90000 10004' },
+    { id: 'FAC005', name: 'Dr. Rahul Varma', department: 'CSE', designation: 'Assistant Professor', phone: '+91 90000 10005' },
     // ECE
-    { id: 'FAC006', name: 'Prof. Naveen Reddy', department: 'ECE', designation: 'Professor' },
-    { id: 'FAC007', name: 'Dr. Kavya Rao', department: 'ECE', designation: 'Associate Professor' },
-    { id: 'FAC008', name: 'Dr. Anitha Menon', department: 'ECE', designation: 'Assistant Professor' },
-    { id: 'FAC009', name: 'Prof. Ravi Teja', department: 'ECE', designation: 'Assistant Professor' },
+    { id: 'FAC006', name: 'Prof. Naveen Reddy', department: 'ECE', designation: 'Professor', phone: '+91 90000 10006' },
+    { id: 'FAC007', name: 'Dr. Kavya Rao', department: 'ECE', designation: 'Associate Professor', phone: '+91 90000 10007' },
+    { id: 'FAC008', name: 'Dr. Anitha Menon', department: 'ECE', designation: 'Assistant Professor', phone: '+91 90000 10008' },
+    { id: 'FAC009', name: 'Prof. Ravi Teja', department: 'ECE', designation: 'Assistant Professor', phone: '+91 90000 10009' },
     // EEE
-    { id: 'FAC010', name: 'Dr. Suresh Babu', department: 'EEE', designation: 'Professor' },
-    { id: 'FAC011', name: 'Prof. Lakshmi Devi', department: 'EEE', designation: 'Associate Professor' },
-    { id: 'FAC012', name: 'Dr. Mahesh Gupta', department: 'EEE', designation: 'Assistant Professor' },
+    { id: 'FAC010', name: 'Dr. Suresh Babu', department: 'EEE', designation: 'Professor', phone: '+91 90000 10010' },
+    { id: 'FAC011', name: 'Prof. Lakshmi Devi', department: 'EEE', designation: 'Associate Professor', phone: '+91 90000 10011' },
+    { id: 'FAC012', name: 'Dr. Mahesh Gupta', department: 'EEE', designation: 'Assistant Professor', phone: '+91 90000 10012' },
     // CME
-    { id: 'FAC013', name: 'Dr. Sneha Nair', department: 'CME', designation: 'Professor' },
-    { id: 'FAC014', name: 'Prof. Vikram Kumar', department: 'CME', designation: 'Associate Professor' },
-    { id: 'FAC015', name: 'Dr. Meera Joshi', department: 'CME', designation: 'Assistant Professor' },
+    { id: 'FAC013', name: 'Dr. Sneha Nair', department: 'CME', designation: 'Professor', phone: '+91 90000 10013' },
+    { id: 'FAC014', name: 'Prof. Vikram Kumar', department: 'CME', designation: 'Associate Professor', phone: '+91 90000 10014' },
+    { id: 'FAC015', name: 'Dr. Meera Joshi', department: 'CME', designation: 'Assistant Professor', phone: '+91 90000 10015' },
     // MEC
-    { id: 'FAC016', name: 'Dr. Rajesh Pillai', department: 'MEC', designation: 'Professor' },
-    { id: 'FAC017', name: 'Prof. Harish Chandra', department: 'MEC', designation: 'Associate Professor' },
-    { id: 'FAC018', name: 'Dr. Sunita Rani', department: 'MEC', designation: 'Assistant Professor' },
+    { id: 'FAC016', name: 'Dr. Rajesh Pillai', department: 'MEC', designation: 'Professor', phone: '+91 90000 10016' },
+    { id: 'FAC017', name: 'Prof. Harish Chandra', department: 'MEC', designation: 'Associate Professor', phone: '+91 90000 10017' },
+    { id: 'FAC018', name: 'Dr. Sunita Rani', department: 'MEC', designation: 'Assistant Professor', phone: '+91 90000 10018' },
     // CIVIL
-    { id: 'FAC019', name: 'Dr. Venkat Prasad', department: 'CIVIL', designation: 'Professor' },
-    { id: 'FAC020', name: 'Prof. Deepak Sinha', department: 'CIVIL', designation: 'Associate Professor' },
-    { id: 'FAC021', name: 'Dr. Neha Kulkarni', department: 'CIVIL', designation: 'Assistant Professor' }
+    { id: 'FAC019', name: 'Dr. Venkat Prasad', department: 'CIVIL', designation: 'Professor', phone: '+91 90000 10019' },
+    { id: 'FAC020', name: 'Prof. Deepak Sinha', department: 'CIVIL', designation: 'Associate Professor', phone: '+91 90000 10020' },
+    { id: 'FAC021', name: 'Dr. Neha Kulkarni', department: 'CIVIL', designation: 'Assistant Professor', phone: '+91 90000 10021' }
 ].map(member => ({
     ...member,
     // Fictional addresses on an example domain — no real mailbox exists.

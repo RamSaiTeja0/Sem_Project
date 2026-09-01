@@ -257,13 +257,23 @@ th.num { text-align: right; }
 
 .faculty-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
 .faculty-list li {
-  display: flex; align-items: center; gap: 9px;
+  display: flex; align-items: flex-start; gap: 10px;
   padding: 9px 12px; border-radius: var(--radius-sm);
   background: var(--ok-100); border: 1px solid var(--ok-line);
-  font-size: 0.88rem; font-weight: 550; color: var(--ink-900);
+  font-size: 0.88rem; color: var(--ink-900);
 }
 .faculty-list.busy-list li { background: var(--danger-100); border-color: var(--danger-line); }
-.faculty-list .dept { margin-left: auto; font-size: 0.77rem; font-weight: 500; color: var(--ink-500); }
+.faculty-list .tick,
+.faculty-list .cross { font-weight: 700; margin-top: 2px; flex-shrink: 0; }
+.faculty-list .tick { color: var(--ok-700, #15803d); }
+.faculty-list .cross { color: var(--danger-700, #b91c1c); }
+.faculty-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
+.faculty-name { font-weight: 600; color: var(--ink-900); line-height: 1.3; }
+.faculty-phone { font-size: 0.8rem; color: var(--ink-600); font-weight: 500; display: flex; align-items: center; gap: 4px; }
+.busy-reason { font-size: 0.79rem; color: #991b1b; font-weight: 500; margin-top: 2px; }
+.faculty-list .dept { margin-left: auto; font-size: 0.77rem; font-weight: 500; color: var(--ink-500); align-self: flex-start; flex-shrink: 0; }
+.phone-link { color: var(--brand-700); text-decoration: none; font-size: 0.85rem; font-weight: 500; display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+.phone-link:hover { text-decoration: underline; }
 
 .readonly-banner {
   margin-top: 18px; padding: 11px 14px; border-radius: var(--radius-sm);
