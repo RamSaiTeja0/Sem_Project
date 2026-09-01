@@ -453,7 +453,11 @@ async function browserRun(playwright) {
 
 /** Fallback: the same path over HTTP when no browser is installed. */
 async function httpRun() {
-    const grid = await request(BASE, 'GET', '/api/timetable');
+    const [grid, meta] = await Promise.all([
+        request(BASE, 'GET', '/api/timetable'),
+        request(BASE, 'GET', '/api/timetable/meta')
+    ]);
+    const rosterCount = meta.body.facultyCount || 12;
 
     await checkAsync('the grid exposes every clickable coordinate', async () => {
         assert.strictEqual(grid.body.cells.length, 35);
@@ -480,7 +484,7 @@ async function httpRun() {
             // Excluding the cell's own faculty removes them from both lists,
             // so the totals cover the roster minus that one person.
             assert.strictEqual(res.body.totalAvailable + res.body.totalBusy,
-                cell.faculty ? 9 : 10, `${cell.day} P${cell.period}`);
+                cell.faculty ? rosterCount - 1 : rosterCount, `${cell.day} P${cell.period}`);
         }
     });
 }
