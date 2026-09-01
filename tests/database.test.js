@@ -106,6 +106,7 @@ async function run() {
         assert.strictEqual(seededCounts.faculty, demo.faculty.length);
         assert.strictEqual(seededCounts.classes, demo.classes.length);
         assert.strictEqual(seededCounts.departments, demo.departments.length);
+        assert.strictEqual(seededCounts.departments, 6, 'all six branches are seeded');
         assert.strictEqual(seededCounts.rooms, demo.rooms.length);
         assert.ok(seededCounts.timetable > 100, 'a full week of periods must be stored');
         assert.strictEqual(seededCounts.users, demo.faculty.length + 1, 'faculty + coordinator');
@@ -116,6 +117,36 @@ async function run() {
         assert.strictEqual(second.seeded, false, 'a populated database must not be re-seeded');
         const after = await repository.counts();
         assert.deepStrictEqual(after, seededCounts);
+    });
+
+    await checkAsync('the faculty profile columns survive a re-run of the schema', async () => {
+        // schema.sql is applied on every startup; the ALTER ... IF NOT EXISTS
+        // statements must be no-ops the second time rather than errors.
+        await seeder.migrate();
+        const { rows } = await db.query(`
+            SELECT column_name FROM information_schema.columns
+             WHERE table_name = 'faculty'`);
+        const columns = rows.map(r => r.column_name);
+        ['designation', 'email', 'phone', 'max_weekly_periods', 'status']
+            .forEach(c => assert.ok(columns.includes(c), `faculty.${c} is missing`));
+
+        const stored = await db.query(
+            "SELECT designation, email, status FROM faculty WHERE code = 'FAC001'");
+        assert.ok(stored.rows[0].designation, 'the seeded designation survived');
+        assert.match(stored.rows[0].email, /@/);
+        assert.strictEqual(stored.rows[0].status, 'active');
+    });
+
+    await checkAsync('classes carry their branch, semester and academic year', async () => {
+        const classes = await repository.listClasses();
+        assert.strictEqual(classes.length, demo.classes.length);
+        classes.forEach(c => {
+            assert.ok(c.department, `${c.code} has no department`);
+            assert.ok(c.semester, `${c.code} has no semester`);
+            assert.ok(c.academicYear, `${c.code} has no academic year`);
+        });
+        const branches = [...new Set(classes.map(c => c.department))].sort();
+        assert.deepStrictEqual(branches, ['CIVIL', 'CME', 'CSE', 'ECE', 'EEE', 'MEC']);
     });
 
     console.log('\n[2] Round-trip through PostgreSQL');
@@ -166,6 +197,17 @@ async function run() {
         { day: freeCell.day, period: freeCell.period });
     const substitute = slotBefore.body.availableFaculty[0];
 
+    // Two classes other than CSE-A, taken from the dataset rather than named
+    // literally, so this suite survives a change to the demo classes.
+    const reference = (await call('GET', '/api/timetable/entries/reference')).body;
+    const otherClasses = reference.classes.map(c => c.code).filter(code => code !== 'CSE-A');
+    assert.ok(otherClasses.length >= 2, 'the demo data needs at least three classes');
+
+    // Two theory subjects, again taken from the data rather than named here.
+    const theory = reference.subjects.filter(s => s.type === 'theory').map(s => s.name);
+    const [SUBJECT_A, SUBJECT_B] = [theory[0], theory[1]];
+    assert.ok(SUBJECT_A && SUBJECT_B, 'the demo data needs at least two theory subjects');
+
     let createdId = null;
 
     await checkAsync('GET /entries/reference offers the form options', async () => {
@@ -182,7 +224,7 @@ async function run() {
         const before = (await call('GET', '/api/timetable/entries')).body.count;
         const res = await call('POST', '/api/timetable/entries', {
             class: 'CSE-A', day: freeCell.day, period: freeCell.period,
-            subject: 'Software Engineering', faculty: substitute, room: 'A-101', type: 'theory'
+            subject: SUBJECT_A, faculty: substitute, room: 'A-101', type: 'theory'
         });
         assert.strictEqual(res.status, 201, JSON.stringify(res.body));
         assert.strictEqual(res.body.saved, true);
@@ -208,7 +250,7 @@ async function run() {
     await checkAsync('a duplicate entry for the same class slot is rejected', async () => {
         const res = await call('POST', '/api/timetable/entries', {
             class: 'CSE-A', day: freeCell.day, period: freeCell.period,
-            subject: 'Data Structures', faculty: substitute, room: 'A-101'
+            subject: SUBJECT_A, faculty: substitute, room: 'A-101'
         });
         assert.strictEqual(res.status, 400);
         assert.strictEqual(res.body.code, 'SLOT_CONFLICT');
@@ -216,8 +258,8 @@ async function run() {
 
     await checkAsync('a faculty conflict across classes is rejected', async () => {
         const res = await call('POST', '/api/timetable/entries', {
-            class: 'CSE-B', day: freeCell.day, period: freeCell.period,
-            subject: 'Data Structures', faculty: substitute, room: 'A-102'
+            class: otherClasses[0], day: freeCell.day, period: freeCell.period,
+            subject: SUBJECT_A, faculty: substitute, room: 'A-102'
         });
         assert.strictEqual(res.status, 400);
         assert.strictEqual(res.body.code, 'SLOT_CONFLICT');
@@ -228,8 +270,8 @@ async function run() {
         const other = (await call('POST', '/api/availability',
             { day: freeCell.day, period: freeCell.period })).body.availableFaculty[0];
         const res = await call('POST', '/api/timetable/entries', {
-            class: 'CSE-C', day: freeCell.day, period: freeCell.period,
-            subject: 'Data Structures', faculty: other, room: 'A-101'
+            class: otherClasses[1], day: freeCell.day, period: freeCell.period,
+            subject: SUBJECT_A, faculty: other, room: 'A-101'
         });
         assert.strictEqual(res.status, 400);
         assert.ok(res.body.conflicts.some(c => c.code === 'ROOM_BUSY'),
@@ -256,14 +298,14 @@ async function run() {
     await checkAsync('PUT /entries/:id edits an entry', async () => {
         const res = await call('PUT', `/api/timetable/entries/${createdId}`, {
             class: 'CSE-A', day: freeCell.day, period: freeCell.period,
-            subject: 'Machine Learning', faculty: substitute, room: 'A-101', type: 'theory'
+            subject: SUBJECT_B, faculty: substitute, room: 'A-101', type: 'theory'
         });
-        assert.strictEqual(res.status, 200);
-        assert.strictEqual(res.body.entry.subject, 'Machine Learning');
+        assert.strictEqual(res.status, 200, JSON.stringify(res.body));
+        assert.strictEqual(res.body.entry.subject, SUBJECT_B);
 
         const cell = (await call('GET', '/api/timetable?class=CSE-A')).body.cells
             .find(c => c.day === freeCell.day && c.period === freeCell.period);
-        assert.strictEqual(cell.subject, 'Machine Learning');
+        assert.strictEqual(cell.subject, SUBJECT_B);
     });
 
     await checkAsync('editing into an occupied slot is rejected', async () => {
@@ -271,7 +313,7 @@ async function run() {
             .find(c => c.status === 'busy' && !(c.day === freeCell.day && c.period === freeCell.period));
         const res = await call('PUT', `/api/timetable/entries/${createdId}`, {
             class: 'CSE-A', day: busyCell.day, period: busyCell.period,
-            subject: 'Machine Learning', faculty: substitute, room: 'A-101'
+            subject: SUBJECT_B, faculty: substitute, room: 'A-101'
         });
         assert.strictEqual(res.status, 400);
         assert.strictEqual(res.body.code, 'SLOT_CONFLICT');
@@ -280,7 +322,7 @@ async function run() {
     await checkAsync('editing a non-existent entry is a 404', async () => {
         const res = await call('PUT', '/api/timetable/entries/99999999', {
             class: 'CSE-A', day: freeCell.day, period: freeCell.period,
-            subject: 'Machine Learning', faculty: substitute
+            subject: SUBJECT_B, faculty: substitute
         });
         assert.strictEqual(res.status, 404);
     });
@@ -310,7 +352,87 @@ async function run() {
         assert.strictEqual(rows[0].n, api);
     });
 
-    console.log('\n[4] Storage reporting');
+    console.log('\n[4] Adding a faculty member');
+
+    const ADDED = 'FAC900';
+    await checkAsync('POST /api/faculty rejects an incomplete or malformed record', async () => {
+        const res = await call('POST', '/api/faculty',
+            { id: 'bad id!', name: 'X', department: 'NOPE', email: 'not-an-email' });
+        assert.strictEqual(res.status, 400);
+        assert.strictEqual(res.body.code, 'INVALID_FACULTY');
+        assert.ok(res.body.problems.length >= 4, 'every problem is reported at once');
+        assert.ok(res.body.problems.some(p => /Faculty ID/i.test(p)));
+        assert.ok(res.body.problems.some(p => /department/i.test(p)));
+        assert.ok(res.body.problems.some(p => /email/i.test(p)));
+    });
+
+    await checkAsync('a duplicate faculty ID is rejected', async () => {
+        const res = await call('POST', '/api/faculty',
+            { id: 'FAC001', name: 'Dr. Somebody Else', department: 'CSE' });
+        assert.strictEqual(res.status, 409);
+        assert.strictEqual(res.body.code, 'DUPLICATE_FACULTY');
+        assert.match(res.body.error, /already in use/);
+    });
+
+    await checkAsync('a duplicate email is rejected', async () => {
+        const existing = (await call('GET', '/api/faculty?search=FAC002')).body.faculty[0];
+        const res = await call('POST', '/api/faculty',
+            { id: 'FAC901', name: 'Dr. Another Person', department: 'CSE', email: existing.email });
+        assert.strictEqual(res.status, 409);
+        assert.match(res.body.error, /Email .* already in use/);
+    });
+
+    await checkAsync('POST /api/faculty stores a valid record', async () => {
+        const before = (await call('GET', '/api/faculty')).body.count;
+        const res = await call('POST', '/api/faculty', {
+            id: ADDED, name: 'Dr. Test Appointee', department: 'CIVIL',
+            designation: 'Assistant Professor', email: 'test.appointee@college.edu',
+            phone: '+91-90000-00000', maxWeeklyPeriods: 18, status: 'active'
+        });
+        assert.strictEqual(res.status, 201, JSON.stringify(res.body));
+        assert.strictEqual(res.body.faculty.id, ADDED);
+        assert.strictEqual(res.body.faculty.department, 'CIVIL');
+        assert.strictEqual(res.body.faculty.designation, 'Assistant Professor');
+
+        const after = (await call('GET', '/api/faculty')).body.count;
+        assert.strictEqual(after, before + 1, 'the roster count grew by one');
+
+        const row = await db.query('SELECT name, status FROM faculty WHERE code = $1', [ADDED]);
+        assert.strictEqual(row.rows[0].name, 'Dr. Test Appointee', 'the row is really in PostgreSQL');
+    });
+
+    await checkAsync('the new faculty is immediately usable everywhere', async () => {
+        // Free at every slot, since they teach nothing yet.
+        const availability = await call('POST', '/api/availability', { day: 'Monday', period: 1 });
+        assert.ok(availability.body.availableFaculty.includes('Dr. Test Appointee'),
+            'the new member is offered as a substitute');
+
+        const branch = await call('GET', '/api/faculty?department=CIVIL');
+        assert.ok(branch.body.faculty.some(f => f.id === ADDED), 'they appear under their branch');
+
+        const reference = await call('GET', '/api/timetable/entries/reference');
+        assert.ok(reference.body.faculty.some(f => f.name === 'Dr. Test Appointee'),
+            'they are selectable when adding a timetable entry');
+
+        const departments = await call('GET', '/api/faculty/departments');
+        const civil = departments.body.details.find(d => d.code === 'CIVIL');
+        assert.strictEqual(civil.facultyCount, 4, 'the branch count includes them');
+    });
+
+    await checkAsync('a sign-in account is created for the new faculty member', async () => {
+        const { rows } = await db.query(
+            'SELECT username FROM users WHERE faculty_id = (SELECT id FROM faculty WHERE code = $1)',
+            [ADDED]);
+        assert.strictEqual(rows.length, 1);
+        assert.strictEqual(rows[0].username, 'test.appointee');
+    });
+
+    // Leave the database as it was found.
+    await db.query('DELETE FROM users WHERE faculty_id = (SELECT id FROM faculty WHERE code = $1)', [ADDED]);
+    await db.query('DELETE FROM faculty WHERE code = $1', [ADDED]);
+    await store.reloadFromDatabase();
+
+    console.log('\n[5] Storage reporting');
 
     await checkAsync('GET /api/storage reports the database backing', async () => {
         const res = await call('GET', '/api/storage');

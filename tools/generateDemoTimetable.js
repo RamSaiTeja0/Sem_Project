@@ -17,6 +17,7 @@
 'use strict';
 const fs = require('fs');
 const path = require('path');
+const { DEPARTMENTS } = require('../src/data/departments');
 
 const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
 const PERIODS = [1, 2, 3, 4, 5, 6, 7];
@@ -29,120 +30,181 @@ function rng(seed) {
 }
 
 const FACULTY = [
-    { id: 'FAC01', name: 'Dr. Arjun Rao', department: 'CSE' },
-    { id: 'FAC02', name: 'Dr. Priya Sharma', department: 'CSE' },
-    { id: 'FAC03', name: 'Prof. Kiran Reddy', department: 'CSE' },
-    { id: 'FAC04', name: 'Dr. Ananya Iyer', department: 'CSE' },
-    { id: 'FAC05', name: 'Dr. Rahul Varma', department: 'CSE' },
-    { id: 'FAC06', name: 'Prof. Sneha Nair', department: 'CSE' },
-    { id: 'FAC07', name: 'Dr. Vikram Kumar', department: 'CSE' },
-    { id: 'FAC08', name: 'Prof. Meera Joshi', department: 'CSE' },
-    { id: 'FAC09', name: 'Prof. Naveen Reddy', department: 'ECE' },
-    { id: 'FAC10', name: 'Dr. Kavya Rao', department: 'ECE' },
-    { id: 'FAC11', name: 'Dr. Anitha Menon', department: 'ECE' },
-    { id: 'FAC12', name: 'Prof. Ravi Teja', department: 'ECE' }
-];
+    // CSE
+    { id: 'FAC001', name: 'Dr. Arjun Rao', department: 'CSE', designation: 'Professor' },
+    { id: 'FAC002', name: 'Dr. Priya Sharma', department: 'CSE', designation: 'Associate Professor' },
+    { id: 'FAC003', name: 'Prof. Kiran Reddy', department: 'CSE', designation: 'Assistant Professor' },
+    { id: 'FAC004', name: 'Dr. Ananya Iyer', department: 'CSE', designation: 'Associate Professor' },
+    { id: 'FAC005', name: 'Dr. Rahul Varma', department: 'CSE', designation: 'Assistant Professor' },
+    // ECE
+    { id: 'FAC006', name: 'Prof. Naveen Reddy', department: 'ECE', designation: 'Professor' },
+    { id: 'FAC007', name: 'Dr. Kavya Rao', department: 'ECE', designation: 'Associate Professor' },
+    { id: 'FAC008', name: 'Dr. Anitha Menon', department: 'ECE', designation: 'Assistant Professor' },
+    { id: 'FAC009', name: 'Prof. Ravi Teja', department: 'ECE', designation: 'Assistant Professor' },
+    // EEE
+    { id: 'FAC010', name: 'Dr. Suresh Babu', department: 'EEE', designation: 'Professor' },
+    { id: 'FAC011', name: 'Prof. Lakshmi Devi', department: 'EEE', designation: 'Associate Professor' },
+    { id: 'FAC012', name: 'Dr. Mahesh Gupta', department: 'EEE', designation: 'Assistant Professor' },
+    // CME
+    { id: 'FAC013', name: 'Dr. Sneha Nair', department: 'CME', designation: 'Professor' },
+    { id: 'FAC014', name: 'Prof. Vikram Kumar', department: 'CME', designation: 'Associate Professor' },
+    { id: 'FAC015', name: 'Dr. Meera Joshi', department: 'CME', designation: 'Assistant Professor' },
+    // MEC
+    { id: 'FAC016', name: 'Dr. Rajesh Pillai', department: 'MEC', designation: 'Professor' },
+    { id: 'FAC017', name: 'Prof. Harish Chandra', department: 'MEC', designation: 'Associate Professor' },
+    { id: 'FAC018', name: 'Dr. Sunita Rani', department: 'MEC', designation: 'Assistant Professor' },
+    // CIVIL
+    { id: 'FAC019', name: 'Dr. Venkat Prasad', department: 'CIVIL', designation: 'Professor' },
+    { id: 'FAC020', name: 'Prof. Deepak Sinha', department: 'CIVIL', designation: 'Associate Professor' },
+    { id: 'FAC021', name: 'Dr. Neha Kulkarni', department: 'CIVIL', designation: 'Assistant Professor' }
+].map(member => ({
+    ...member,
+    // Fictional addresses on an example domain — no real mailbox exists.
+    email: member.name
+        .replace(/^(Dr|Prof|Mr|Mrs|Ms)\.?\s+/, '')
+        .toLowerCase().replace(/[^a-z0-9]+/g, '.') + '@college.edu',
+    status: 'active',
+    maxWeeklyPeriods: 20
+}));
 
 const ROOMS = [
     { code: 'A-101', name: 'Block A — Room 101', type: 'classroom', capacity: 60 },
     { code: 'A-102', name: 'Block A — Room 102', type: 'classroom', capacity: 60 },
-    { code: 'A-103', name: 'Block A — Room 103', type: 'classroom', capacity: 60 },
     { code: 'E-201', name: 'Block E — Room 201', type: 'classroom', capacity: 60 },
     { code: 'E-202', name: 'Block E — Room 202', type: 'classroom', capacity: 60 },
+    { code: 'P-301', name: 'Block P — Room 301', type: 'classroom', capacity: 60 },
+    { code: 'C-401', name: 'Block C — Room 401', type: 'classroom', capacity: 60 },
+    { code: 'M-501', name: 'Block M — Room 501', type: 'classroom', capacity: 60 },
+    { code: 'V-601', name: 'Block V — Room 601', type: 'classroom', capacity: 60 },
     { code: 'CS-LAB-1', name: 'Computer Lab 1', type: 'lab', capacity: 35 },
     { code: 'CS-LAB-2', name: 'Computer Lab 2', type: 'lab', capacity: 35 },
-    { code: 'CS-LAB-3', name: 'Computer Lab 3', type: 'lab', capacity: 35 },
     { code: 'EC-LAB-1', name: 'Electronics Lab 1', type: 'lab', capacity: 30 },
-    { code: 'EC-LAB-2', name: 'Embedded Systems Lab', type: 'lab', capacity: 30 }
+    { code: 'EC-LAB-2', name: 'Electronics Lab 2', type: 'lab', capacity: 30 },
+    { code: 'EE-LAB-1', name: 'Electrical Machines Lab', type: 'lab', capacity: 30 },
+    { code: 'CM-LAB-1', name: 'Computer Engineering Lab', type: 'lab', capacity: 35 },
+    { code: 'ME-WORKSHOP', name: 'Mechanical Workshop', type: 'lab', capacity: 40 },
+    { code: 'CV-LAB-1', name: 'Civil Engineering Lab', type: 'lab', capacity: 30 }
 ];
 
 const SUBJECTS = [
+    // CSE
     { code: 'CS501', name: 'Data Structures', department: 'CSE', type: 'theory' },
     { code: 'CS502', name: 'Database Management Systems', department: 'CSE', type: 'theory' },
     { code: 'CS503', name: 'Operating Systems', department: 'CSE', type: 'theory' },
     { code: 'CS504', name: 'Computer Networks', department: 'CSE', type: 'theory' },
-    { code: 'CS505', name: 'Java Programming', department: 'CSE', type: 'theory' },
-    { code: 'CS506', name: 'Web Technologies', department: 'CSE', type: 'theory' },
-    { code: 'CS507', name: 'Software Engineering', department: 'CSE', type: 'theory' },
-    { code: 'CS508', name: 'Machine Learning', department: 'CSE', type: 'theory' },
+    { code: 'CS505', name: 'Web Technologies', department: 'CSE', type: 'theory' },
     { code: 'CS551', name: 'Data Structures Lab', department: 'CSE', type: 'lab' },
     { code: 'CS552', name: 'DBMS Lab', department: 'CSE', type: 'lab' },
-    { code: 'CS553', name: 'Operating Systems Lab', department: 'CSE', type: 'lab' },
-    { code: 'CS554', name: 'Java Programming Lab', department: 'CSE', type: 'lab' },
-    { code: 'CS555', name: 'Web Technologies Lab', department: 'CSE', type: 'lab' },
-    { code: 'CS556', name: 'Machine Learning Lab', department: 'CSE', type: 'lab' },
+    { code: 'CS553', name: 'Web Technologies Lab', department: 'CSE', type: 'lab' },
+    // ECE
     { code: 'EC501', name: 'Digital Electronics', department: 'ECE', type: 'theory' },
-    { code: 'EC502', name: 'Microprocessors', department: 'ECE', type: 'theory' },
-    { code: 'EC503', name: 'Signals and Systems', department: 'ECE', type: 'theory' },
+    { code: 'EC502', name: 'Signals and Systems', department: 'ECE', type: 'theory' },
+    { code: 'EC503', name: 'Microprocessors', department: 'ECE', type: 'theory' },
     { code: 'EC504', name: 'Communication Systems', department: 'ECE', type: 'theory' },
-    { code: 'EC505', name: 'Embedded Systems', department: 'ECE', type: 'theory' },
     { code: 'EC551', name: 'Digital Electronics Lab', department: 'ECE', type: 'lab' },
     { code: 'EC552', name: 'Microprocessors Lab', department: 'ECE', type: 'lab' },
-    { code: 'EC553', name: 'Embedded Systems Lab', department: 'ECE', type: 'lab' }
+    // EEE
+    { code: 'EE501', name: 'Power Systems', department: 'EEE', type: 'theory' },
+    { code: 'EE502', name: 'Electrical Machines', department: 'EEE', type: 'theory' },
+    { code: 'EE503', name: 'Control Systems', department: 'EEE', type: 'theory' },
+    { code: 'EE551', name: 'Electrical Machines Lab', department: 'EEE', type: 'lab' },
+    { code: 'EE552', name: 'Power Systems Lab', department: 'EEE', type: 'lab' },
+    // CME
+    { code: 'CM501', name: 'Computer Architecture', department: 'CME', type: 'theory' },
+    { code: 'CM502', name: 'Programming', department: 'CME', type: 'theory' },
+    { code: 'CM503', name: 'Software Engineering', department: 'CME', type: 'theory' },
+    { code: 'CM551', name: 'Programming Lab', department: 'CME', type: 'lab' },
+    { code: 'CM552', name: 'Computer Architecture Lab', department: 'CME', type: 'lab' },
+    // MEC
+    { code: 'ME501', name: 'Engineering Mechanics', department: 'MEC', type: 'theory' },
+    { code: 'ME502', name: 'Thermodynamics', department: 'MEC', type: 'theory' },
+    { code: 'ME503', name: 'Manufacturing Technology', department: 'MEC', type: 'theory' },
+    { code: 'ME551', name: 'Manufacturing Technology Lab', department: 'MEC', type: 'lab' },
+    { code: 'ME552', name: 'Thermodynamics Lab', department: 'MEC', type: 'lab' },
+    // CIVIL
+    { code: 'CV501', name: 'Structural Engineering', department: 'CIVIL', type: 'theory' },
+    { code: 'CV502', name: 'Surveying', department: 'CIVIL', type: 'theory' },
+    { code: 'CV503', name: 'Concrete Technology', department: 'CIVIL', type: 'theory' },
+    { code: 'CV551', name: 'Surveying Lab', department: 'CIVIL', type: 'lab' },
+    { code: 'CV552', name: 'Concrete Technology Lab', department: 'CIVIL', type: 'lab' }
 ];
+
+const ACADEMIC_YEAR = '2025-26';
 
 const CLASSES = [
     { class: 'CSE-A', department: 'CSE', semester: 5, room: 'A-101', labRooms: ['CS-LAB-1', 'CS-LAB-2'] },
-    { class: 'CSE-B', department: 'CSE', semester: 5, room: 'A-102', labRooms: ['CS-LAB-2', 'CS-LAB-3'] },
-    { class: 'CSE-C', department: 'CSE', semester: 5, room: 'A-103', labRooms: ['CS-LAB-3', 'CS-LAB-1'] },
+    { class: 'CSE-B', department: 'CSE', semester: 5, room: 'A-102', labRooms: ['CS-LAB-2', 'CS-LAB-1'] },
     { class: 'ECE-A', department: 'ECE', semester: 5, room: 'E-201', labRooms: ['EC-LAB-1', 'EC-LAB-2'] },
-    { class: 'ECE-B', department: 'ECE', semester: 5, room: 'E-202', labRooms: ['EC-LAB-2', 'EC-LAB-1'] }
+    { class: 'ECE-B', department: 'ECE', semester: 5, room: 'E-202', labRooms: ['EC-LAB-2', 'EC-LAB-1'] },
+    { class: 'EEE-A', department: 'EEE', semester: 5, room: 'P-301', labRooms: ['EE-LAB-1'] },
+    { class: 'CME-A', department: 'CME', semester: 5, room: 'C-401', labRooms: ['CM-LAB-1'] },
+    { class: 'MEC-A', department: 'MEC', semester: 5, room: 'M-501', labRooms: ['ME-WORKSHOP'] },
+    { class: 'CIVIL-A', department: 'CIVIL', semester: 5, room: 'V-601', labRooms: ['CV-LAB-1'] }
 ];
 
 /** Weekly load per class: subject -> faculty -> periods per week. */
 const PLAN = {
     'CSE-A': [
-        ['Data Structures', 'Dr. Arjun Rao', 4],
-        ['Database Management Systems', 'Dr. Priya Sharma', 4],
-        ['Operating Systems', 'Prof. Kiran Reddy', 4],
+        ['Data Structures', 'Dr. Arjun Rao', 5],
+        ['Database Management Systems', 'Dr. Priya Sharma', 5],
+        ['Operating Systems', 'Prof. Kiran Reddy', 5],
         ['Computer Networks', 'Dr. Ananya Iyer', 4],
-        ['Java Programming', 'Dr. Rahul Varma', 4],
-        ['Software Engineering', 'Prof. Sneha Nair', 3],
-        ['Machine Learning', 'Dr. Vikram Kumar', 3],
-        ['DBMS Lab', 'Dr. Priya Sharma', 3],
-        ['Java Programming Lab', 'Dr. Rahul Varma', 3]
+        ['Web Technologies', 'Dr. Rahul Varma', 4],
+        ['Data Structures Lab', 'Dr. Arjun Rao', 3],
+        ['DBMS Lab', 'Dr. Priya Sharma', 3]
     ],
     'CSE-B': [
-        ['Data Structures', 'Prof. Meera Joshi', 4],
-        ['Database Management Systems', 'Dr. Arjun Rao', 4],
-        ['Operating Systems', 'Dr. Priya Sharma', 4],
-        ['Computer Networks', 'Prof. Kiran Reddy', 4],
-        ['Web Technologies', 'Dr. Ananya Iyer', 4],
-        ['Java Programming', 'Prof. Sneha Nair', 3],
-        ['Machine Learning', 'Dr. Vikram Kumar', 3],
-        ['Data Structures Lab', 'Prof. Meera Joshi', 3],
-        ['Web Technologies Lab', 'Dr. Ananya Iyer', 3]
-    ],
-    'CSE-C': [
-        ['Data Structures', 'Dr. Rahul Varma', 4],
-        ['Operating Systems', 'Prof. Meera Joshi', 4],
+        ['Data Structures', 'Dr. Priya Sharma', 5],
+        ['Database Management Systems', 'Dr. Ananya Iyer', 5],
+        ['Operating Systems', 'Dr. Rahul Varma', 4],
         ['Computer Networks', 'Dr. Arjun Rao', 4],
-        ['Java Programming', 'Dr. Vikram Kumar', 4],
-        ['Web Technologies', 'Prof. Sneha Nair', 4],
-        ['Software Engineering', 'Prof. Kiran Reddy', 3],
-        ['Machine Learning', 'Dr. Priya Sharma', 3],
-        ['Operating Systems Lab', 'Prof. Meera Joshi', 3],
-        ['Machine Learning Lab', 'Dr. Priya Sharma', 3]
+        ['Web Technologies', 'Prof. Kiran Reddy', 4],
+        ['Web Technologies Lab', 'Prof. Kiran Reddy', 3],
+        ['DBMS Lab', 'Dr. Ananya Iyer', 3]
     ],
     'ECE-A': [
-        ['Digital Electronics', 'Prof. Naveen Reddy', 4],
-        ['Microprocessors', 'Dr. Kavya Rao', 4],
-        ['Signals and Systems', 'Dr. Anitha Menon', 4],
-        ['Communication Systems', 'Prof. Ravi Teja', 4],
-        ['Embedded Systems', 'Prof. Naveen Reddy', 3],
+        ['Digital Electronics', 'Prof. Naveen Reddy', 5],
+        ['Signals and Systems', 'Dr. Kavya Rao', 5],
+        ['Microprocessors', 'Dr. Anitha Menon', 5],
+        ['Communication Systems', 'Prof. Ravi Teja', 5],
         ['Digital Electronics Lab', 'Prof. Naveen Reddy', 3],
-        ['Microprocessors Lab', 'Dr. Kavya Rao', 3],
-        ['Embedded Systems Lab', 'Prof. Ravi Teja', 3]
+        ['Microprocessors Lab', 'Dr. Anitha Menon', 3]
     ],
     'ECE-B': [
-        ['Digital Electronics', 'Dr. Kavya Rao', 4],
-        ['Microprocessors', 'Prof. Ravi Teja', 4],
-        ['Signals and Systems', 'Prof. Naveen Reddy', 4],
+        ['Digital Electronics', 'Dr. Kavya Rao', 5],
+        ['Signals and Systems', 'Prof. Naveen Reddy', 5],
+        ['Microprocessors', 'Prof. Ravi Teja', 5],
         ['Communication Systems', 'Dr. Anitha Menon', 4],
-        ['Embedded Systems', 'Dr. Kavya Rao', 3],
-        ['Digital Electronics Lab', 'Dr. Anitha Menon', 3],
         ['Microprocessors Lab', 'Prof. Ravi Teja', 3],
-        ['Embedded Systems Lab', 'Prof. Ravi Teja', 3]
+        ['Digital Electronics Lab', 'Dr. Kavya Rao', 3]
+    ],
+    'EEE-A': [
+        ['Power Systems', 'Dr. Suresh Babu', 5],
+        ['Electrical Machines', 'Prof. Lakshmi Devi', 5],
+        ['Control Systems', 'Dr. Mahesh Gupta', 5],
+        ['Electrical Machines Lab', 'Prof. Lakshmi Devi', 3],
+        ['Power Systems Lab', 'Dr. Suresh Babu', 3]
+    ],
+    'CME-A': [
+        ['Computer Architecture', 'Dr. Sneha Nair', 5],
+        ['Programming', 'Prof. Vikram Kumar', 5],
+        ['Software Engineering', 'Dr. Meera Joshi', 5],
+        ['Programming Lab', 'Prof. Vikram Kumar', 3],
+        ['Computer Architecture Lab', 'Dr. Sneha Nair', 3]
+    ],
+    'MEC-A': [
+        ['Engineering Mechanics', 'Dr. Rajesh Pillai', 5],
+        ['Thermodynamics', 'Prof. Harish Chandra', 5],
+        ['Manufacturing Technology', 'Dr. Sunita Rani', 5],
+        ['Manufacturing Technology Lab', 'Dr. Sunita Rani', 3],
+        ['Thermodynamics Lab', 'Prof. Harish Chandra', 3]
+    ],
+    'CIVIL-A': [
+        ['Structural Engineering', 'Dr. Venkat Prasad', 5],
+        ['Surveying', 'Prof. Deepak Sinha', 5],
+        ['Concrete Technology', 'Dr. Neha Kulkarni', 5],
+        ['Surveying Lab', 'Prof. Deepak Sinha', 3],
+        ['Concrete Technology Lab', 'Dr. Neha Kulkarni', 3]
     ]
 };
 
@@ -312,7 +374,8 @@ function rowsFor(className) {
 const dataset = {
     meta: {
         institution: 'Institute of Engineering & Technology',
-        title: 'Semester V — Working Timetable (Demo Data)',
+        title: `Semester V — Working Timetable ${ACADEMIC_YEAR} (Demo Data)`,
+        academicYear: ACADEMIC_YEAR,
         primaryClass: 'CSE-A',
         days: DAYS,
         periods: PERIODS,
@@ -326,10 +389,7 @@ const dataset = {
             '7': { start: '15:10', end: '16:00' }
         }
     },
-    departments: [
-        { code: 'CSE', name: 'Computer Science & Engineering' },
-        { code: 'ECE', name: 'Electronics & Communication Engineering' }
-    ],
+    departments: DEPARTMENTS,
     rooms: ROOMS,
     subjects: SUBJECTS,
     faculty: FACULTY,
@@ -337,6 +397,7 @@ const dataset = {
         class: c.class,
         department: c.department,
         semester: c.semester,
+        academicYear: ACADEMIC_YEAR,
         room: c.room,
         rows: rowsFor(c.class)
     }))
@@ -364,7 +425,7 @@ function js(value, indent) {
 const header = `/**
  * Demo academic dataset — realistic fictional data for demonstrating the app.
  *
- * ${FACULTY.length} faculty across ${dataset.departments.length} departments, ${CLASSES.length} classes, ${SUBJECTS.length} subjects,
+ * ${FACULTY.length} faculty across ${dataset.departments.length} branches, ${CLASSES.length} classes, ${SUBJECTS.length} subjects,
  * ${ROOMS.length} rooms, Monday-Friday, periods 1-7.
  *
  * GENERATED FILE — produced by tools/generateDemoTimetable.js and committed as

@@ -34,10 +34,22 @@ scope — see [Future enhancements](#future-enhancements).
 - **Excel import (.xlsx)** — the primary structured input. Upload, preview,
   validate, then confirm.
 - **CSV import** — the same normalization pipeline, same result.
-- **Add Timetable** — create, edit and delete a scheduled period from the
-  dashboard. Faculty clashes, room clashes, duplicate slots and missing fields
-  are all rejected with a message naming the problem, and valid entries are
-  saved to PostgreSQL.
+- **Faculty Directory** — every faculty member with ID, name, branch,
+  designation, email, weekly load, and free/busy status at any slot you pick.
+  Searchable by name, ID, email or designation, and filterable by branch. The
+  dashboard's Total Faculty card opens it.
+- **Add Faculty** — register a new faculty member. A duplicate ID, a duplicate
+  email, an unknown branch and a malformed address are each rejected with a
+  message naming the problem. A new arrival is immediately offered as a
+  substitute and gets a sign-in account.
+- **Six branches** — CSE, ECE, EEE, CME, MEC and CIVIL, defined once in
+  `src/data/departments.js` and shared by the seed, the API and every filter.
+- **Add Timetable** — create, edit and delete a scheduled period, choosing a
+  branch and then a class. Faculty clashes, room clashes, duplicate slots and
+  missing fields are all rejected with a message naming the problem, and valid
+  entries are saved to PostgreSQL.
+- **Validation Report** — what the validator found in the loaded timetable,
+  reached from the dashboard's Conflicts card.
 - **PostgreSQL / Neon storage** — optional. Set `DATABASE_URL` and the
   timetable is stored, with tables created and demo data seeded automatically.
   Without it the app runs on the bundled demo dataset exactly as before.
@@ -96,7 +108,8 @@ tested directly and reused unchanged if the storage or transport changes.
 │   │   ├── session.js            signed-cookie sessions (no dependency)
 │   │   └── availabilityEngine.js the availability query engine
 │   ├── data/
-│   │   ├── demoTimetable.js      12-faculty demo dataset (generated)
+│   │   ├── departments.js        the six branches, defined once
+│   │   ├── demoTimetable.js      21-faculty demo dataset (generated)
 │   │   ├── users.js              demo account directory (faculty-derived)
 │   │   └── store.js              store: PostgreSQL, or in-memory fallback
 │   ├── db/
@@ -112,7 +125,7 @@ tested directly and reused unchanged if the storage or transport changes.
 │   └── routes/
 │       ├── timetable.js          grids, metadata, records
 │       ├── entries.js            add / edit / delete a timetable entry
-│       ├── faculty.js            roster and load
+│       ├── faculty.js            roster, branches, and adding a faculty member
 │       ├── availability.js       the read-only availability API
 │       ├── import.js             upload endpoints
 │       └── auth.js               sign-in, sign-out, session
@@ -156,6 +169,18 @@ existed keep working unchanged.
 A record exists for every faculty × day × period combination, so availability
 is a direct lookup rather than a scan across timetables. Multi-period labs
 become one record per period, keeping each coordinate individually addressable.
+
+A faculty member carries a profile alongside their schedule:
+
+```json
+{ "id": "FAC001", "name": "Dr. Arjun Rao", "department": "CSE",
+  "designation": "Professor", "email": "arjun.rao@college.edu",
+  "phone": null, "maxWeeklyPeriods": 20, "status": "active" }
+```
+
+Every profile field except the name and branch is optional, so a roster loaded
+from a spreadsheet — which carries none of them — still produces valid faculty
+records with nulls where the source said nothing.
 
 ---
 
@@ -264,11 +289,76 @@ point you at Quick Paste, rather than failing with an unexplained error.
 
 ---
 
+## The dashboard
+
+Every statistic is computed from live API responses — nothing on the dashboard
+is hard-coded. Most cards open the view behind their number:
+
+| Card | Opens |
+| --- | --- |
+| Total faculty | Faculty Directory |
+| Available faculty / Busy faculty | Faculty Availability |
+| Total classes / Scheduled periods | Master Timetable |
+| Total subjects | Add Timetable (the stored entries) |
+| Timetable slots / Tightest slot | Availability Summary |
+| Conflicts | Validation Report |
+
+The cards are real `<button>` elements, so they are reachable by keyboard and
+announced as actions rather than as static text.
+
+---
+
+## The faculty directory
+
+Reached from the sidebar or from the dashboard's Total Faculty card. Each row
+carries the faculty ID, name, branch, designation, email, busy and free period
+counts, weekly load, subjects and classes.
+
+Two filters and a search narrow the list: **Department** covers all six
+branches with a live count each, and **Search** matches a name, ID, email or
+designation. The **Free at** selector adds an availability column showing who
+is free or busy at that exact day and period, computed by the same engine the
+substitution lookup uses.
+
+### Adding a faculty member
+
+The form above the directory takes an ID, name and branch (all required) plus
+an optional designation, email, phone, weekly period cap and status. Validation
+happens in two places and reports every problem at once:
+
+| Rejected | Message |
+| --- | --- |
+| A missing required field | caught by the browser before any request is sent |
+| A malformed email | caught by the browser, and again by the server |
+| A duplicate faculty ID | `Faculty ID "FAC001" is already in use` |
+| A duplicate email | `Email "..." is already in use` |
+| An unknown branch | `Unknown department "XYZ". Valid: CSE, ECE, …` |
+
+A saved faculty member is immediately part of the roster: they appear in the
+directory and its branch filter, the Total Faculty count updates, they become
+selectable when adding a timetable entry, and they are offered as a substitute
+at every slot they are free. They also get a sign-in account, exactly as the
+seeded faculty do.
+
+Saving needs `DATABASE_URL`, for the same reason timetable edits do. Without it
+the form says so and the Save button is disabled; browsing, filtering and
+availability all keep working on the demo dataset.
+
+---
+
 ## Adding, editing and deleting entries
 
-**Add Timetable** in the sidebar creates a single scheduled period. Pick the
-class, day, period, subject, faculty, room and type, then save. Existing
-entries are listed below the form with Edit and Delete beside each.
+**Add Timetable** in the sidebar creates a single scheduled period. Pick a
+branch to narrow the class list, then the class, day, period, subject, faculty,
+room and type, and save. The class's branch, semester, academic year and home
+room are shown as you choose it. Existing entries are listed below the form
+with Edit and Delete beside each.
+
+**Master Timetable** shows one class's full week, filterable by branch, with
+the same academic context line. Every cell stays clickable: clicking one sends
+its day and period to the availability engine and shows the selected period,
+the available substitutes, the busy faculty with what each is teaching, and the
+read-only notice. Nothing is ever assigned automatically.
 
 Every save is checked before it is written, and all problems are reported at
 once rather than one at a time:
@@ -304,7 +394,10 @@ All responses are JSON.
 | `GET` | `/api/timetable/meta` | Days, periods, classes, timings |
 | `GET` | `/api/timetable/records` | Normalized records (`day`, `period`, `faculty`, `status` filters) |
 | `GET` | `/api/faculty` | Roster with busy/free counts (`department`, `search` filters) |
-| `GET` | `/api/faculty/departments` | Distinct departments |
+| `GET` | `/api/faculty?day=Monday&period=2` | …plus each member's free/busy status at that slot |
+| `POST` | `/api/faculty` | **Add a faculty member** (validated, then saved) |
+| `GET` | `/api/faculty/departments` | The six branches, with roster counts |
+| `GET` | `/api/faculty/designations` | Designation and status vocabularies |
 | `POST` | `/api/availability` | **Free faculty for a slot** |
 | `GET` | `/api/availability` | Same query over GET |
 | `GET` | `/api/availability/summary` | Totals for the dashboard |
@@ -385,7 +478,7 @@ npm test              # all suites
 npm run test:engine   # normalizer, validator, availability engine
 npm run test:api      # every endpoint, including Excel and CSV import
 npm run test:auth     # sessions, sign-in, and the AUTH_REQUIRED guard
-npm run test:db       # schema, seeding, round-trip and entry CRUD
+npm run test:db       # schema, migration, seeding, round-trip, entry and faculty CRUD
 npm run test:e2e      # click -> API -> engine -> displayed result
 ```
 
@@ -456,11 +549,11 @@ automatically at startup.
 
 | Table | Holds |
 | --- | --- |
-| `departments` | CSE, ECE |
+| `departments` | CSE, ECE, EEE, CME, MEC, CIVIL |
 | `rooms` | classrooms and labs, with capacity |
-| `faculty` | the roster, each in a department |
+| `faculty` | the roster: ID, name, branch, designation, email, phone, load cap, status |
 | `subjects` | theory and lab subjects, each in a department |
-| `classes` | CSE-A/B/C, ECE-A/B, each with a home room |
+| `classes` | CSE-A/B, ECE-A/B, EEE-A, CME-A, MEC-A, CIVIL-A — branch, semester, academic year, home room |
 | `periods` | period numbers and their start/end times |
 | `timetable` | one row per class + day + period |
 | `users` | sign-in accounts (the coordinator plus one per faculty) |
@@ -481,16 +574,39 @@ CREATE UNIQUE INDEX timetable_room_slot_unique ON timetable (room_id, day_of_wee
 so a double-booked faculty member or room is rejected by PostgreSQL even if
 something other than this application tries to insert one.
 
+### Upgrading an existing database
+
+`schema.sql` is applied on every startup and is safe to re-run: tables use
+`CREATE TABLE IF NOT EXISTS`, and columns added after the first release use
+`ALTER TABLE ... ADD COLUMN IF NOT EXISTS`. Upgrading a database created by an
+earlier version adds the new faculty profile columns and the class academic
+year **in place** — no table is dropped and no row is rewritten, so data
+already stored survives untouched.
+
 ### Demo data
 
-`src/data/demoTimetable.js` holds 12 fictional faculty across CSE and ECE, 5
-classes, 22 subjects (theory and lab), 10 rooms, and a full Monday–Friday
-P1–P7 week of 152 scheduled periods.
+`src/data/demoTimetable.js` holds 21 fictional faculty across all six branches,
+8 classes, 34 subjects (theory and lab), 16 classrooms and labs, and a full
+Monday–Friday P1–P7 week of 192 scheduled periods.
+
+| Branch | Faculty | Classes | Subjects include |
+| --- | --- | --- | --- |
+| CSE | 5 | CSE-A, CSE-B | Data Structures, DBMS, Operating Systems, Computer Networks, Web Technologies |
+| ECE | 4 | ECE-A, ECE-B | Digital Electronics, Signals and Systems, Microprocessors, Communication Systems |
+| EEE | 3 | EEE-A | Power Systems, Electrical Machines, Control Systems |
+| CME | 3 | CME-A | Computer Architecture, Programming, Software Engineering |
+| MEC | 3 | MEC-A | Engineering Mechanics, Thermodynamics, Manufacturing Technology |
+| CIVIL | 3 | CIVIL-A | Structural Engineering, Surveying, Concrete Technology |
+
+Every faculty member has a designation and an `@college.edu` address. The names
+and addresses are fictional and exist only for this demonstration — no real
+person's details appear anywhere in this project.
 
 It is a **generated file**. `tools/generateDemoTimetable.js` searches for a
 schedule that satisfies every constraint and writes the result out as plain
-data; the app never runs the generator. To change the demo timetable, edit the
-teaching plan in that script and re-run it:
+data; the app never runs the generator. To change the demo timetable — a new
+branch, another class, a different teaching plan — edit that script and re-run
+it:
 
 ```bash
 node tools/generateDemoTimetable.js
@@ -512,11 +628,13 @@ Structured for, but deliberately not implementing:
 - OCR / image timetable extraction (Excel and CSV remain the reliable path)
 - Automatic substitution assignment and persistence
 - Subject eligibility and "can teach this subject" checking
-- Workload balancing across faculty
+- Workload balancing across faculty, and enforcing the per-faculty period cap
+  (`maxWeeklyPeriods` is stored and displayed, but nothing rejects an entry for
+  exceeding it yet)
 - Notifications by email or messaging
-- Timetable conflict detection across departments
-- Attendance integration
-- PostgreSQL/Neon persistence
+- Editing and deactivating a faculty member from the UI (the directory adds and
+  lists; changing a record is a database operation for now)
+- Attendance integration (marks still live in the browser)
 
 ---
 

@@ -33,6 +33,7 @@
       <button type="button" class="nav-item" data-view="manage">Add Timetable</button>
       <button type="button" class="nav-item" data-view="faculty">Faculty Directory</button>
       <button type="button" class="nav-item" data-view="reports">Availability Summary</button>
+      <button type="button" class="nav-item" data-view="validation">Validation Report</button>
       <button type="button" class="nav-item" data-view="about">Settings / About</button>
     </nav>
 
@@ -178,10 +179,12 @@
           </div>
           <div class="card-body">
             <div id="manageStorageNote"></div>
+            <p class="muted" id="manageClassMeta" style="margin-bottom:14px;"></p>
             <form id="manageForm" autocomplete="off">
               <input type="hidden" id="manageId" value="" />
               <div class="controls">
-                <label class="field"><span>Class</span><select id="manageClass" required></select></label>
+                <label class="field"><span>Department</span><select id="manageDept"></select></label>
+                <label class="field"><span>Class / Section</span><select id="manageClass" required></select></label>
                 <label class="field"><span>Day</span><select id="manageDay" required></select></label>
                 <label class="field"><span>Period</span><select id="managePeriod" required></select></label>
                 <label class="field"><span>Subject</span><select id="manageSubject" required></select></label>
@@ -408,9 +411,13 @@ Dr. Priya Sharma, FREE, DBMS, DBMS"></textarea>
               <h2>Master Timetable</h2>
               <p>Every cell is clickable. Clicking sends its day and period to the availability engine.</p>
             </div>
-            <label class="field inline"><span>View</span><select id="ttView"></select></label>
+            <div class="head-actions">
+              <label class="field inline"><span>Department</span><select id="ttDept"></select></label>
+              <label class="field inline"><span>View</span><select id="ttView"></select></label>
+            </div>
           </div>
           <div class="card-body">
+            <p class="muted" id="ttMeta" style="margin-bottom:12px;"></p>
             <div class="table-scroll">
               <table class="timetable">
                 <thead id="ttHead"></thead>
@@ -432,22 +439,62 @@ Dr. Priya Sharma, FREE, DBMS, DBMS"></textarea>
         <div class="card">
           <div class="card-head">
             <div>
+              <h2>Add Faculty</h2>
+              <p>Register a new faculty member. Saved to the database and immediately available for substitution.</p>
+            </div>
+            <span class="pill" id="facultyBackend">Checking storage…</span>
+          </div>
+          <div class="card-body">
+            <div id="facultyStorageNote"></div>
+            <form id="facultyForm" autocomplete="off">
+              <div class="controls">
+                <label class="field"><span>Faculty ID <em class="req">*</em></span>
+                  <input type="text" id="facNewId" placeholder="e.g. FAC022" required /></label>
+                <label class="field"><span>Faculty name <em class="req">*</em></span>
+                  <input type="text" id="facNewName" placeholder="e.g. Dr. Anjali Rao" required /></label>
+                <label class="field"><span>Department <em class="req">*</em></span>
+                  <select id="facNewDept" required></select></label>
+                <label class="field"><span>Designation</span>
+                  <select id="facNewDesignation"></select></label>
+                <label class="field"><span>Email</span>
+                  <input type="email" id="facNewEmail" placeholder="name@college.edu" /></label>
+                <label class="field"><span>Phone</span>
+                  <input type="text" id="facNewPhone" placeholder="optional" /></label>
+                <label class="field"><span>Max weekly periods</span>
+                  <input type="number" id="facNewMax" min="1" max="60" placeholder="optional" /></label>
+                <label class="field"><span>Status</span>
+                  <select id="facNewStatus"></select></label>
+                <button type="submit" class="btn" id="facSave">Add faculty</button>
+                <button type="button" class="btn btn-ghost" id="facReset">Clear</button>
+              </div>
+            </form>
+            <div id="facultyResult" style="margin-top:16px;"></div>
+          </div>
+        </div>
+
+        <div class="card" style="margin-top:20px;">
+          <div class="card-head">
+            <div>
               <h2>Faculty Directory</h2>
-              <p>Roster with teaching load. Free periods are what availability draws on.</p>
+              <p>Every faculty member on record, with teaching load. Free periods are what availability draws on.</p>
             </div>
             <div class="head-actions">
               <label class="field inline"><span>Department</span><select id="facDept"></select></label>
-              <label class="field inline"><span>Search</span><input type="text" id="facSearch" placeholder="Name or ID" /></label>
+              <label class="field inline"><span>Search</span><input type="text" id="facSearch" placeholder="Name, ID or email" /></label>
+              <label class="field inline"><span>Free at</span><select id="facSlotDay"></select></label>
+              <label class="field inline"><span>&nbsp;</span><select id="facSlotPeriod"></select></label>
             </div>
           </div>
           <div class="card-body">
+            <p class="muted" id="facCount" style="margin-bottom:10px;"></p>
             <div class="table-scroll">
-              <table class="data">
+              <table class="data directory">
                 <thead>
                   <tr>
                     <th>Faculty ID</th><th>Name</th><th>Department</th>
-                    <th class="num">Busy</th><th class="num">Free</th><th class="num">Total</th>
-                    <th>Load</th><th>Subjects</th><th>Classes</th>
+                    <th>Designation</th><th>Email</th>
+                    <th class="num">Busy</th><th class="num">Free</th>
+                    <th>Load</th><th>Availability</th><th>Subjects</th><th>Classes</th>
                   </tr>
                 </thead>
                 <tbody id="facBody"></tbody>
@@ -476,6 +523,25 @@ Dr. Priya Sharma, FREE, DBMS, DBMS"></textarea>
       </section>
 
       <!-- ------------------------- ABOUT ----------------------------- -->
+      <!-- ---------------------- VALIDATION REPORT -------------------- -->
+      <section class="view" id="view-validation">
+        <div class="card">
+          <div class="card-head">
+            <div>
+              <h2>Validation Report</h2>
+              <p>What the validator found in the loaded timetable. Errors block a timetable from loading; warnings do not.</p>
+            </div>
+            <span class="pill" id="validationChip">Checking…</span>
+          </div>
+          <div class="card-body">
+            <div class="stats compact" id="validationStats"></div>
+            <div id="validationBody" style="margin-top:18px;">
+              <p class="muted">Loading the validation report…</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
       <section class="view" id="view-about">
         <div class="card">
           <div class="card-head"><div><h2>Settings / About</h2></div></div>

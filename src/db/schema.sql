@@ -30,6 +30,28 @@ CREATE TABLE IF NOT EXISTS faculty (
     email         TEXT
 );
 
+-- Faculty profile fields, added after the first release. ADD COLUMN IF NOT
+-- EXISTS upgrades an existing database in place: no table is dropped and no
+-- row is rewritten, so installed data survives the upgrade untouched.
+ALTER TABLE faculty ADD COLUMN IF NOT EXISTS designation TEXT;
+ALTER TABLE faculty ADD COLUMN IF NOT EXISTS phone TEXT;
+ALTER TABLE faculty ADD COLUMN IF NOT EXISTS max_weekly_periods INTEGER;
+ALTER TABLE faculty ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'active';
+
+DO $$
+BEGIN
+    -- Guarded because a repeat ALTER ... ADD CONSTRAINT is an error, and
+    -- ADD CONSTRAINT IF NOT EXISTS does not exist for CHECK constraints.
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'faculty_status_check') THEN
+        ALTER TABLE faculty ADD CONSTRAINT faculty_status_check
+            CHECK (status IN ('active', 'on_leave', 'inactive'));
+    END IF;
+END $$;
+
+-- Two faculty must not share an email address when one is given.
+CREATE UNIQUE INDEX IF NOT EXISTS faculty_email_unique
+    ON faculty (LOWER(email)) WHERE email IS NOT NULL;
+
 CREATE TABLE IF NOT EXISTS subjects (
     id            SERIAL PRIMARY KEY,
     code          TEXT NOT NULL UNIQUE,
@@ -46,6 +68,9 @@ CREATE TABLE IF NOT EXISTS classes (
     semester      INTEGER,
     home_room_id  INTEGER REFERENCES rooms(id) ON DELETE SET NULL
 );
+
+-- The academic year a class belongs to, shown alongside its semester.
+ALTER TABLE classes ADD COLUMN IF NOT EXISTS academic_year TEXT;
 
 -- Period definitions (start/end times shown in the grid header).
 CREATE TABLE IF NOT EXISTS periods (

@@ -23,6 +23,7 @@
         entries: '/api/timetable/entries',
         entryReference: '/api/timetable/entries/reference',
         storage: '/api/storage',
+        designations: '/api/faculty/designations',
         health: '/api/health',
         session: '/api/auth/session',
         logout: '/api/auth/logout'
@@ -38,6 +39,7 @@
         faculty: [],
         formats: null,
         reference: null,     // form options for Add Timetable
+        classMeta: {},       // class code -> department, semester, academic year
         editingId: null,     // entry currently loaded into the form
         activity: [],
         attendance: {}
@@ -132,6 +134,7 @@
         manage: 'Add Timetable',
         faculty: 'Faculty Directory',
         reports: 'Availability Summary',
+        validation: 'Validation Report',
         about: 'Settings / About'
     };
 
@@ -152,11 +155,12 @@
         });
         el('viewTitle').textContent = TITLES[name] || 'Dashboard';
 
-        if (name === 'faculty') loadFacultyTable();
+        if (name === 'faculty') { loadFacultyForm(); loadFacultyTable(); }
         if (name === 'reports') loadReports();
         if (name === 'attendance') loadAttendance();
         if (name === 'schedule') loadSchedule();
         if (name === 'manage') loadManage();
+        if (name === 'validation') loadValidation();
 
         var sidebar = el('sidebar');
         if (sidebar) sidebar.classList.remove('is-open');
@@ -389,11 +393,22 @@
     }
 
     // -------------------------------------------------------- dashboard
+    /**
+     * One dashboard statistic. When `view` is set the card becomes a button
+     * that opens that view — a real button, so it is keyboard reachable and
+     * announced as an action rather than as static text.
+     */
     function statCard(s) {
-        return '<div class="stat' + (s.tone ? ' is-' + s.tone : '') + '">' +
+        var body =
             '<div class="stat-label">' + esc(s.label) + '</div>' +
             '<div class="stat-value">' + esc(s.value) + '</div>' +
-            '<div class="stat-note">' + esc(s.note || '') + '</div></div>';
+            '<div class="stat-note">' + esc(s.note || '') + '</div>';
+        var classes = 'stat' + (s.tone ? ' is-' + s.tone : '');
+
+        if (!s.view) return '<div class="' + classes + '">' + body + '</div>';
+        return '<button type="button" class="' + classes + '" data-stat-view="' + esc(s.view) + '"' +
+            ' title="' + esc(s.linkLabel || 'Open') + '">' + body +
+            '<span class="stat-link">' + esc(s.linkLabel || 'Open') + ' →</span></button>';
     }
 
     /**
@@ -424,23 +439,32 @@
                 var conflicts = (meta.warnings || []).length;
 
                 el('dashboardStats').innerHTML = [
-                    { label: 'Total faculty', value: summary.totalFaculty, note: 'in the roster', tone: 'brand' },
+                    { label: 'Total faculty', value: summary.totalFaculty, note: 'in the roster', tone: 'brand',
+                      view: 'faculty', linkLabel: 'Faculty directory' },
                     { label: 'Available faculty', value: selected ? selected.available : '—',
-                      note: selected ? 'free at ' + selected.day + ' P' + selected.period : 'pick a slot', tone: 'ok' },
+                      note: selected ? 'free at ' + selected.day + ' P' + selected.period : 'pick a slot', tone: 'ok',
+                      view: 'availability', linkLabel: 'Faculty availability' },
                     { label: 'Busy faculty', value: selected ? selected.busy : '—',
-                      note: selected ? 'teaching at that slot' : 'pick a slot', tone: 'busy' },
+                      note: selected ? 'teaching at that slot' : 'pick a slot', tone: 'busy',
+                      view: 'availability', linkLabel: 'Faculty availability' },
                     { label: 'Total classes', value: summary.classes.length,
                       note: summary.classes.slice(0, 3).join(', ') +
-                            (summary.classes.length > 3 ? ' + ' + (summary.classes.length - 3) + ' more' : '') },
-                    { label: 'Total subjects', value: subjectCount, note: 'taught this semester' },
+                            (summary.classes.length > 3 ? ' + ' + (summary.classes.length - 3) + ' more' : ''),
+                      view: 'timetable', linkLabel: 'Master timetable' },
+                    { label: 'Total subjects', value: subjectCount, note: 'taught this semester',
+                      view: 'manage', linkLabel: 'Timetable entries' },
                     { label: 'Timetable slots', value: summary.days.length * summary.periods.length,
-                      note: summary.days.length + ' days × ' + summary.periods.length + ' periods' },
-                    { label: 'Scheduled periods', value: scheduled, note: 'across ' + summary.classes.length + ' class(es)' },
+                      note: summary.days.length + ' days × ' + summary.periods.length + ' periods',
+                      view: 'reports', linkLabel: 'Availability summary' },
+                    { label: 'Scheduled periods', value: scheduled, note: 'across ' + summary.classes.length + ' class(es)',
+                      view: 'timetable', linkLabel: 'Master timetable' },
                     { label: 'Conflicts', value: conflicts,
                       note: conflicts ? 'validator warnings — see below' : 'none reported',
-                      tone: conflicts ? 'busy' : 'ok' },
+                      tone: conflicts ? 'busy' : 'ok',
+                      view: 'validation', linkLabel: 'Validation report' },
                     { label: 'Tightest slot', value: tightest ? tightest.available : '—',
-                      note: tightest ? 'free at ' + tightest.day + ' P' + tightest.period : '' }
+                      note: tightest ? 'free at ' + tightest.day + ' P' + tightest.period : '',
+                      view: 'reports', linkLabel: 'Availability summary' }
                 ].map(statCard).join('');
             });
     }
@@ -527,34 +551,228 @@
     }
 
     // ---------------------------------------------------------- faculty
+    /** Human label for a faculty status code. */
+    function statusLabel(status) {
+        if (status === 'on_leave') return 'On leave';
+        if (status === 'inactive') return 'Inactive';
+        return 'Active';
+    }
+
     function loadFacultyTable() {
         var params = [];
         if (el('facDept').value) params.push('department=' + encodeURIComponent(el('facDept').value));
         if (el('facSearch').value) params.push('search=' + encodeURIComponent(el('facSearch').value));
+
+        // The slot selector is optional: with both halves chosen, the server
+        // adds each faculty member's free/busy status at that exact period.
+        var day = el('facSlotDay') ? el('facSlotDay').value : '';
+        var period = el('facSlotPeriod') ? el('facSlotPeriod').value : '';
+        if (day && period) {
+            params.push('day=' + encodeURIComponent(day));
+            params.push('period=' + encodeURIComponent(period));
+        }
         var url = API.faculty + (params.length ? '?' + params.join('&') : '');
 
         return getJson(url).then(function (data) {
+            var counter = el('facCount');
+            if (counter) {
+                counter.textContent = data.count + ' faculty member' + (data.count === 1 ? '' : 's') +
+                    (data.slot ? ' · availability shown for ' + data.slot.day + ' P' + data.slot.period : '');
+            }
             if (!data.faculty.length) {
                 el('facBody').innerHTML =
-                    '<tr><td colspan="9" class="muted">No faculty match this filter.</td></tr>';
+                    '<tr><td colspan="11" class="muted">No faculty match this filter.</td></tr>';
                 return;
             }
             el('facBody').innerHTML = data.faculty.map(function (f) {
                 var pct = f.totalPeriods ? Math.round((f.busyPeriods / f.totalPeriods) * 100) : 0;
+
+                var availability = '<span class="muted">—</span>';
+                if (f.availability) {
+                    availability = f.availability.status === 'free'
+                        ? '<span class="badge badge-free">Free</span>'
+                        : '<span class="badge badge-busy">Busy</span> ' +
+                          '<span class="muted">' + esc(f.availability.subject || '') +
+                          (f.availability.className ? ' · ' + esc(f.availability.className) : '') + '</span>';
+                } else if (f.status && f.status !== 'active') {
+                    availability = '<span class="badge badge-busy">' + esc(statusLabel(f.status)) + '</span>';
+                }
+
                 return '<tr>' +
                     '<td class="mono">' + esc(f.id) + '</td>' +
-                    '<td>' + esc(f.name) + '</td>' +
+                    '<td>' + esc(f.name) +
+                        (f.status && f.status !== 'active'
+                            ? ' <span class="muted">(' + esc(statusLabel(f.status)) + ')</span>' : '') + '</td>' +
                     '<td>' + esc(f.department) + '</td>' +
+                    '<td>' + esc(f.designation || '—') + '</td>' +
+                    '<td>' + (f.email
+                        ? '<a href="mailto:' + esc(f.email) + '">' + esc(f.email) + '</a>'
+                        : '<span class="muted">—</span>') + '</td>' +
                     '<td class="num"><span class="badge badge-busy">' + esc(f.busyPeriods) + '</span></td>' +
                     '<td class="num"><span class="badge badge-free">' + esc(f.freePeriods) + '</span></td>' +
-                    '<td class="num">' + esc(f.totalPeriods) + '</td>' +
-                    '<td><span class="loadbar" title="' + pct + '% of the week"><i style="width:' + pct + '%"></i></span></td>' +
-                    '<td>' + esc(f.subjects.join(', ') || '—') + '</td>' +
-                    '<td>' + esc(f.classes.join(', ') || '—') + '</td>' +
+                    '<td><span class="loadbar" title="' + pct + '% of the week' +
+                        (f.maxWeeklyPeriods ? ', cap ' + esc(f.maxWeeklyPeriods) : '') +
+                        '"><i style="width:' + pct + '%"></i></span></td>' +
+                    '<td>' + availability + '</td>' +
+                    '<td class="list" title="' + esc(f.subjects.join(', ')) + '">' +
+                        esc(f.subjects.join(', ') || '—') + '</td>' +
+                    '<td class="list" title="' + esc(f.classes.join(', ')) + '">' +
+                        esc(f.classes.join(', ') || '—') + '</td>' +
                     '</tr>';
             }).join('');
         });
     }
+
+    // ------------------------------------------------------- add faculty
+    function facultyNote(message, kind) {
+        var box = el('facultyResult');
+        if (!box) return;
+        box.innerHTML = message
+            ? '<div class="notice notice-' + (kind || 'info') + '">' + message + '</div>' : '';
+    }
+
+    function resetFacultyForm() {
+        ['facNewId', 'facNewName', 'facNewEmail', 'facNewPhone', 'facNewMax'].forEach(function (id) {
+            el(id).value = '';
+        });
+        if (el('facNewDept').options.length) el('facNewDept').selectedIndex = 0;
+        if (el('facNewDesignation').options.length) el('facNewDesignation').selectedIndex = 0;
+        el('facNewStatus').value = 'active';
+    }
+
+    /** Populate the Add Faculty form and say whether saving is possible. */
+    function loadFacultyForm() {
+        return Promise.all([
+            getJson(API.departments),
+            getJson(API.designations).catch(function () { return { designations: [], statuses: ['active'] }; }),
+            getJson(API.storage).catch(function () { return null; })
+        ]).then(function (results) {
+            var details = results[0].details || [];
+            fillSelect(el('facNewDept'), details.map(function (d) {
+                return { value: d.code, label: d.code + ' — ' + d.name };
+            }));
+            fillSelect(el('facNewDesignation'), [{ value: '', label: '— not stated —' }]
+                .concat(results[1].designations || []));
+            fillSelect(el('facNewStatus'), (results[1].statuses || ['active']).map(function (v) {
+                return { value: v, label: statusLabel(v) };
+            }), 'active');
+
+            var storage = results[2];
+            var editable = Boolean(storage && storage.editable);
+            var chip = el('facultyBackend');
+            if (chip) {
+                chip.textContent = editable ? 'Saving to PostgreSQL' : 'Read-only — no database';
+                chip.className = 'pill ' + (editable ? 'pill-ok' : 'pill-warn');
+            }
+            var note = el('facultyStorageNote');
+            if (note) {
+                note.innerHTML = editable ? '' :
+                    '<div class="notice notice-warn">New faculty cannot be saved because no database is ' +
+                    'configured. Set <code>DATABASE_URL</code> to your Neon connection string and restart. ' +
+                    'The directory below still lists everyone in the loaded dataset.' +
+                    (storage && storage.error ? '<br />Reported: ' + esc(storage.error) : '') + '</div>';
+            }
+            el('facSave').disabled = !editable;
+            return editable;
+        });
+    }
+
+    function saveFaculty(event) {
+        event.preventDefault();
+        var payload = {
+            id: el('facNewId').value,
+            name: el('facNewName').value,
+            department: el('facNewDept').value,
+            designation: el('facNewDesignation').value || null,
+            email: el('facNewEmail').value || null,
+            phone: el('facNewPhone').value || null,
+            maxWeeklyPeriods: el('facNewMax').value || null,
+            status: el('facNewStatus').value
+        };
+        var button = el('facSave');
+        button.disabled = true;
+        facultyNote('Saving…', 'info');
+
+        postJson(API.faculty, payload).then(function (res) {
+            button.disabled = false;
+            if (res.status >= 400) {
+                facultyNote(rejectionHtml(res.body), 'error');
+                return;
+            }
+            var added = res.body.faculty;
+            facultyNote('Added <strong>' + esc(added.id) + ' — ' + esc(added.name) + '</strong> (' +
+                esc(added.department) + '). They are now available for substitution.', 'ok');
+            logActivity('Added faculty ' + added.id + ' — ' + added.name);
+            resetFacultyForm();
+            // The roster changed, so every view counting faculty is stale.
+            loadFacultyTable();
+            loadDashboard();
+            refreshDepartmentFilters();
+        }).catch(function (err) {
+            button.disabled = false;
+            facultyNote('Could not save: ' + esc(err.message), 'error');
+        });
+    }
+
+    /** Re-read the branch list after the roster changes, keeping selections. */
+    function refreshDepartmentFilters() {
+        return getJson(API.departments).then(function (data) {
+            var options = (data.details || []).map(function (d) {
+                return { value: d.code, label: d.code + ' (' + d.facultyCount + ')' };
+            });
+            [['facDept', 'All departments'], ['availDept', 'All departments']].forEach(function (pair) {
+                var select = el(pair[0]);
+                if (!select) return;
+                var previous = select.value;
+                fillSelect(select, [{ value: '', label: pair[1] }].concat(options), previous);
+            });
+        });
+    }
+
+    // -------------------------------------------------- validation report
+    function loadValidation() {
+        return getJson(API.meta).then(function (meta) {
+            var warnings = meta.warnings || [];
+            var chip = el('validationChip');
+            if (chip) {
+                chip.textContent = warnings.length
+                    ? warnings.length + ' warning' + (warnings.length === 1 ? '' : 's')
+                    : 'No issues';
+                chip.className = 'pill ' + (warnings.length ? 'pill-warn' : 'pill-ok');
+            }
+
+            el('validationStats').innerHTML = [
+                { label: 'Errors', value: 0, note: 'a loaded timetable has none by definition', tone: 'ok' },
+                { label: 'Warnings', value: warnings.length,
+                  note: warnings.length ? 'listed below' : 'none reported',
+                  tone: warnings.length ? 'busy' : 'ok' },
+                { label: 'Source', value: meta.origin || '—', note: 'where this timetable came from' },
+                { label: 'Faculty', value: meta.facultyCount, note: 'in the loaded roster' }
+            ].map(statCard).join('');
+
+            if (!warnings.length) {
+                el('validationBody').innerHTML =
+                    '<div class="notice notice-ok">The loaded timetable raised no warnings. ' +
+                    'No faculty member is double-booked, no room hosts two classes at once, ' +
+                    'and every class covers its week.</div>';
+                return;
+            }
+
+            el('validationBody').innerHTML =
+                '<div class="notice notice-info">These are <strong>warnings</strong>, not errors. ' +
+                'A timetable with errors is refused at load time, so anything listed here was ' +
+                'accepted — it is reported so you can decide whether it is intended.</div>' +
+                '<div class="table-scroll" style="margin-top:14px;"><table class="data"><thead><tr>' +
+                '<th>Code</th><th>Detail</th></tr></thead><tbody>' +
+                warnings.map(function (w) {
+                    return '<tr><td class="mono">' + esc(w.code) + '</td><td>' + esc(w.message) + '</td></tr>';
+                }).join('') + '</tbody></table></div>';
+        }).catch(function (err) {
+            el('validationBody').innerHTML =
+                '<div class="notice notice-error">Could not load the report: ' + esc(err.message) + '</div>';
+        });
+    }
+
 
     // ---------------------------------------------------------- reports
     function loadReports() {
@@ -985,6 +1203,47 @@
         return value.indexOf('class:') === 0 ? '?class=' + encodeURIComponent(value.slice(6)) : '';
     }
 
+    /**
+     * Rebuild the Master Timetable's class list for the chosen department,
+     * keeping the current class selected when it belongs to that department.
+     */
+    function applyTimetableDepartment() {
+        var wanted = (el('ttDept') && el('ttDept').value) || '';
+        var meta = state.meta || { classes: [], primaryClass: null };
+        var classes = meta.classes.filter(function (code) {
+            return !wanted || (state.classMeta[code] || {}).department === wanted;
+        });
+        if (!classes.length) classes = meta.classes.slice();
+
+        var previous = (el('ttView').value || '').replace(/^class:/, '');
+        var keep = classes.indexOf(previous) >= 0 ? previous : classes[0];
+        fillSelect(el('ttView'), classes.map(function (c) {
+            var info = state.classMeta[c] || {};
+            return {
+                value: 'class:' + c,
+                label: 'Class — ' + c + (info.department ? ' (' + info.department + ')' : '')
+            };
+        }), 'class:' + keep);
+        describeTimetableClass();
+        return loadGrid(ttQuery(), 'ttHead', 'ttBody', jumpToAvailability);
+    }
+
+    /** The one-line academic context under the Master Timetable heading. */
+    function describeTimetableClass() {
+        var box = el('ttMeta');
+        if (!box) return;
+        var code = (el('ttView').value || '').replace(/^class:/, '');
+        var info = state.classMeta[code];
+        if (!info) { box.textContent = ''; return; }
+        box.textContent = [
+            code,
+            info.departmentName || info.department,
+            info.semester ? 'Semester ' + info.semester : null,
+            info.academicYear ? 'Academic year ' + info.academicYear : null,
+            info.room ? 'Home room ' + info.room : null
+        ].filter(Boolean).join(' · ');
+    }
+
     function onAvailabilitySelect(cell) {
         checkAvailability(cell, 'availResult', {
             department: el('availDept').value,
@@ -1016,6 +1275,9 @@
             fillSelect(el('attDay'), meta.days, meta.days[0]);
             fillSelect(el('attClass'), meta.classes, meta.primaryClass);
             fillSelect(el('availClass'), meta.classes, meta.primaryClass);
+            fillSelect(el('facSlotDay'), [{ value: '', label: '— any —' }].concat(meta.days));
+            fillSelect(el('facSlotPeriod'), [{ value: '', label: '— any —' }].concat(
+                meta.periods.map(function (p) { return { value: p, label: 'Period ' + p }; })));
 
             var views = meta.classes.map(function (c) {
                 return { value: 'class:' + c, label: 'Class — ' + c };
@@ -1029,7 +1291,8 @@
                 loadSourceCard(),
                 loadWorkloadCard(),
                 getJson(API.health),
-                getJson(API.importFormats).catch(function () { return null; })
+                getJson(API.importFormats).catch(function () { return null; }),
+                getJson(API.entryReference).catch(function () { return null; })
             ]);
         }).then(function (results) {
             var facultyData = results[0];
@@ -1051,9 +1314,22 @@
                 mine && facultyOptions.some(function (o) { return o.value === mine; })
                     ? mine : (facultyOptions[0] && facultyOptions[0].value));
 
-            fillSelect(el('facDept'), [{ value: '', label: 'All departments' }].concat(departments));
-            fillSelect(el('availDept'), [{ value: '', label: 'All departments' }].concat(departments));
+            var departmentOptions = (results[1].details || []).map(function (d) {
+                return { value: d.code, label: d.code + ' (' + d.facultyCount + ')' };
+            });
+            fillSelect(el('facDept'), [{ value: '', label: 'All departments' }].concat(departmentOptions));
+            fillSelect(el('availDept'), [{ value: '', label: 'All departments' }].concat(departmentOptions));
 
+            // Master Timetable: filter the class list down to one branch.
+            state.classMeta = {};
+            var reference = results[7];
+            if (reference) {
+                (reference.classes || []).forEach(function (c) { state.classMeta[c.code] = c; });
+            }
+            fillSelect(el('ttDept'), [{ value: '', label: 'All departments' }].concat(
+                (results[1].details || []).map(function (d) { return d.code; })));
+
+            applyTimetableDepartment();
             var query = ttQuery();
 
             var note = el('formatNote');
@@ -1209,7 +1485,12 @@
             var reference = results[0];
             state.reference = reference;
 
-            fillSelect(el('manageClass'), reference.classes.map(function (c) { return c.code; }));
+            reference.classes.forEach(function (c) { state.classMeta[c.code] = c; });
+            fillSelect(el('manageDept'), [{ value: '', label: 'All departments' }].concat(
+                (reference.departments || []).map(function (d) {
+                    return { value: d.code, label: d.code + ' — ' + d.name };
+                })), el('manageDept').value);
+            applyManageDepartment();
             fillSelect(el('manageDay'), reference.days);
             fillSelect(el('managePeriod'), reference.periods.map(function (p) {
                 return { value: p, label: 'Period ' + p };
@@ -1223,6 +1504,8 @@
             var previous = filter.value;
             fillSelect(filter, [{ value: '', label: 'All classes' }].concat(
                 reference.classes.map(function (c) { return c.code; })), previous);
+
+            el('manageClass').onchange = describeManageClass;
 
             // A lab subject implies a lab session; the user can still override.
             el('manageSubject').onchange = function () {
@@ -1242,6 +1525,54 @@
         }).catch(function (err) {
             manageNote('Could not load the form: ' + esc(err.message), 'error');
         });
+    }
+
+    /** Narrow the Add Timetable class list to the chosen department. */
+    function applyManageDepartment() {
+        var reference = state.reference;
+        if (!reference) return;
+        var wanted = el('manageDept').value;
+        var classes = reference.classes.filter(function (c) {
+            return !wanted || c.department === wanted;
+        });
+        if (!classes.length) classes = reference.classes.slice();
+
+        var previous = el('manageClass').value;
+        var keep = classes.some(function (c) { return c.code === previous; })
+            ? previous : (classes[0] && classes[0].code);
+        fillSelect(el('manageClass'), classes.map(function (c) { return c.code; }), keep);
+        describeManageClass();
+    }
+
+    /** Show the selected class's branch, semester and academic year. */
+    function describeManageClass() {
+        var box = el('manageClassMeta');
+        if (!box) return;
+        var info = state.classMeta[el('manageClass').value];
+        box.textContent = info
+            ? [
+                info.departmentName || info.department,
+                info.semester ? 'Semester ' + info.semester : null,
+                info.academicYear ? 'Academic year ' + info.academicYear : null,
+                info.room ? 'Home room ' + info.room : null
+            ].filter(Boolean).join(' · ')
+            : '';
+    }
+
+    /**
+     * Render a rejection. With several problems the joined sentence would just
+     * repeat the list, so show a lead-in and the list; with one, show it plain.
+     */
+    function rejectionHtml(body, fallback) {
+        var problems = (body && (body.problems ||
+            (body.conflicts || []).map(function (c) { return c.message; }))) || [];
+        if (problems.length > 1) {
+            return '<strong>Not saved.</strong> ' + problems.length + ' problems need fixing:' +
+                '<ul style="margin:8px 0 0 18px;">' + problems.map(function (d) {
+                    return '<li>' + esc(d) + '</li>';
+                }).join('') + '</ul>';
+        }
+        return '<strong>Not saved.</strong> ' + esc((body && body.error) || fallback || 'Request failed');
     }
 
     function saveEntry(event) {
@@ -1264,14 +1595,7 @@
             .then(function (res) {
                 button.disabled = false;
                 if (res.status >= 400) {
-                    var body = res.body || {};
-                    var detail = (body.problems || (body.conflicts || []).map(function (c) { return c.message; }) || []);
-                    manageNote('<strong>Not saved.</strong> ' + esc(body.error || 'Request failed') +
-                        (detail.length > 1
-                            ? '<ul style="margin:8px 0 0 18px;">' + detail.map(function (d) {
-                                return '<li>' + esc(d) + '</li>';
-                            }).join('') + '</ul>'
-                            : ''), 'error');
+                    manageNote(rejectionHtml(res.body), 'error');
                     return;
                 }
                 var entry = res.body.entry;
@@ -1330,6 +1654,13 @@
             button.addEventListener('click', function () { showView(button.dataset.view); });
         });
 
+        // Stat cards are re-rendered on every refresh, so the handler lives on
+        // the container rather than on each card.
+        el('dashboardStats').addEventListener('click', function (event) {
+            var card = event.target.closest('[data-stat-view]');
+            if (card) showView(card.dataset.statView);
+        });
+
         var toggle = el('sidebarToggle');
         if (toggle) {
             toggle.addEventListener('click', function () { el('sidebar').classList.toggle('is-open'); });
@@ -1357,7 +1688,20 @@
         });
 
         // --- master timetable
+        // --- faculty directory and add faculty
+        el('facultyForm').addEventListener('submit', saveFaculty);
+        el('facReset').addEventListener('click', function () {
+            resetFacultyForm();
+            facultyNote('');
+        });
+        el('facSlotDay').addEventListener('change', loadFacultyTable);
+        el('facSlotPeriod').addEventListener('change', loadFacultyTable);
+
+        // --- master timetable department filter
+        el('ttDept').addEventListener('change', applyTimetableDepartment);
+
         // --- add / edit timetable
+        el('manageDept').addEventListener('change', applyManageDepartment);
         el('manageForm').addEventListener('submit', saveEntry);
         el('manageReset').addEventListener('click', function () {
             fillManageForm(null);
@@ -1366,6 +1710,7 @@
         el('manageFilterClass').addEventListener('change', loadManageList);
 
         el('ttView').addEventListener('change', function () {
+            describeTimetableClass();
             loadGrid(ttQuery(), 'ttHead', 'ttBody', jumpToAvailability);
         });
 

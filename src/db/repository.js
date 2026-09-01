@@ -43,10 +43,12 @@ async function counts() {
  */
 async function loadSource(meta) {
     const [facultyRows, classRows, entryRows, periodRows, roomRows, subjectRows, deptRows] = await Promise.all([
-        db.query(`SELECT f.code, f.name, COALESCE(d.code, 'General') AS department
+        db.query(`SELECT f.code, f.name, COALESCE(d.code, 'General') AS department,
+                         f.designation, f.email, f.phone, f.max_weekly_periods, f.status
                     FROM faculty f LEFT JOIN departments d ON d.id = f.department_id
                    ORDER BY f.code`),
-        db.query(`SELECT c.code, c.semester, COALESCE(d.code, 'General') AS department, r.code AS room
+        db.query(`SELECT c.code, c.semester, c.academic_year,
+                         COALESCE(d.code, 'General') AS department, r.code AS room
                     FROM classes c
                     LEFT JOIN departments d ON d.id = c.department_id
                     LEFT JOIN rooms r ON r.id = c.home_room_id
@@ -111,6 +113,7 @@ async function loadSource(meta) {
             class: cls.code,
             department: cls.department,
             semester: cls.semester,
+            academicYear: cls.academic_year,
             room: cls.room,
             rows
         };
@@ -133,7 +136,16 @@ async function loadSource(meta) {
         subjects: subjectRows.rows.map(s => ({
             code: s.code, name: s.name, department: s.department, type: s.subject_type
         })),
-        faculty: facultyRows.rows.map(f => ({ id: f.code, name: f.name, department: f.department })),
+        faculty: facultyRows.rows.map(f => ({
+            id: f.code,
+            name: f.name,
+            department: f.department,
+            designation: f.designation,
+            email: f.email,
+            phone: f.phone,
+            maxWeeklyPeriods: f.max_weekly_periods,
+            status: f.status
+        })),
         classes
     };
 }
@@ -318,7 +330,8 @@ async function listSubjects() {
 
 async function listClasses() {
     const { rows } = await db.query(`
-        SELECT c.code, c.semester, COALESCE(d.code, 'General') AS department, r.code AS room
+        SELECT c.code, c.semester, c.academic_year AS "academicYear",
+               COALESCE(d.code, 'General') AS department, r.code AS room
           FROM classes c
           LEFT JOIN departments d ON d.id = c.department_id
           LEFT JOIN rooms r ON r.id = c.home_room_id
@@ -326,9 +339,93 @@ async function listClasses() {
     return rows;
 }
 
+async function listDepartments() {
+    const { rows } = await db.query(`
+        SELECT d.code, d.name, COUNT(f.id)::int AS "facultyCount"
+          FROM departments d
+          LEFT JOIN faculty f ON f.department_id = d.id
+         GROUP BY d.code, d.name
+         ORDER BY d.code`);
+    return rows;
+}
+
+/**
+ * Insert one faculty member.
+ *
+ * Uniqueness of the code and the email is checked here so both can be
+ * reported together, and is guaranteed by the UNIQUE constraints regardless.
+ */
+async function addFaculty(member) {
+    return db.withTransaction(async client => {
+        const problems = [];
+
+        const byCode = await client.query('SELECT 1 FROM faculty WHERE UPPER(code) = UPPER($1)', [member.id]);
+        if (byCode.rows.length) problems.push(`Faculty ID "${member.id}" is already in use`);
+
+        const byName = await client.query('SELECT 1 FROM faculty WHERE UPPER(name) = UPPER($1)', [member.name]);
+        if (byName.rows.length) problems.push(`A faculty member named "${member.name}" already exists`);
+
+        if (member.email) {
+            const byEmail = await client.query(
+                'SELECT 1 FROM faculty WHERE LOWER(email) = LOWER($1)', [member.email]);
+            if (byEmail.rows.length) problems.push(`Email "${member.email}" is already in use`);
+        }
+
+        const dept = await client.query('SELECT id FROM departments WHERE UPPER(code) = UPPER($1)',
+            [member.department]);
+        if (!dept.rows.length) problems.push(`Unknown department "${member.department}"`);
+
+        if (problems.length) {
+            const error = new Error(problems.join('; '));
+            error.code = 'DUPLICATE_FACULTY';
+            error.status = 409;
+            error.details = problems;
+            throw error;
+        }
+
+        const { rows } = await client.query(`
+            INSERT INTO faculty (code, name, department_id, designation, email, phone,
+                                 max_weekly_periods, status)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            RETURNING id`,
+            [member.id, member.name, dept.rows[0].id, member.designation, member.email,
+             member.phone, member.maxWeeklyPeriods, member.status]);
+
+        // A sign-in account, matching how the demo directory derives one per
+        // faculty member, so a new arrival can sign in like everybody else.
+        await client.query(`
+            INSERT INTO users (username, name, role, department_id, faculty_id)
+            VALUES ($1, $2, 'faculty', $3, $4)
+            ON CONFLICT (username) DO NOTHING`,
+            [usernameFor(member.name), member.name, dept.rows[0].id, rows[0].id]);
+
+        return getFaculty(rows[0].id, client);
+    });
+}
+
+/** The username convention shared with src/data/users.js. */
+function usernameFor(name) {
+    return String(name).toLowerCase()
+        .replace(/^(dr|prof|mr|mrs|ms)\.?\s+/, '')
+        .replace(/[^a-z0-9]+/g, '.')
+        .replace(/^\.|\.$/g, '');
+}
+
+async function getFaculty(id, client) {
+    const runner = client || db;
+    const { rows } = await runner.query(`
+        SELECT f.code AS id, f.name, COALESCE(d.code, 'General') AS department,
+               f.designation, f.email, f.phone,
+               f.max_weekly_periods AS "maxWeeklyPeriods", f.status
+          FROM faculty f LEFT JOIN departments d ON d.id = f.department_id
+         WHERE f.id = $1`, [id]);
+    return rows[0] || null;
+}
+
 module.exports = {
     isEmpty, counts, loadSource,
     listEntries, getEntry, addEntry, updateEntry, deleteEntry,
-    listRooms, listSubjects, listClasses,
+    listRooms, listSubjects, listClasses, listDepartments,
+    addFaculty, getFaculty, usernameFor,
     DAY_ORDER
 };

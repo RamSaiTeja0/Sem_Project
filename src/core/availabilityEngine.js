@@ -111,21 +111,46 @@ function createEngine(normalized) {
         normalizeDay(input) { return normalizeDayName(input, days); },
         normalizePeriod(input) { return normalizePeriodNumber(input, periods); },
 
-        /** Per-faculty load, for the Faculty Management section. */
-        getFacultyStats() {
+        /**
+         * Per-faculty profile and load, for the Faculty Directory.
+         *
+         * @param options.day     with `period`, adds `availability` — whether
+         *                        this faculty is free or busy at that slot,
+         *                        and what they are teaching if busy.
+         */
+        getFacultyStats(options = {}) {
+            const slotDay = options.day || null;
+            const slotPeriod = options.period == null ? null : options.period;
+            const total = days.length * periods.length;
+
             return faculty.map(member => {
                 const busy = normalized.busyRecords.filter(r => r.faculty === member.name);
-                const total = days.length * periods.length;
-                return {
+                const stats = {
                     id: member.id,
                     name: member.name,
                     department: member.department,
+                    designation: member.designation || null,
+                    email: member.email || null,
+                    phone: member.phone || null,
+                    maxWeeklyPeriods: member.maxWeeklyPeriods == null ? null : member.maxWeeklyPeriods,
+                    status: member.status || 'active',
                     busyPeriods: busy.length,
                     freePeriods: total - busy.length,
                     totalPeriods: total,
                     subjects: [...new Set(busy.map(r => r.subject).filter(Boolean))].sort(),
                     classes: [...new Set(busy.map(r => r.className).filter(Boolean))].sort()
                 };
+
+                if (slotDay && slotPeriod != null) {
+                    const at = busy.find(r => r.day === slotDay && r.period === slotPeriod);
+                    stats.availability = at
+                        ? {
+                            day: slotDay, period: slotPeriod, status: 'busy',
+                            subject: at.subject, className: at.className, room: at.room
+                        }
+                        : { day: slotDay, period: slotPeriod, status: 'free' };
+                }
+                return stats;
             });
         },
 

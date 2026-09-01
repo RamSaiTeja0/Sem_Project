@@ -159,7 +159,7 @@ async function browserRun(playwright) {
                 'Dashboard', 'My Schedule', 'Adjust / Substitute', 'Faculty Availability',
                 'Upload Paper Sheet', 'Attendance Track',
                 'Master Timetable', 'Add Timetable', 'Faculty Directory',
-                'Availability Summary', 'Settings / About'
+                'Availability Summary', 'Validation Report', 'Settings / About'
             ]);
             assert.strictEqual(await page.locator('.nav a[href="/"]').count(), 1, 'a Home link');
             assert.strictEqual(await page.locator('#sidebarLogout').count(), 1, 'a Logout control');
@@ -172,7 +172,7 @@ async function browserRun(playwright) {
                 .map(t => t.trim());
             ['Total faculty', 'Available faculty', 'Busy faculty', 'Timetable slots', 'Conflicts']
                 .forEach(label => assert.ok(labels.includes(label), 'missing stat card: ' + label));
-            assert.match(await page.locator('#topbarMeta').textContent(), /12 faculty/);
+            assert.match(await page.locator('#topbarMeta').textContent(), /21 faculty/);
             assert.ok((await page.locator('#workloadCard table.data tbody tr').count()) > 0, 'workload rows');
         });
 
@@ -226,9 +226,9 @@ async function browserRun(playwright) {
 
             const shown = (await page.locator('#availResult ul.faculty-list:not(.busy-list) li').allTextContents())
                 .map(t => t.replace(/✓/g, '').trim());
-            assert.strictEqual(shown.length, 8);
+            assert.strictEqual(shown.length, 17);
             assert.ok(!shown.some(t => t.startsWith('Prof. Kiran Reddy')), 'the teaching faculty is excluded');
-            assert.ok(!shown.some(t => t.startsWith('Dr. Priya Sharma')), 'busy elsewhere, excluded');
+            assert.ok(!shown.some(t => t.startsWith('Prof. Lakshmi Devi')), 'busy elsewhere, excluded');
 
             assert.strictEqual(await page.locator('#availBody .slot-btn.is-selected').count(), 1);
             assert.match(await page.locator('#availResult .slot-title').textContent(), /Monday — Period 2/);
@@ -242,7 +242,7 @@ async function browserRun(playwright) {
             // Busy faculty are listed alongside the free ones.
             const busy = (await page.locator('#availResult .busy-list li').allTextContents())
                 .map(t => t.replace(/✗/g, '').trim());
-            // Three others teach at Monday P2, in CSE-B, CSE-C and ECE-A.
+            // Three others teach at Monday P2, in other classes and branches.
             assert.strictEqual(busy.length, 3, 'three faculty are busy elsewhere');
             busy.forEach(entry => assert.ok(!shown.includes(entry), 'busy faculty are never listed free'));
 
@@ -274,7 +274,9 @@ async function browserRun(playwright) {
                     return (await res.json()).availableFaculty;
                 }, { day, period, faculty: sent.faculty });
                 const shown = (await page.locator('#availResult ul.faculty-list:not(.busy-list) li').allTextContents())
-                    .map(t => t.replace(/✓/g, '').replace(/\s*(CSE|ECE|General)\s*$/, '').trim());
+                    // Each entry ends with the faculty's department badge; strip
+                    // whatever branch it names rather than a fixed list.
+                    .map(t => t.replace(/✓/g, '').replace(/\s*[A-Z]{2,6}\s*$/, '').trim());
                 assert.deepStrictEqual(shown, api, `${day} P${period} display must match the engine`);
             }
         });
@@ -320,7 +322,7 @@ async function browserRun(playwright) {
         await checkAsync('faculty directory and reports render, with working filters', async () => {
             await page.click('.nav-item[data-view="faculty"]');
             await page.waitForSelector('#facBody tr');
-            assert.strictEqual(await page.locator('#facBody tr').count(), 12);
+            assert.strictEqual(await page.locator('#facBody tr').count(), 21);
 
             await page.selectOption('#facDept', 'ECE');
             await page.waitForFunction(() => document.querySelectorAll('#facBody tr').length === 4);

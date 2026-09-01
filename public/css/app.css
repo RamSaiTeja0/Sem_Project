@@ -396,3 +396,34 @@ th.num { text-align: right; }
 .entry-scroll thead th { position: sticky; top: 0; z-index: 1; }
 
 .row-actions { display: flex; gap: 8px; justify-content: flex-end; white-space: nowrap; }
+
+/* Required-field marker in a form label. */
+.field .req { color: var(--danger-700); font-style: normal; font-weight: 700; }
+
+/* A stat card that opens the view behind its number. Rendered as a button so
+   it is reachable by keyboard and announced as an action, not as static text. */
+button.stat {
+  font: inherit; text-align: left; width: 100%;
+  cursor: pointer; appearance: none;
+  transition: border-color 0.12s ease, box-shadow 0.12s ease, transform 0.12s ease;
+}
+button.stat:hover { border-color: var(--brand-400); box-shadow: var(--shadow); transform: translateY(-1px); }
+button.stat:focus-visible { outline: 2px solid var(--brand-500); outline-offset: 2px; }
+button.stat .stat-link {
+  display: block; margin-top: 8px;
+  font-size: 0.74rem; font-weight: 650; letter-spacing: 0.02em;
+  color: var(--brand-700);
+}
+
+/* ========================== faculty directory ========================= */
+/* Eleven columns do not fit a laptop viewport. Rather than squashing names
+   onto two lines and clipping the last column, the table keeps its natural
+   width and the wrapper scrolls. */
+.data.directory { min-width: 1180px; }
+.data.directory td, .data.directory th { white-space: nowrap; }
+
+/* The two list columns are the ones that genuinely vary in length; cap them
+   and keep the full text in the title attribute. */
+.data.directory td.list {
+  max-width: 220px; overflow: hidden; text-overflow: ellipsis;
+}

@@ -17,6 +17,7 @@ const path = require('path');
 const db = require('./pool');
 const repository = require('./repository');
 const demoTimetable = require('../data/demoTimetable');
+const { DEPARTMENTS } = require('../data/departments');
 const { normalize } = require('../core/normalizer');
 
 const SCHEMA_PATH = path.join(__dirname, 'schema.sql');
@@ -42,9 +43,16 @@ async function seed(dataset = demoTimetable, options = {}) {
 
     await db.withTransaction(async client => {
         // ---- departments ----
-        const departments = dataset.departments && dataset.departments.length
-            ? dataset.departments
-            : [...new Set(normalized.faculty.map(f => f.department))].map(code => ({ code, name: code }));
+        // The canonical branch list first, then anything else the dataset
+        // mentions, so every branch is selectable even before a faculty
+        // member has been assigned to it.
+        const declaredDepartments = dataset.departments || [];
+        const mentioned = [...new Set(normalized.faculty.map(f => f.department))]
+            .filter(code => !DEPARTMENTS.some(d => d.code === code) &&
+                            !declaredDepartments.some(d => d.code === code))
+            .map(code => ({ code, name: code }));
+        const departments = [...DEPARTMENTS, ...declaredDepartments, ...mentioned]
+            .filter((dept, index, all) => all.findIndex(d => d.code === dept.code) === index);
         for (const dept of departments) {
             await client.query(
                 `INSERT INTO departments (code, name) VALUES ($1, $2)
@@ -67,10 +75,14 @@ async function seed(dataset = demoTimetable, options = {}) {
         // ---- faculty ----
         for (const member of normalized.faculty) {
             await client.query(
-                `INSERT INTO faculty (code, name, department_id)
-                 VALUES ($1, $2, (SELECT id FROM departments WHERE code = $3))
+                `INSERT INTO faculty (code, name, department_id, designation, email, phone,
+                                      max_weekly_periods, status)
+                 VALUES ($1, $2, (SELECT id FROM departments WHERE code = $3), $4, $5, $6, $7, $8)
                  ON CONFLICT (code) DO NOTHING`,
-                [member.id, member.name, member.department]);
+                [member.id, member.name, member.department, member.designation || null,
+                 member.email || null, member.phone || null,
+                 member.maxWeeklyPeriods == null ? null : member.maxWeeklyPeriods,
+                 member.status || 'active']);
         }
 
         // ---- subjects ----
@@ -96,11 +108,13 @@ async function seed(dataset = demoTimetable, options = {}) {
         // ---- classes ----
         for (const cls of dataset.classes || []) {
             await client.query(
-                `INSERT INTO classes (code, department_id, semester, home_room_id)
-                 VALUES ($1, (SELECT id FROM departments WHERE code = $2), $3,
-                         (SELECT id FROM rooms WHERE code = $4))
+                `INSERT INTO classes (code, department_id, semester, academic_year, home_room_id)
+                 VALUES ($1, (SELECT id FROM departments WHERE code = $2), $3, $4,
+                         (SELECT id FROM rooms WHERE code = $5))
                  ON CONFLICT (code) DO NOTHING`,
-                [cls.class, cls.department || null, cls.semester || null, cls.room || null]);
+                [cls.class, cls.department || null, cls.semester || null,
+                 cls.academicYear || (dataset.meta && dataset.meta.academicYear) || null,
+                 cls.room || null]);
         }
 
         // ---- periods ----

@@ -71,9 +71,9 @@ async function run() {
         assert.deepStrictEqual(meta.body.days, ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday']);
         assert.deepStrictEqual(meta.body.periods, [1, 2, 3, 4, 5, 6, 7]);
         assert.strictEqual(meta.body.primaryClass, 'CSE-A');
-        assert.strictEqual(meta.body.facultyCount, 12);
+        assert.strictEqual(meta.body.facultyCount, 21);
         assert.deepStrictEqual(meta.body.classes.slice().sort(),
-            ['CSE-A', 'CSE-B', 'CSE-C', 'ECE-A', 'ECE-B']);
+            ['CIVIL-A', 'CME-A', 'CSE-A', 'CSE-B', 'ECE-A', 'ECE-B', 'EEE-A', 'MEC-A']);
     });
 
     const grid = await get('/api/timetable');
@@ -112,7 +112,7 @@ async function run() {
     const faculty = await get('/api/faculty');
     check('GET /api/faculty returns the roster with free/busy counts', () => {
         assert.strictEqual(faculty.status, 200);
-        assert.strictEqual(faculty.body.count, 12);
+        assert.strictEqual(faculty.body.count, 21);
         faculty.body.faculty.forEach(f => {
             assert.strictEqual(f.busyPeriods + f.freePeriods, f.totalPeriods);
             assert.ok(f.id && f.name && f.department);
@@ -126,6 +126,62 @@ async function run() {
         filtered.body.faculty.forEach(f => assert.strictEqual(f.department, 'ECE'));
         assert.strictEqual(searched.body.count, 1);
         assert.strictEqual(searched.body.faculty[0].name, 'Dr. Arjun Rao');
+    });
+
+    const departments = await get('/api/faculty/departments');
+    check('GET /api/faculty/departments lists all six branches with counts', () => {
+        assert.strictEqual(departments.status, 200);
+        assert.deepStrictEqual(departments.body.departments.slice().sort(),
+            ['CIVIL', 'CME', 'CSE', 'ECE', 'EEE', 'MEC']);
+        departments.body.details.forEach(d => {
+            assert.ok(d.name && d.name !== d.code, `${d.code} has no full name`);
+            assert.ok(Number.isInteger(d.facultyCount), `${d.code} has no roster count`);
+        });
+        const total = departments.body.details.reduce((sum, d) => sum + d.facultyCount, 0);
+        assert.strictEqual(total, 21, 'the branch counts must add up to the roster');
+    });
+
+    const perBranch = await Promise.all(
+        ['CSE', 'ECE', 'EEE', 'CME', 'MEC', 'CIVIL'].map(code =>
+            get('/api/faculty?department=' + code).then(res => ({ code, res }))));
+    check('every branch filter returns only that branch', () => {
+        perBranch.forEach(({ code, res }) => {
+            assert.ok(res.body.count > 0, `${code} has no faculty`);
+            res.body.faculty.forEach(f => assert.strictEqual(f.department, code));
+        });
+    });
+
+    const profiled = await get('/api/faculty?search=FAC001');
+    check('a faculty record carries the full profile', () => {
+        const member = profiled.body.faculty[0];
+        assert.strictEqual(member.id, 'FAC001');
+        assert.strictEqual(member.department, 'CSE');
+        assert.ok(member.designation, 'designation is reported');
+        assert.match(member.email, /@/);
+        assert.strictEqual(member.status, 'active');
+        assert.ok(member.busyPeriods > 0 && member.freePeriods > 0);
+    });
+
+    const atSlot = await get('/api/faculty?day=Monday&period=2');
+    check('faculty can be listed with availability at one slot', () => {
+        assert.strictEqual(atSlot.status, 200);
+        assert.deepStrictEqual(atSlot.body.slot, { day: 'Monday', period: 2 });
+        const busy = atSlot.body.faculty.filter(f => f.availability.status === 'busy');
+        assert.strictEqual(busy.length, 4);
+        busy.forEach(f => assert.ok(f.availability.subject));
+    });
+
+    const badSlot = await get('/api/faculty?day=Funday&period=2');
+    check('an invalid slot on the faculty list is a 400', () => {
+        assert.strictEqual(badSlot.status, 400);
+        assert.strictEqual(badSlot.body.code, 'INVALID_DAY');
+    });
+
+    const addWithoutDb = await post('/api/faculty', { id: 'X1', name: 'Dr. Nobody', department: 'CSE' });
+    check('adding faculty without a database is refused, not faked', () => {
+        assert.strictEqual(addWithoutDb.status, 503);
+        assert.strictEqual(addWithoutDb.body.code, 'DATABASE_REQUIRED');
+        assert.match(addWithoutDb.body.error, /DATABASE_URL/);
     });
 
     const records = await get('/api/timetable/records?day=Monday&period=2&status=busy');
@@ -148,7 +204,7 @@ async function run() {
         assert.strictEqual(availability.body.day, 'Monday');
         assert.strictEqual(availability.body.period, 2);
         assert.strictEqual(availability.body.subject, 'Operating Systems');
-        assert.strictEqual(availability.body.totalAvailable, 8);
+        assert.strictEqual(availability.body.totalAvailable, 17);
         assert.ok(Array.isArray(availability.body.availableFaculty));
         assert.strictEqual(availability.body.readOnly, true);
     });
@@ -156,7 +212,7 @@ async function run() {
     check('busy faculty never appear in availableFaculty', () => {
         const busy = availability.body.busy.map(b => b.faculty);
         assert.deepStrictEqual(busy.sort(), [
-            'Dr. Priya Sharma', 'Dr. Rahul Varma', 'Prof. Kiran Reddy', 'Prof. Ravi Teja'
+            'Dr. Meera Joshi', 'Prof. Kiran Reddy', 'Prof. Lakshmi Devi', 'Prof. Ravi Teja'
         ]);
         busy.forEach(name => assert.ok(!availability.body.availableFaculty.includes(name)));
     });
@@ -182,8 +238,8 @@ async function run() {
     const summary = await get('/api/availability/summary?day=Monday&period=2');
     check('GET /api/availability/summary reports totals for a slot', () => {
         assert.strictEqual(summary.status, 200);
-        assert.strictEqual(summary.body.totalFaculty, 12);
-        assert.strictEqual(summary.body.selected.available, 8);
+        assert.strictEqual(summary.body.totalFaculty, 21);
+        assert.strictEqual(summary.body.selected.available, 17);
         assert.strictEqual(summary.body.selected.busy, 4);
         assert.strictEqual(summary.body.slots.length, 35);
     });
@@ -222,7 +278,7 @@ async function run() {
 
     const stillDemo = await get('/api/timetable/meta');
     check('previewing did not change the loaded timetable', () => {
-        assert.strictEqual(stillDemo.body.facultyCount, 12);
+        assert.strictEqual(stillDemo.body.facultyCount, 21);
         assert.strictEqual(stillDemo.body.primaryClass, 'CSE-A');
     });
 
@@ -262,7 +318,7 @@ async function run() {
 
     const afterFailures = await get('/api/timetable/meta');
     check('failed imports leave the loaded timetable untouched', () => {
-        assert.strictEqual(afterFailures.body.facultyCount, 12);
+        assert.strictEqual(afterFailures.body.facultyCount, 21);
         assert.strictEqual(afterFailures.body.origin, 'demo-data');
     });
 

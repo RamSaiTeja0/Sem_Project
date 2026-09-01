@@ -135,6 +135,8 @@ module.exports = {
     get origin() { return state.origin; },
     get loadedAt() { return state.loadedAt; },
     get normalized() { return state.normalized; },
+    /** The raw source the live dataset was built from, as loaded. */
+    get source() { return state.source; },
     get usingDatabase() { return databaseBacked; },
     get databaseError() { return databaseError; },
     get databaseConfigured() { return db.isConfigured(); }

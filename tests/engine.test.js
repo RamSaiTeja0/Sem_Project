@@ -32,7 +32,7 @@ check('demo data yields the whole roster over 5 days x 7 periods', () => {
     assert.strictEqual(meta.facultyCount, ROSTER);
     assert.strictEqual(meta.days.length, 5);
     assert.strictEqual(meta.periods.length, 7);
-    assert.strictEqual(meta.classes.length, 5);
+    assert.strictEqual(meta.classes.length, demo.classes.length);
     assert.strictEqual(engine.getRecords().length, ROSTER * 5 * 7);
 });
 
@@ -50,6 +50,30 @@ check('the demo dataset never double-books a faculty member or a room', () => {
             `room ${r.room} is double-booked at ${r.day} P${r.period}`);
         rooms.set(rk, r);
     });
+});
+
+check('the roster covers all six branches, each with a profile', () => {
+    const stats = engine.getFacultyStats();
+    const branches = [...new Set(stats.map(f => f.department))].sort();
+    assert.deepStrictEqual(branches, ['CIVIL', 'CME', 'CSE', 'ECE', 'EEE', 'MEC']);
+    assert.ok(stats.length >= 15 && stats.length <= 25, `roster of ${stats.length} is outside 15-25`);
+    stats.forEach(f => {
+        assert.ok(f.designation, `${f.name} has no designation`);
+        assert.match(f.email || '', /^[^\s@]+@[^\s@]+\.[^\s@]+$/, `${f.name} has no valid email`);
+        assert.strictEqual(f.status, 'active');
+    });
+});
+
+check('faculty stats can report availability at one slot', () => {
+    const plain = engine.getFacultyStats();
+    assert.ok(plain.every(f => f.availability === undefined), 'no slot asked for, none reported');
+
+    const atSlot = engine.getFacultyStats({ day: 'Monday', period: 2 });
+    const busy = atSlot.filter(f => f.availability.status === 'busy');
+    const free = atSlot.filter(f => f.availability.status === 'free');
+    assert.strictEqual(busy.length + free.length, atSlot.length);
+    assert.strictEqual(busy.length, engine.getAvailability('Monday', 2).totalBusy);
+    busy.forEach(f => assert.ok(f.availability.subject, `${f.name} is busy but teaching nothing`));
 });
 
 check('every faculty member has both busy and free periods', () => {
@@ -85,14 +109,14 @@ check('every record has the documented shape and a busy/free status', () => {
 });
 
 check('a multi-period lab marks every period it spans', () => {
-    // CSE-A Monday P5-P7 is Dr. Priya Sharma's DBMS Lab in CS-LAB-1.
+    // ECE-A Monday P5-P7 is Prof. Naveen Reddy's Digital Electronics Lab.
     [5, 6, 7].forEach(period => {
         const slot = engine.getSlot('Monday', period);
-        const busy = slot.busy.filter(r => r.faculty === 'Dr. Priya Sharma');
-        assert.strictEqual(busy.length, 1, `Dr. Priya Sharma must be busy Monday P${period}`);
-        assert.strictEqual(busy[0].subject, 'DBMS Lab');
+        const busy = slot.busy.filter(r => r.faculty === 'Prof. Naveen Reddy');
+        assert.strictEqual(busy.length, 1, `Prof. Naveen Reddy must be busy Monday P${period}`);
+        assert.strictEqual(busy[0].subject, 'Digital Electronics Lab');
         assert.strictEqual(busy[0].type, 'lab');
-        assert.strictEqual(busy[0].room, 'CS-LAB-1');
+        assert.strictEqual(busy[0].room, 'EC-LAB-1');
     });
 });
 
@@ -100,26 +124,24 @@ console.log('\n[2] Availability');
 
 check('[test 1] Monday P2 returns the correct free faculty', () => {
     const result = engine.getAvailability('Monday', 2);
-    // Busy: Kiran Reddy (CSE-A OS), Priya Sharma (CSE-B OS),
-    //       Rahul Varma (CSE-C DS), Ravi Teja (ECE-A Communication Systems).
     assert.deepStrictEqual(names(result.busy.map(b => b.faculty)), names([
-        'Prof. Kiran Reddy', 'Dr. Priya Sharma', 'Dr. Rahul Varma', 'Prof. Ravi Teja'
+        'Prof. Kiran Reddy', 'Dr. Meera Joshi', 'Prof. Lakshmi Devi', 'Prof. Ravi Teja'
     ]));
     assert.strictEqual(result.totalBusy, 4);
-    assert.strictEqual(result.totalAvailable, 8);
-    assert.deepStrictEqual(names(result.availableFaculty), names([
-        'Dr. Arjun Rao', 'Dr. Ananya Iyer', 'Prof. Sneha Nair', 'Dr. Vikram Kumar',
-        'Prof. Meera Joshi', 'Prof. Naveen Reddy', 'Dr. Kavya Rao', 'Dr. Anitha Menon'
-    ]));
+    assert.strictEqual(result.totalAvailable, ROSTER - 4);
+    // Free + busy is the whole roster, and the two lists never overlap.
+    result.busy.forEach(b =>
+        assert.ok(!result.availableFaculty.includes(b.faculty), b.faculty + ' is in both lists'));
 });
 
 check('[test 2] Tuesday P1 returns the correct free faculty', () => {
     const result = engine.getAvailability('Tuesday', 1);
     assert.deepStrictEqual(names(result.busy.map(b => b.faculty)), names([
-        'Prof. Sneha Nair', 'Dr. Vikram Kumar', 'Prof. Meera Joshi', 'Dr. Kavya Rao'
+        'Dr. Anitha Menon', 'Dr. Kavya Rao', 'Dr. Priya Sharma',
+        'Dr. Rahul Varma', 'Dr. Rajesh Pillai', 'Prof. Deepak Sinha'
     ]));
-    assert.strictEqual(result.totalAvailable, 8);
-    assert.ok(!result.availableFaculty.includes('Prof. Sneha Nair'));
+    assert.strictEqual(result.totalAvailable, ROSTER - 6);
+    assert.ok(!result.availableFaculty.includes('Dr. Priya Sharma'));
 });
 
 check('[test 3] busy faculty are excluded at every slot', () => {
@@ -274,6 +296,7 @@ check('a faculty grid shows that faculty\'s own week', () => {
     assert.strictEqual(grid.cells.length, 35);
     const busy = grid.cells.filter(c => c.status === 'busy');
     assert.strictEqual(busy.length, 12);
+    busy.forEach(c => assert.strictEqual(c.faculty, 'Dr. Arjun Rao'));
     assert.strictEqual(engine.getFacultyGrid('Nobody At All'), null);
 });
 

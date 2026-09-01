@@ -132,24 +132,39 @@ function normalize(source) {
             add('error', 'FACULTY_DUPLICATE', `Duplicate faculty name: "${name}"`, { name });
             return;
         }
-        const member = {
-            id: text(entry.id) || name,
-            name,
-            department: text(entry.department) || 'General'
-        };
-        faculty.push(member);
-        byName.set(name.toUpperCase(), member);
+        faculty.push(buildMember(text(entry.id) || name, name, entry));
+        byName.set(name.toUpperCase(), faculty[faculty.length - 1]);
     });
 
     // A faculty referenced by a timetable entry but absent from the roster is
     // registered here rather than dropped — dropping them would silently make
     // them look free everywhere.
+    /**
+     * A faculty member as the rest of the app sees them. The profile fields
+     * are optional: a source that carries none (an uploaded spreadsheet, say)
+     * still produces a valid member, with nulls where it said nothing.
+     */
+    function buildMember(id, name, entry) {
+        const source = entry || {};
+        return {
+            id,
+            name,
+            department: text(source.department) || 'General',
+            designation: text(source.designation) || null,
+            email: text(source.email) || null,
+            phone: text(source.phone) || null,
+            maxWeeklyPeriods: Number.isFinite(parseInt(source.maxWeeklyPeriods, 10))
+                ? parseInt(source.maxWeeklyPeriods, 10) : null,
+            status: text(source.status) || 'active'
+        };
+    }
+
     function resolveFaculty(name, context) {
         const clean = text(name);
         if (!clean) return null;
         const existing = byName.get(clean.toUpperCase());
         if (existing) return existing;
-        const member = { id: clean, name: clean, department: 'General' };
+        const member = buildMember(clean, clean, null);
         faculty.push(member);
         byName.set(clean.toUpperCase(), member);
         add('warning', 'FACULTY_AUTO_ADDED',

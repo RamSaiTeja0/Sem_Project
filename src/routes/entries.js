@@ -23,8 +23,28 @@ const router = express.Router();
 const store = require('../data/store');
 const db = require('../db/pool');
 const repository = require('../db/repository');
+const { nameFor: departmentName } = require('../data/departments');
 
 const TYPES = ['theory', 'lab'];
+
+/**
+ * Class records from the live dataset, used when no database is serving.
+ * The source keeps each class's department, semester and academic year, so the
+ * form can show and filter on them either way.
+ */
+function classesFromDataset() {
+    const declared = (store.source && store.source.classes) || [];
+    return store.engine.getMeta().classes.map(code => {
+        const match = declared.find(c => (c.class || c.name) === code) || {};
+        return {
+            code,
+            department: match.department || null,
+            semester: match.semester || null,
+            academicYear: match.academicYear || null,
+            room: match.room || null
+        };
+    });
+}
 
 /** Writes need a database; reads of reference data do not. */
 function requireDatabase(req, res, next) {
@@ -96,18 +116,25 @@ router.get('/reference', async (req, res, next) => {
         const [classes, subjects, rooms] = fromDatabase
             ? await Promise.all([repository.listClasses(), repository.listSubjects(), repository.listRooms()])
             : [
-                meta.classes.map(code => ({ code, department: null, semester: null, room: null })),
+                classesFromDataset(),
                 [...new Set(store.normalized.busyRecords.map(r => r.subject).filter(Boolean))]
                     .sort().map(name => ({ code: null, name, type: /lab/i.test(name) ? 'lab' : 'theory' })),
                 [...new Set(store.normalized.busyRecords.map(r => r.room).filter(Boolean))]
                     .sort().map(code => ({ code, type: /lab/i.test(code) ? 'lab' : 'classroom' }))
             ];
 
+        const withNames = classes.map(cls => ({
+            ...cls,
+            departmentName: cls.department ? departmentName(cls.department) : null
+        }));
+
         res.json({
             days: engine.getDays(),
             periods: engine.getPeriods(),
             types: TYPES,
-            classes,
+            classes: withNames,
+            departments: [...new Set(withNames.map(c => c.department).filter(Boolean))].sort()
+                .map(code => ({ code, name: departmentName(code) })),
             subjects,
             rooms,
             faculty: engine.getFaculty(),
