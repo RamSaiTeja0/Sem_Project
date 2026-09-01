@@ -22,8 +22,19 @@ const app = express();
 app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: true }));
 
-// Static dashboard.
-app.use(express.static(path.join(__dirname, 'public')));
+// Static assets. `index: false` so "/" is routed explicitly to the landing
+// page rather than being served index.html by the static middleware.
+app.use(express.static(path.join(__dirname, 'public'), { index: false }));
+
+// Landing page.
+app.get(['/', '/home', '/home.html'], (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'home.html'));
+});
+
+// Dashboard application.
+app.get(['/dashboard', '/app', '/index.html'], (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
 
 // Health check, handy for deployment probes.
 app.get('/api/health', (req, res) => {
@@ -42,7 +53,7 @@ app.use('/api', (req, res) => {
     res.status(404).json({ error: `Unknown endpoint: ${req.method} ${req.originalUrl}`, code: 'NOT_FOUND' });
 });
 
-// Everything else serves the single-page dashboard.
+// Everything else serves the dashboard, so its in-app views remain linkable.
 app.get('*', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });

@@ -91,7 +91,16 @@
         about: 'Settings / About'
     };
 
-    function showView(name) {
+    var VIEW_NAMES = ['dashboard', 'timetable', 'availability', 'substitute',
+                     'import', 'faculty', 'reports', 'about'];
+
+    /** Open the view named in the URL hash, so the home page can link into it. */
+    function viewFromHash() {
+        var name = (window.location.hash || '').replace(/^#/, '');
+        return VIEW_NAMES.indexOf(name) >= 0 ? name : null;
+    }
+
+    function showView(name, updateHash) {
         Array.prototype.forEach.call(document.querySelectorAll('.view'), function (section) {
             section.classList.toggle('is-active', section.id === 'view-' + name);
         });
@@ -102,6 +111,10 @@
 
         if (name === 'faculty') loadFacultyTable();
         if (name === 'reports') loadReports();
+
+        if (updateHash !== false && window.location.hash !== '#' + name) {
+            window.history.replaceState(null, '', '#' + name);
+        }
     }
 
     // -------------------------------------------------------- timetable
@@ -203,37 +216,52 @@
         var container = el(containerId);
         if (!container) return;
 
-        var listHtml;
-        if (!result.availableFaculty.length) {
-            listHtml = notice('No faculty are free during this period.', 'warn');
-        } else {
-            listHtml = '<ul class="faculty-list">' + result.available.map(function (f) {
+        var freeHtml = result.availableFaculty.length
+            ? '<ul class="faculty-list">' + result.available.map(function (f) {
                 return '<li><span class="tick">✓</span>' + esc(f.faculty) +
                     '<span class="dept">' + esc(f.department || '') + '</span></li>';
-            }).join('') + '</ul>';
-        }
+            }).join('') + '</ul>'
+            : notice('No faculty are free during this period.', 'warn');
+
+        // Busy faculty are shown too, with what is keeping them occupied, so the
+        // result can be checked rather than taken on trust.
+        var busyHtml = result.busy.length
+            ? '<ul class="faculty-list busy-list">' + result.busy.map(function (f) {
+                var reason = [f.subject, f.className].filter(Boolean).join(' · ');
+                return '<li><span class="cross">✗</span>' + esc(f.faculty) +
+                    '<span class="dept">' + esc(reason || 'teaching') + '</span></li>';
+            }).join('') + '</ul>'
+            : '<p class="muted">Nobody else is teaching this period.</p>';
 
         container.innerHTML =
+            '<div class="section-label">Selected</div>' +
             '<div class="slot-title">' + esc(cell.day) + ' — Period ' + esc(cell.period) + '</div>' +
             '<div style="margin-top:8px;">' +
+                '<div class="detail-row"><span class="detail-label">Day</span>' +
+                    '<span class="detail-value">' + esc(cell.day) + '</span></div>' +
+                '<div class="detail-row"><span class="detail-label">Period</span>' +
+                    '<span class="detail-value">P' + esc(cell.period) + '</span></div>' +
                 '<div class="detail-row"><span class="detail-label">Class</span>' +
                     '<span class="detail-value">' + esc(cell.class || '—') + '</span></div>' +
                 '<div class="detail-row"><span class="detail-label">Subject</span>' +
                     '<span class="detail-value">' + esc(cell.subject || 'Free period') + '</span></div>' +
-                '<div class="detail-row"><span class="detail-label">Faculty</span>' +
+                '<div class="detail-row"><span class="detail-label">Current Faculty</span>' +
                     '<span class="detail-value">' + esc(cell.faculty || '—') + '</span></div>' +
                 (cell.room ? '<div class="detail-row"><span class="detail-label">Room</span>' +
                     '<span class="detail-value">' + esc(cell.room) + '</span></div>' : '') +
             '</div>' +
-            '<div class="section-label">Available Faculty · ' + esc(result.totalAvailable) + '</div>' +
-            listHtml +
-            '<p class="readonly-note">Read-only. ' +
-                (cell.faculty
-                    ? 'Excluding ' + esc(cell.faculty) + ', '
-                    : 'Of ') +
+            '<div class="section-label">Available Substitute Faculty · ' +
+                esc(result.totalAvailable) + '</div>' +
+            freeHtml +
+            '<div class="section-label">Busy Faculty · ' + esc(result.totalBusy) + '</div>' +
+            busyHtml +
+            '<div class="readonly-banner" id="readOnlyBanner">' +
+                'READ ONLY — No substitution has been assigned.</div>' +
+            '<p class="readonly-note">' +
+                (cell.faculty ? 'Excluding ' + esc(cell.faculty) + ', ' : 'Of ') +
                 esc(result.totalFaculty) + ' faculty were checked: ' +
                 esc(result.totalAvailable) + ' free, ' + esc(result.totalBusy) + ' teaching. ' +
-                'No substitute is assigned and nothing is saved.</p>';
+                'Nothing was saved and no timetable was modified.</p>';
     }
 
     function checkAvailability(cell, containerId, extra) {
@@ -593,6 +621,11 @@
             button.addEventListener('click', function () { showView(button.dataset.view); });
         });
 
+        window.addEventListener('hashchange', function () {
+            var name = viewFromHash();
+            if (name) showView(name, false);
+        });
+
         el('dashCheck').addEventListener('click', function () {
             checkAvailability({
                 day: el('dashDay').value,
@@ -629,6 +662,9 @@
         el('facSearch').addEventListener('input', loadFacultyTable);
         el('subFind').addEventListener('click', findCover);
         el('importPreview').addEventListener('click', previewImport);
+
+        var initial = viewFromHash();
+        if (initial) showView(initial, false);
 
         bootstrap();
     });

@@ -1,0 +1,94 @@
+/* TecSubstitution — shared design tokens.
+   Linked by BOTH the landing page and the dashboard so the two look like one
+   application. Institutional navy / blue / white / gray; no gradients, no
+   decorative animation. */
+
+:root {
+  --navy-900: #10243d;
+  --navy-800: #16375c;
+  --navy-700: #1e4a78;
+  --navy-600: #2563a0;
+  --blue-500: #2f6fb0;
+  --blue-100: #e3edf7;
+  --blue-050: #f2f7fb;
+
+  --ink-900: #14202e;
+  --ink-700: #34455a;
+  --ink-500: #5b6c80;
+  --ink-400: #7d8b9c;
+
+  --line: #d5dde5;
+  --line-soft: #e7edf2;
+  --surface: #ffffff;
+  --canvas: #f4f6f9;
+
+  --ok-700: #17603a;
+  --ok-100: #e4f2ea;
+  --ok-500: #2c8558;
+  --warn-700: #8a5a08;
+  --warn-100: #fbf1dd;
+  --danger-700: #96261f;
+  --danger-100: #fbe6e4;
+
+  --radius: 4px;
+  --sidebar: 232px;
+  --header: 56px;
+  --font: "Segoe UI", Inter, Roboto, -apple-system, BlinkMacSystemFont, Arial, sans-serif;
+}
+
+/* ---------------------------------------------------------- shared basics */
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+body {
+  margin: 0;
+  font-family: var(--font);
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--ink-700);
+  background: var(--canvas);
+}
+
+/* Shared brand lockup, used in the dashboard sidebar and the site header. */
+.brand { display: flex; align-items: center; gap: 10px; text-decoration: none; }
+.brand-mark {
+  width: 28px; height: 28px; flex: none;
+  background: #ffffff; color: var(--navy-800);
+  border-radius: var(--radius);
+  display: flex; align-items: center; justify-content: center;
+  font-weight: 700; font-size: 0.8rem; letter-spacing: 0.02em;
+}
+.brand-text { font-weight: 600; font-size: 0.95rem; letter-spacing: 0.01em; }
+
+/* Shared buttons. */
+.btn {
+  display: inline-block; padding: 8px 16px;
+  background: var(--navy-700); color: #ffffff;
+  border: 1px solid var(--navy-700); border-radius: var(--radius);
+  font: inherit; font-size: 0.84rem; font-weight: 600; cursor: pointer;
+  text-decoration: none; text-align: center;
+  transition: background-color 0.12s ease;
+}
+.btn:hover { background: var(--navy-800); }
+.btn:disabled { background: var(--ink-400); border-color: var(--ink-400); cursor: not-allowed; }
+.btn-secondary { background: var(--surface); color: var(--ink-700); border-color: var(--line); }
+.btn-secondary:hover { background: var(--blue-050); color: var(--ink-900); }
+
+/* Shared status badges. */
+.badge {
+  display: inline-block; padding: 2px 8px; border-radius: 10px;
+  font-size: 0.72rem; font-weight: 600; white-space: nowrap;
+}
+.badge-free { background: var(--ok-100); color: var(--ok-700); }
+.badge-busy { background: var(--danger-100); color: var(--danger-700); }
+.badge-neutral { background: var(--blue-100); color: var(--navy-800); }
+
+/* Shared notices. */
+.notice { padding: 10px 13px; border-radius: var(--radius); font-size: 0.83rem; }
+.notice-info { background: var(--blue-050); border: 1px solid var(--line); color: var(--ink-700); }
+.notice-ok { background: var(--ok-100); border: 1px solid #c6e2d2; color: var(--ok-700); }
+.notice-warn { background: var(--warn-100); border: 1px solid #edd9ae; color: var(--warn-700); }
+.notice-error { background: var(--danger-100); border: 1px solid #efc4c0; color: var(--danger-700); }
+.notice + .notice { margin-top: 8px; }
+
+.muted { color: var(--ink-500); font-size: 0.83rem; }
+.mono { font-family: "Cascadia Mono", Consolas, "Courier New", monospace; font-size: 0.78rem; }

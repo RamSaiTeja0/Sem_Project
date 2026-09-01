@@ -33,12 +33,31 @@ async function browserRun(playwright) {
     page.on('request', r => requests.push({ method: r.method(), url: r.url(), body: r.postData() }));
 
     try {
+        // The landing page is served at "/" and links into the dashboard.
         await page.goto(BASE + '/', { waitUntil: 'networkidle' });
-        // The dashboard is the landing view; the grid is rendered but hidden
-        // until the Primary Timetable section is opened.
+
+        await checkAsync('the home page loads and explains the project', async () => {
+            assert.match(await page.locator('h1').first().textContent(),
+                /Smart Faculty Substitution Management/);
+            ['#about', '#features', '#workflow', '#excel', '#benefits'].forEach(function () {});
+            for (const id of ['about', 'features', 'workflow', 'excel', 'benefits']) {
+                assert.strictEqual(await page.locator('#' + id).count(), 1, 'missing section #' + id);
+            }
+            assert.ok((await page.locator('.feature').count()) >= 9, 'feature cards');
+            assert.match(await page.locator('.site-footer').textContent(),
+                /Faculty Substitution Management System/);
+        });
+
+        await checkAsync('the home page CTA opens the dashboard timetable', async () => {
+            await page.click('.hero-actions a[href="/dashboard#timetable"]');
+            await page.waitForSelector('#ttBody .slot-btn', { state: 'visible' });
+            assert.match(page.url(), /\/dashboard#timetable$/);
+        });
+
         await page.waitForSelector('#ttBody .slot-btn', { state: 'attached' });
 
         await checkAsync('dashboard loads with the navigation and stats', async () => {
+            await page.click('.nav-item[data-view="dashboard"]');
             assert.strictEqual(await page.locator('.nav-item').count(), 8);
             assert.ok((await page.locator('#dashboardStats .stat').count()) >= 4);
             assert.match(await page.locator('#topbarMeta').textContent(), /10 faculty/);
@@ -67,7 +86,7 @@ async function browserRun(playwright) {
             const before = requests.length;
             await page.click('.nav-item[data-view="availability"]');
             await page.click('#availBody .slot-btn[data-day="Monday"][data-period="2"]');
-            await page.waitForSelector('#availResult ul.faculty-list');
+            await page.waitForSelector('#availResult ul.faculty-list:not(.busy-list)');
 
             const posted = requests.slice(before)
                 .find(r => r.method === 'POST' && r.url.endsWith('/api/availability'));
@@ -77,7 +96,7 @@ async function browserRun(playwright) {
             assert.strictEqual(sent.period, 2);
             assert.strictEqual(sent.subject, 'OS');
 
-            const shown = (await page.locator('#availResult ul.faculty-list li').allTextContents())
+            const shown = (await page.locator('#availResult ul.faculty-list:not(.busy-list) li').allTextContents())
                 .map(t => t.replace(/✓/g, '').trim());
             assert.strictEqual(shown.length, 8);
             assert.ok(!shown.some(t => t.startsWith('Dr. Meera Nair')), 'the teaching faculty is excluded');
@@ -85,6 +104,23 @@ async function browserRun(playwright) {
 
             assert.strictEqual(await page.locator('#availBody .slot-btn.is-selected').count(), 1);
             assert.match(await page.locator('#availResult .slot-title').textContent(), /Monday — Period 2/);
+
+            // The selected cell is described in full.
+            const panel = await page.locator('#availResult').textContent();
+            assert.match(panel, /Class\s*CSE-A/);
+            assert.match(panel, /Subject\s*OS/);
+            assert.match(panel, /Current Faculty\s*Dr\. Meera Nair/);
+
+            // Busy faculty are listed alongside the free ones.
+            const busy = (await page.locator('#availResult .busy-list li').allTextContents())
+                .map(t => t.replace(/✗/g, '').trim());
+            assert.strictEqual(busy.length, 1, 'Prof. Naveen Reddy is busy elsewhere');
+            assert.ok(busy[0].startsWith('Prof. Naveen Reddy'));
+
+            // The read-only guarantee is stated where the result is read.
+            assert.strictEqual(
+                (await page.locator('#readOnlyBanner').textContent()).trim(),
+                'READ ONLY — No substitution has been assigned.');
         });
 
         await checkAsync('several more cells each resolve correctly', async () => {
@@ -92,7 +128,7 @@ async function browserRun(playwright) {
             for (const [day, period] of picks) {
                 const before = requests.length;
                 await page.click(`#availBody .slot-btn[data-day="${day}"][data-period="${period}"]`);
-                await page.waitForSelector('#availResult ul.faculty-list, #availResult .notice-warn');
+                await page.waitForSelector('#availResult ul.faculty-list:not(.busy-list), #availResult .notice-warn');
 
                 const posted = requests.slice(before)
                     .find(r => r.method === 'POST' && r.url.endsWith('/api/availability'));
@@ -108,7 +144,7 @@ async function browserRun(playwright) {
                     });
                     return (await res.json()).availableFaculty;
                 }, { day, period, faculty: sent.faculty });
-                const shown = (await page.locator('#availResult ul.faculty-list li').allTextContents())
+                const shown = (await page.locator('#availResult ul.faculty-list:not(.busy-list) li').allTextContents())
                     .map(t => t.replace(/✓/g, '').replace(/\s*(CSE|ECE|General)\s*$/, '').trim());
                 assert.deepStrictEqual(shown, api, `${day} P${period} display must match the engine`);
             }

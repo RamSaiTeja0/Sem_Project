@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>TecSubstitution — Smart Faculty Substitution Management</title>
+  <meta name="description" content="TecSubstitution helps colleges manage timetables, identify available substitute faculty, and process timetable data efficiently." />
+  <link rel="stylesheet" href="/css/theme.css" />
+  <link rel="stylesheet" href="/css/home.css" />
+</head>
+<body>
+
+<!-- =============================== HEADER =============================== -->
+<header class="site-header">
+  <div class="wrap">
+    <a class="brand" href="/">
+      <span class="brand-mark">TS</span>
+      <span class="brand-text">TecSubstitution</span>
+    </a>
+    <nav class="site-nav">
+      <a href="#home">Home</a>
+      <a href="#features">Features</a>
+      <a href="#workflow">Workflow</a>
+      <a href="/dashboard#timetable">Timetable</a>
+      <a href="/dashboard#availability">Faculty Availability</a>
+      <a href="/dashboard#import">Excel Import</a>
+      <a class="nav-cta" href="/dashboard">Open Dashboard</a>
+    </nav>
+  </div>
+</header>
+
+<!-- ================================ HERO ================================ -->
+<section class="hero" id="home">
+  <div class="wrap">
+    <div>
+      <h1>Smart Faculty Substitution Management</h1>
+      <p>
+        TecSubstitution helps colleges manage academic timetables, identify which
+        faculty are free during any period, and process timetable data from
+        spreadsheets — so covering an absent colleague takes seconds instead of
+        cross-reading ten timetables by hand.
+      </p>
+      <div class="hero-actions">
+        <a class="btn btn-light" href="/dashboard#timetable">View Timetable</a>
+        <a class="btn btn-ghost" href="/dashboard#availability">Check Faculty Availability</a>
+      </div>
+    </div>
+
+    <div class="hero-panel">
+      <div class="hero-panel-head">Primary Timetable — click any period</div>
+      <table class="mini">
+        <thead><tr><th>Day</th><th>P1</th><th>P2</th><th>P3</th><th>P4</th></tr></thead>
+        <tbody>
+          <tr><td>Monday</td><td>DBMS</td><td class="pick">OS</td><td>CN</td><td>Java</td></tr>
+          <tr><td>Tuesday</td><td>CN</td><td>DBMS</td><td>OS</td><td>Python</td></tr>
+          <tr><td>Wednesday</td><td>Java</td><td>CN</td><td>DBMS</td><td>SE</td></tr>
+        </tbody>
+      </table>
+      <div class="hero-panel-foot">
+        <div class="row"><span class="badge badge-neutral">Monday · P2 · OS</span></div>
+        <div class="row"><span class="badge badge-free">3 free</span>
+          <span class="badge badge-busy">2 busy</span>
+          <span class="muted">read-only result</span></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- =============================== ABOUT ================================ -->
+<section class="section section-alt" id="about">
+  <div class="wrap">
+    <div class="eyebrow">About the system</div>
+    <h2 class="section-title">Why substitution management needs a system</h2>
+    <p class="section-lead">
+      Arranging cover for an absent faculty member is routine work that consumes
+      a disproportionate amount of a department's time.
+    </p>
+
+    <div class="card-grid">
+      <div class="feature">
+        <h3>Manual substitution is time-consuming</h3>
+        <p>Every absence means checking each period of the day and deciding cover for each one separately, usually at short notice.</p>
+      </div>
+      <div class="feature">
+        <h3>Finding free faculty by hand is difficult</h3>
+        <p>Knowing who is genuinely free at a given period means cross-reading every other faculty timetable at the same coordinate.</p>
+      </div>
+      <div class="feature">
+        <h3>Timetable data is awkward to process</h3>
+        <p>Timetables arrive as spreadsheets in different layouts, with merged lab periods and inconsistent labels for free slots.</p>
+      </div>
+      <div class="feature">
+        <h3>TecSubstitution automates the lookup</h3>
+        <p>It normalizes every timetable into one internal format and answers "who is free at this day and period" in a single click.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================== FEATURES ============================== -->
+<section class="section" id="features">
+  <div class="wrap">
+    <div class="eyebrow">Features</div>
+    <h2 class="section-title">What the system does</h2>
+    <p class="section-lead">Each feature is implemented and covered by the automated test suite.</p>
+
+    <div class="card-grid">
+      <div class="feature"><h3><span class="tick">✓</span> Timetable Management</h3>
+        <p>View any class timetable or an individual faculty member's own week, with period timings and rooms.</p></div>
+      <div class="feature"><h3><span class="tick">✓</span> Clickable Timetable</h3>
+        <p>Every period is a control carrying its own day, period, class, subject, faculty and room.</p></div>
+      <div class="feature"><h3><span class="tick">✓</span> Faculty Availability Detection</h3>
+        <p>One lookup returns everyone free at that exact coordinate, checked against all loaded timetables.</p></div>
+      <div class="feature"><h3><span class="tick">✓</span> Substitute Faculty Suggestions</h3>
+        <p>Pick an absent faculty member and a day to see every period they teach and who could cover each one.</p></div>
+      <div class="feature"><h3><span class="tick">✓</span> Excel Timetable Import</h3>
+        <p>Upload an .xlsx timetable; matrix and long-form layouts are both detected automatically.</p></div>
+      <div class="feature"><h3><span class="tick">✓</span> Timetable Validation</h3>
+        <p>Invalid days, out-of-range periods, duplicate entries and double-bookings are reported, never silently accepted.</p></div>
+      <div class="feature"><h3><span class="tick">✓</span> Faculty Management</h3>
+        <p>The full roster with teaching load — busy periods, free periods, subjects and classes per faculty.</p></div>
+      <div class="feature"><h3><span class="tick">✓</span> Automated Processing</h3>
+        <p>Import, normalization and validation run as one pipeline, so every source produces identical internal data.</p></div>
+      <div class="feature"><h3><span class="tick">✓</span> Read-only Availability Checking</h3>
+        <p>Checking availability never assigns a substitute or writes to any timetable. There is no write path in that code.</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================== WORKFLOW ============================== -->
+<section class="section section-alt" id="workflow">
+  <div class="wrap">
+    <div class="eyebrow">Workflow</div>
+    <h2 class="section-title">From spreadsheet to substitute list</h2>
+
+    <div class="split">
+      <div class="flow">
+        <div class="flow-step"><span class="n">1</span> Upload timetable (Excel / CSV)</div>
+        <div class="flow-arrow">↓</div>
+        <div class="flow-step"><span class="n">2</span> Extract data</div>
+        <div class="flow-arrow">↓</div>
+        <div class="flow-step"><span class="n">3</span> Validate</div>
+        <div class="flow-arrow">↓</div>
+        <div class="flow-step"><span class="n">4</span> Generate timetable</div>
+        <div class="flow-arrow">↓</div>
+        <div class="flow-step"><span class="n">5</span> Click the required period</div>
+        <div class="flow-arrow">↓</div>
+        <div class="flow-step"><span class="n">6</span> Check faculty availability</div>
+        <div class="flow-arrow">↓</div>
+        <div class="flow-step"><span class="n">7</span> Compare all faculty timetables</div>
+        <div class="flow-arrow">↓</div>
+        <div class="flow-step"><span class="n">8</span> Display suitable faculty</div>
+      </div>
+
+      <div>
+        <h3 class="section-title" style="font-size:1.05rem;">How faculty substitution works</h3>
+        <div class="example">
+          <h3>Faculty X is unavailable for Monday P2</h3>
+          <p class="case">The system checks every other faculty member's schedule at that exact day and period.</p>
+          <ul class="check">
+            <li class="free"><span class="mark">✓</span> Faculty A <span class="why">free</span></li>
+            <li class="busy"><span class="mark">✗</span> Faculty B <span class="why">teaching CN, CSE-B</span></li>
+            <li class="free"><span class="mark">✓</span> Faculty C <span class="why">free</span></li>
+            <li class="busy"><span class="mark">✗</span> Faculty D <span class="why">teaching DBMS Lab</span></li>
+          </ul>
+          <p class="result-line">
+            <strong>Result:</strong> Faculty A and Faculty C can be considered as substitutes.
+            The list is displayed only — <strong>no substitution is assigned or saved</strong>.
+          </p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- =========================== EXCEL PROCESSING ========================= -->
+<section class="section" id="excel">
+  <div class="wrap">
+    <div class="eyebrow">Excel processing</div>
+    <h2 class="section-title">How spreadsheet timetables are handled</h2>
+    <p class="section-lead">
+      Excel is the primary structured input. Nothing is loaded until you review a
+      preview and confirm it, so a bad file can never quietly replace working data.
+    </p>
+
+    <div class="split">
+      <div class="flow">
+        <div class="flow-step"><span class="n">1</span> Excel file (.xlsx)</div>
+        <div class="flow-arrow">↓</div>
+        <div class="flow-step"><span class="n">2</span> Data extraction</div>
+        <div class="flow-arrow">↓</div>
+        <div class="flow-step"><span class="n">3</span> Validation</div>
+        <div class="flow-arrow">↓</div>
+        <div class="flow-step"><span class="n">4</span> Normalization</div>
+        <div class="flow-arrow">↓</div>
+        <div class="flow-step"><span class="n">5</span> Timetable preview</div>
+      </div>
+
+      <div>
+        <div class="feature" style="margin-bottom:14px;">
+          <h3>Accepted columns</h3>
+          <p class="mono" style="color:var(--ink-700);">Day · Period · Class · Faculty · Subject · Room</p>
+          <p style="margin-top:8px;">
+            A faculty-per-row matrix such as <span class="mono">Faculty | Monday P1 | Monday P2</span>
+            is also detected automatically. A cell reading FREE, “-”, or left blank means the
+            faculty is not teaching then.
+          </p>
+        </div>
+        <div class="feature">
+          <h3>What validation catches</h3>
+          <p>Unrecognised structures, invalid days and periods, duplicate entries for the same
+             faculty and slot, a faculty double-booked across two classes, and empty timetables —
+             each reported with the row it came from.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================== BENEFITS ============================== -->
+<section class="section section-alt" id="benefits">
+  <div class="wrap">
+    <div class="eyebrow">Benefits</div>
+    <h2 class="section-title">What departments get out of it</h2>
+    <ul class="benefits">
+      <li><span class="tick">✓</span> Reduced manual effort</li>
+      <li><span class="tick">✓</span> Faster substitute identification</li>
+      <li><span class="tick">✓</span> Reduced scheduling errors</li>
+      <li><span class="tick">✓</span> Organized timetable management</li>
+      <li><span class="tick">✓</span> Easy Excel processing</li>
+      <li><span class="tick">✓</span> Better visibility of faculty availability</li>
+    </ul>
+
+    <div class="hero-actions" style="margin-top:26px;">
+      <a class="btn" href="/dashboard#timetable">View Timetable</a>
+      <a class="btn btn-secondary" href="/dashboard#availability">Check Faculty Availability</a>
+    </div>
+  </div>
+</section>
+
+<!-- =============================== FOOTER =============================== -->
+<footer class="site-footer">
+  <div class="wrap">
+    <div>
+      <strong>TecSubstitution</strong>
+      <p>Faculty Substitution Management System</p>
+      <p>Academic Timetable &amp; Faculty Availability Platform</p>
+    </div>
+    <div class="footer-links">
+      <a href="/dashboard">Dashboard</a>
+      <a href="/dashboard#timetable">Primary Timetable</a>
+      <a href="/dashboard#availability">Faculty Availability</a>
+      <a href="/dashboard#import">Excel Import</a>
+    </div>
+  </div>
+</footer>
+
+</body>
+</html>

@@ -34,6 +34,19 @@ async function run() {
     console.log('TecSubstitution — API tests');
     console.log('\n[1] Timetable and faculty endpoints');
 
+    const home = await get('/');
+    const dashboard = await get('/dashboard');
+    check('the landing page is served at / and the dashboard at /dashboard', () => {
+        assert.strictEqual(home.status, 200);
+        assert.match(home.raw, /Smart Faculty Substitution Management/);
+        assert.match(home.raw, /id="features"/);
+        assert.strictEqual(dashboard.status, 200);
+        assert.match(dashboard.raw, /id="view-availability"/);
+        // Both link the same token sheet, so they cannot drift apart visually.
+        assert.match(home.raw, /\/css\/theme\.css/);
+        assert.match(dashboard.raw, /\/css\/theme\.css/);
+    });
+
     const health = await get('/api/health');
     check('GET /api/health reports the service', () => {
         assert.strictEqual(health.status, 200);
