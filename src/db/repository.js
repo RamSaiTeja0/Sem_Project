@@ -349,6 +349,253 @@ async function listDepartments() {
     return rows;
 }
 
+/* ======================================================================
+ * Catalog writes — branches, subjects and classes.
+ *
+ * A branch (department) is an academic programme such as CSE. A class is a
+ * section inside it, such as CSE-A. They are separate records and the API
+ * keeps them separate.
+ *
+ * Deletes are refused while anything still references the record, so removing
+ * a branch can never orphan its subjects, classes or faculty.
+ * ====================================================================== */
+
+function conflict(message, code, status) {
+    const error = new Error(message);
+    error.code = code || 'CONFLICT';
+    error.status = status || 409;
+    return error;
+}
+
+/** Look up a department id by code, throwing a clear 400 when it is unknown. */
+async function departmentId(client, code) {
+    const { rows } = await client.query(
+        'SELECT id FROM departments WHERE UPPER(code) = UPPER($1)', [code]);
+    if (!rows.length) throw conflict(`Unknown branch "${code}"`, 'UNKNOWN_DEPARTMENT', 400);
+    return rows[0].id;
+}
+
+async function addDepartment(branch) {
+    return db.withTransaction(async client => {
+        const problems = [];
+
+        const byCode = await client.query(
+            'SELECT 1 FROM departments WHERE UPPER(code) = UPPER($1)', [branch.code]);
+        if (byCode.rows.length) problems.push(`Branch code "${branch.code}" already exists`);
+
+        const byName = await client.query(
+            'SELECT 1 FROM departments WHERE UPPER(name) = UPPER($1)', [branch.name]);
+        if (byName.rows.length) problems.push(`A branch named "${branch.name}" already exists`);
+
+        if (problems.length) {
+            const error = conflict(problems.join('; '), 'DUPLICATE_DEPARTMENT');
+            error.details = problems;
+            throw error;
+        }
+
+        const { rows } = await client.query(
+            'INSERT INTO departments (code, name) VALUES (UPPER($1), $2) RETURNING code, name',
+            [branch.code, branch.name]);
+        return { ...rows[0], facultyCount: 0 };
+    });
+}
+
+async function updateDepartment(code, changes) {
+    return db.withTransaction(async client => {
+        const id = await departmentId(client, code);
+        if (changes.name) {
+            const clash = await client.query(
+                'SELECT 1 FROM departments WHERE UPPER(name) = UPPER($1) AND id <> $2',
+                [changes.name, id]);
+            if (clash.rows.length) {
+                throw conflict(`A branch named "${changes.name}" already exists`, 'DUPLICATE_DEPARTMENT');
+            }
+        }
+        const { rows } = await client.query(
+            'UPDATE departments SET name = COALESCE($2, name) WHERE id = $1 RETURNING code, name',
+            [id, changes.name || null]);
+        return rows[0];
+    });
+}
+
+/** Remove a branch, but only once nothing else points at it. */
+async function deleteDepartment(code) {
+    return db.withTransaction(async client => {
+        const id = await departmentId(client, code);
+
+        const counts = await client.query(`
+            SELECT (SELECT COUNT(*) FROM faculty  WHERE department_id = $1)::int AS faculty,
+                   (SELECT COUNT(*) FROM subjects WHERE department_id = $1)::int AS subjects,
+                   (SELECT COUNT(*) FROM classes  WHERE department_id = $1)::int AS classes`, [id]);
+        const { faculty, subjects, classes } = counts.rows[0];
+
+        if (faculty || subjects || classes) {
+            const parts = [];
+            if (faculty) parts.push(`${faculty} faculty`);
+            if (subjects) parts.push(`${subjects} subject(s)`);
+            if (classes) parts.push(`${classes} class(es)`);
+            throw conflict(
+                `Branch "${code}" still has ${parts.join(', ')}. Remove or reassign them first.`,
+                'DEPARTMENT_IN_USE');
+        }
+
+        await client.query('DELETE FROM departments WHERE id = $1', [id]);
+        return { code };
+    });
+}
+
+async function addSubject(subject) {
+    return db.withTransaction(async client => {
+        const problems = [];
+
+        const byCode = await client.query(
+            'SELECT 1 FROM subjects WHERE UPPER(code) = UPPER($1)', [subject.code]);
+        if (byCode.rows.length) problems.push(`Subject code "${subject.code}" already exists`);
+
+        // A subject name is unique within its branch, not globally: two branches
+        // may each legitimately teach "Data Structures".
+        const deptRow = await client.query(
+            'SELECT id FROM departments WHERE UPPER(code) = UPPER($1)', [subject.department]);
+        if (!deptRow.rows.length) {
+            problems.push(`Unknown branch "${subject.department}"`);
+        } else {
+            const byName = await client.query(
+                'SELECT 1 FROM subjects WHERE UPPER(name) = UPPER($1) AND department_id = $2',
+                [subject.name, deptRow.rows[0].id]);
+            if (byName.rows.length) {
+                problems.push(`"${subject.name}" already exists in ${subject.department}`);
+            }
+        }
+
+        if (problems.length) {
+            const error = conflict(problems.join('; '), 'DUPLICATE_SUBJECT');
+            error.details = problems;
+            throw error;
+        }
+
+        const { rows } = await client.query(`
+            INSERT INTO subjects (code, name, department_id, subject_type)
+            VALUES (UPPER($1), $2, $3, $4)
+            RETURNING code, name, subject_type AS type`,
+            [subject.code, subject.name, deptRow.rows[0].id, subject.type || 'theory']);
+        return { ...rows[0], department: String(subject.department).toUpperCase() };
+    });
+}
+
+async function updateSubject(code, changes) {
+    return db.withTransaction(async client => {
+        const found = await client.query(
+            'SELECT id FROM subjects WHERE UPPER(code) = UPPER($1)', [code]);
+        if (!found.rows.length) throw conflict(`Unknown subject "${code}"`, 'NOT_FOUND', 404);
+        const id = found.rows[0].id;
+
+        const deptId = changes.department ? await departmentId(client, changes.department) : null;
+
+        const { rows } = await client.query(`
+            UPDATE subjects
+               SET name = COALESCE($2, name),
+                   subject_type = COALESCE($3, subject_type),
+                   department_id = COALESCE($4, department_id)
+             WHERE id = $1
+            RETURNING code, name, subject_type AS type,
+                      (SELECT COALESCE(code, 'General') FROM departments WHERE id = subjects.department_id) AS department`,
+            [id, changes.name || null, changes.type || null, deptId]);
+        return rows[0];
+    });
+}
+
+async function deleteSubject(code) {
+    return db.withTransaction(async client => {
+        const found = await client.query(
+            'SELECT id FROM subjects WHERE UPPER(code) = UPPER($1)', [code]);
+        if (!found.rows.length) throw conflict(`Unknown subject "${code}"`, 'NOT_FOUND', 404);
+        const id = found.rows[0].id;
+
+        const used = await client.query(
+            'SELECT COUNT(*)::int AS n FROM timetable WHERE subject_id = $1', [id]);
+        if (used.rows[0].n) {
+            throw conflict(
+                `Subject "${code}" is used by ${used.rows[0].n} timetable entry(ies). Remove them first.`,
+                'SUBJECT_IN_USE');
+        }
+
+        await client.query('DELETE FROM subjects WHERE id = $1', [id]);
+        return { code };
+    });
+}
+
+async function addClass(section) {
+    return db.withTransaction(async client => {
+        const byCode = await client.query(
+            'SELECT 1 FROM classes WHERE UPPER(code) = UPPER($1)', [section.code]);
+        if (byCode.rows.length) {
+            throw conflict(`Class "${section.code}" already exists`, 'DUPLICATE_CLASS');
+        }
+
+        const deptId = await departmentId(client, section.department);
+
+        let roomId = null;
+        if (section.room) {
+            const room = await client.query(
+                'SELECT id FROM rooms WHERE UPPER(code) = UPPER($1)', [section.room]);
+            if (!room.rows.length) {
+                throw conflict(`Unknown room "${section.room}"`, 'UNKNOWN_ROOM', 400);
+            }
+            roomId = room.rows[0].id;
+        }
+
+        const { rows } = await client.query(`
+            INSERT INTO classes (code, department_id, semester, academic_year, home_room_id)
+            VALUES (UPPER($1), $2, $3, $4, $5)
+            RETURNING code, semester, academic_year AS "academicYear"`,
+            [section.code, deptId, section.semester || null,
+             section.academicYear || null, roomId]);
+        return { ...rows[0], department: String(section.department).toUpperCase(), room: section.room || null };
+    });
+}
+
+async function updateClass(code, changes) {
+    return db.withTransaction(async client => {
+        const found = await client.query(
+            'SELECT id FROM classes WHERE UPPER(code) = UPPER($1)', [code]);
+        if (!found.rows.length) throw conflict(`Unknown class "${code}"`, 'NOT_FOUND', 404);
+        const id = found.rows[0].id;
+
+        const deptId = changes.department ? await departmentId(client, changes.department) : null;
+
+        const { rows } = await client.query(`
+            UPDATE classes
+               SET department_id = COALESCE($2, department_id),
+                   semester = COALESCE($3, semester),
+                   academic_year = COALESCE($4, academic_year)
+             WHERE id = $1
+            RETURNING code, semester, academic_year AS "academicYear",
+                      (SELECT COALESCE(code, 'General') FROM departments WHERE id = classes.department_id) AS department`,
+            [id, deptId, changes.semester || null, changes.academicYear || null]);
+        return rows[0];
+    });
+}
+
+async function deleteClass(code) {
+    return db.withTransaction(async client => {
+        const found = await client.query(
+            'SELECT id FROM classes WHERE UPPER(code) = UPPER($1)', [code]);
+        if (!found.rows.length) throw conflict(`Unknown class "${code}"`, 'NOT_FOUND', 404);
+        const id = found.rows[0].id;
+
+        const used = await client.query(
+            'SELECT COUNT(*)::int AS n FROM timetable WHERE class_id = $1', [id]);
+        if (used.rows[0].n) {
+            throw conflict(
+                `Class "${code}" still has ${used.rows[0].n} timetable entry(ies). Remove them first.`,
+                'CLASS_IN_USE');
+        }
+
+        await client.query('DELETE FROM classes WHERE id = $1', [id]);
+        return { code };
+    });
+}
+
 /**
  * Insert one faculty member.
  *
@@ -426,6 +673,9 @@ module.exports = {
     isEmpty, counts, loadSource,
     listEntries, getEntry, addEntry, updateEntry, deleteEntry,
     listRooms, listSubjects, listClasses, listDepartments,
+    addDepartment, updateDepartment, deleteDepartment,
+    addSubject, updateSubject, deleteSubject,
+    addClass, updateClass, deleteClass,
     addFaculty, getFaculty, usernameFor,
     DAY_ORDER
 };

@@ -19,6 +19,7 @@ const facultyRoutes = require('./src/routes/faculty');
 const availabilityRoutes = require('./src/routes/availability');
 const importRoutes = require('./src/routes/import');
 const entryRoutes = require('./src/routes/entries');
+const catalogRoutes = require('./src/routes/catalog');
 const authRoutes = require('./src/routes/auth');
 
 const app = express();
@@ -108,6 +109,9 @@ app.use('/api/timetable/entries', requireAuth, entryRoutes);
 app.use('/api/timetable', requireAuth, timetableRoutes);
 app.use('/api/faculty', requireAuth, facultyRoutes);
 app.use('/api/availability', requireAuth, availabilityRoutes);
+// Branch / subject / class management. Reads work without a database; writes
+// need one, for the same reason timetable entry writes do.
+app.use('/api', requireAuth, catalogRoutes);
 
 // Unknown API paths answer in JSON instead of returning the dashboard HTML.
 app.use('/api', (req, res) => {

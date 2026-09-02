@@ -437,3 +437,19 @@ button.stat .stat-link {
 .data.directory td.list {
   max-width: 220px; overflow: hidden; text-overflow: ellipsis;
 }
+
+/* ---- Add Timetable method chooser: all three routes visible at once ---- */
+.method-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; }
+.method {
+  border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 15px 16px; background: var(--surface);
+}
+.method.is-active { border-color: var(--navy-600); background: var(--blue-050); }
+.method h3 { margin: 0 0 6px; font-size: 0.9rem; font-weight: 600; color: var(--ink-900); }
+.method p { margin: 0 0 10px; font-size: 0.82rem; color: var(--ink-500); }
+
+/* ---- catalog forms ---- */
+.form-grid { display: flex; gap: 12px; flex-wrap: wrap; align-items: flex-end; }
+.form-grid label.field { margin-bottom: 0; min-width: 150px; flex: 1 1 150px; }
+.form-grid .btn { flex: none; }
+.btn-sm { padding: 4px 10px; font-size: 0.76rem; }

@@ -298,8 +298,13 @@ async function run() {
     const formats = await get('/api/timetable/import/formats');
     check('GET /api/timetable/import/formats documents the layouts', () => {
         assert.strictEqual(formats.status, 200);
-        assert.deepStrictEqual(formats.body.supported, ['.xlsx', '.csv']);
+        // Spreadsheets are parsed here; image/PDF route to the extraction adapter.
+        assert.deepStrictEqual(formats.body.spreadsheet, ['.xlsx', '.xls', '.csv']);
+        ['.xlsx', '.xls', '.csv', '.png', '.jpg', '.jpeg', '.webp', '.pdf']
+            .forEach(ext => assert.ok(formats.body.supported.includes(ext), ext));
         assert.strictEqual(formats.body.primary, '.xlsx');
+        assert.strictEqual(formats.body.document.available, false,
+            'no extraction provider is configured by default');
     });
 
     const csvPreview = await upload(BASE, '/api/timetable/import/preview', 'tt.csv', Buffer.from(CSV_MATRIX));

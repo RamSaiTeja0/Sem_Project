@@ -132,6 +132,9 @@
         attendance: 'Attendance Track',
         timetable: 'Master Timetable',
         manage: 'Add Timetable',
+        branches: 'Branch Management',
+        subjects: 'Subject Management',
+        classes: 'Class Management',
         faculty: 'Faculty Directory',
         reports: 'Availability Summary',
         validation: 'Validation Report',
@@ -157,6 +160,10 @@
 
         if (name === 'faculty') { loadFacultyForm(); loadFacultyTable(); }
         if (name === 'reports') loadReports();
+        if (name === 'manage') loadDocumentStatus();
+        if (name === 'branches') loadBranches();
+        if (name === 'subjects') loadSubjects();
+        if (name === 'classes') loadClasses();
         if (name === 'attendance') loadAttendance();
         if (name === 'schedule') loadSchedule();
         if (name === 'manage') loadManage();
@@ -1732,6 +1739,207 @@
         loadFacultyTable();
     }
 
+
+    /* ==================================================================
+     * Catalog management — branches, subjects and classes.
+     *
+     * A BRANCH is a programme (CSE). A CLASS is a section inside one (CSE-A).
+     * Branch lists are fetched from the API rather than hardcoded, so a branch
+     * created here appears in every dropdown without a code change.
+     * ================================================================== */
+
+    var catalogState = { branches: [] };
+
+    function catalogFail(containerId, err) {
+        var node = el(containerId);
+        if (node) node.innerHTML = notice(err && err.message ? err.message : String(err), 'error');
+    }
+
+    function backendPill(pillId, noteId, writable) {
+        var pill = el(pillId);
+        if (pill) {
+            pill.textContent = writable ? 'Database' : 'Demo dataset (read-only)';
+            pill.className = 'pill ' + (writable ? 'pill-ok' : 'pill-warn');
+        }
+        var note = el(noteId);
+        if (note) {
+            note.innerHTML = writable ? '' : notice(
+                'No database is configured, so this list is read-only. Set DATABASE_URL ' +
+                '(Neon or any PostgreSQL) and restart to add, edit or remove records.', 'warn');
+        }
+    }
+
+    /** Fill every branch dropdown from the live list. */
+    function fillBranchSelects(branches) {
+        var options = branches.map(function (b) {
+            return { value: b.code, label: b.code + ' — ' + b.name };
+        });
+        ['subjectBranch', 'classBranch'].forEach(function (id) {
+            var current = el(id) && el(id).value;
+            fillSelect(el(id), options, current);
+        });
+        ['subjectFilter', 'classFilter'].forEach(function (id) {
+            var current = el(id) && el(id).value;
+            fillSelect(el(id), [{ value: '', label: 'All branches' }].concat(options), current);
+        });
+    }
+
+    function loadBranches() {
+        return getJson('/api/branches').then(function (data) {
+            catalogState.branches = data.branches;
+            backendPill('branchBackend', 'branchStorageNote', data.writable);
+            fillBranchSelects(data.branches);
+
+            var submit = el('branchSubmit');
+            if (submit) submit.disabled = !data.writable;
+
+            el('branchBody').innerHTML = data.branches.map(function (b) {
+                return '<tr>' +
+                    '<td class="mono">' + esc(b.code) + '</td>' +
+                    '<td>' + esc(b.name) + '</td>' +
+                    '<td class="num">' + esc(b.facultyCount) + '</td>' +
+                    '<td>' + (data.writable
+                        ? '<button type="button" class="btn btn-secondary btn-sm" data-branch-delete="' +
+                          esc(b.code) + '">Delete</button>'
+                        : '<span class="muted">read-only</span>') + '</td>' +
+                    '</tr>';
+            }).join('');
+
+            Array.prototype.forEach.call(
+                document.querySelectorAll('[data-branch-delete]'), function (button) {
+                    button.addEventListener('click', function () {
+                        deleteCatalog('/api/branches/' + encodeURIComponent(button.dataset.branchDelete),
+                            'branchResult', loadBranches);
+                    });
+                });
+        }).catch(function (err) { catalogFail('branchResult', err); });
+    }
+
+    function loadSubjects() {
+        var branch = el('subjectFilter') ? el('subjectFilter').value : '';
+        var url = '/api/subjects' + (branch ? '?branch=' + encodeURIComponent(branch) : '');
+        return Promise.all([
+            catalogState.branches.length ? Promise.resolve(null) : loadBranches(),
+            getJson(url)
+        ]).then(function (results) {
+            var data = results[1];
+            backendPill('subjectBackend', 'subjectStorageNote', data.writable);
+            fillBranchSelects(catalogState.branches);
+            var submit = el('subjectSubmit');
+            if (submit) submit.disabled = !data.writable;
+
+            el('subjectBody').innerHTML = data.subjects.length
+                ? data.subjects.map(function (sub) {
+                    return '<tr>' +
+                        '<td class="mono">' + esc(sub.code || '—') + '</td>' +
+                        '<td>' + esc(sub.name) + '</td>' +
+                        '<td>' + esc(sub.department || '—') + '</td>' +
+                        '<td><span class="badge badge-neutral">' + esc(sub.type || 'theory') + '</span></td>' +
+                        '<td>' + (data.writable && sub.code
+                            ? '<button type="button" class="btn btn-secondary btn-sm" data-subject-delete="' +
+                              esc(sub.code) + '">Delete</button>'
+                            : '<span class="muted">read-only</span>') + '</td>' +
+                        '</tr>';
+                }).join('')
+                : '<tr><td colspan="5" class="muted">No subjects for this branch yet.</td></tr>';
+
+            Array.prototype.forEach.call(
+                document.querySelectorAll('[data-subject-delete]'), function (button) {
+                    button.addEventListener('click', function () {
+                        deleteCatalog('/api/subjects/' + encodeURIComponent(button.dataset.subjectDelete),
+                            'subjectResult', loadSubjects);
+                    });
+                });
+        }).catch(function (err) { catalogFail('subjectResult', err); });
+    }
+
+    function loadClasses() {
+        var branch = el('classFilter') ? el('classFilter').value : '';
+        var url = '/api/classes' + (branch ? '?branch=' + encodeURIComponent(branch) : '');
+        return Promise.all([
+            catalogState.branches.length ? Promise.resolve(null) : loadBranches(),
+            getJson(url)
+        ]).then(function (results) {
+            var data = results[1];
+            backendPill('classBackend', 'classStorageNote', data.writable);
+            fillBranchSelects(catalogState.branches);
+            var submit = el('classSubmit');
+            if (submit) submit.disabled = !data.writable;
+
+            el('classBody').innerHTML = data.classes.length
+                ? data.classes.map(function (cls) {
+                    return '<tr>' +
+                        '<td class="mono">' + esc(cls.code) + '</td>' +
+                        '<td>' + esc(cls.department || '—') + '</td>' +
+                        '<td class="num">' + esc(cls.semester == null ? '—' : cls.semester) + '</td>' +
+                        '<td>' + esc(cls.academicYear || '—') + '</td>' +
+                        '<td>' + (data.writable
+                            ? '<button type="button" class="btn btn-secondary btn-sm" data-class-delete="' +
+                              esc(cls.code) + '">Delete</button>'
+                            : '<span class="muted">read-only</span>') + '</td>' +
+                        '</tr>';
+                }).join('')
+                : '<tr><td colspan="5" class="muted">No classes for this branch yet.</td></tr>';
+
+            Array.prototype.forEach.call(
+                document.querySelectorAll('[data-class-delete]'), function (button) {
+                    button.addEventListener('click', function () {
+                        deleteCatalog('/api/classes/' + encodeURIComponent(button.dataset.classDelete),
+                            'classResult', loadClasses);
+                    });
+                });
+        }).catch(function (err) { catalogFail('classResult', err); });
+    }
+
+    /** Shared create handler: POST, report, refresh. */
+    function submitCatalog(url, payload, resultId, reload) {
+        var container = el(resultId);
+        if (container) container.innerHTML = notice('Saving…', 'info');
+        return postJson(url, payload).then(function (res) {
+            if (!res.ok) {
+                var message = (res.body && res.body.error) || ('Request failed (HTTP ' + res.status + ')');
+                if (container) container.innerHTML = notice(message, 'error');
+                return false;
+            }
+            if (container) container.innerHTML = notice(res.body.message || 'Saved.', 'ok');
+            // A new branch changes every branch dropdown, so refresh the list.
+            return loadBranches().then(reload).then(function () { return true; });
+        }).catch(function () {
+            if (container) container.innerHTML = notice('Could not reach the server.', 'error');
+            return false;
+        });
+    }
+
+    function deleteCatalog(url, resultId, reload) {
+        var container = el(resultId);
+        if (container) container.innerHTML = notice('Removing…', 'info');
+        return fetch(url, { method: 'DELETE' }).then(function (response) {
+            return response.json().catch(function () { return null; })
+                .then(function (body) {
+                    if (!response.ok) {
+                        container.innerHTML = notice(
+                            (body && body.error) || ('Delete failed (HTTP ' + response.status + ')'), 'error');
+                        return;
+                    }
+                    container.innerHTML = notice((body && body.message) || 'Removed.', 'ok');
+                    return loadBranches().then(reload);
+                });
+        }).catch(function () {
+            container.innerHTML = notice('Could not reach the server.', 'error');
+        });
+    }
+
+    /** Image/PDF extraction availability, shown on the Add Timetable page. */
+    function loadDocumentStatus() {
+        return getJson('/api/timetable/import/document-status').then(function (status) {
+            var node = el('manageDocStatus');
+            if (!node) return;
+            node.innerHTML = status.available
+                ? notice(status.message, 'ok')
+                : notice(status.message + ' Use ' + status.alternatives.join(', ') + '.', 'warn');
+        }).catch(function () { /* leave the card as-is */ });
+    }
+
     // ------------------------------------------------------------ wiring
     document.addEventListener('DOMContentLoaded', function () {
         loadAttendanceState();
@@ -1901,6 +2109,48 @@
             saveAttendanceState();
             loadAttendance();
         });
+
+        // --- catalog forms ---
+        var branchForm = el('branchForm');
+        if (branchForm) branchForm.addEventListener('submit', function (event) {
+            event.preventDefault();
+            submitCatalog('/api/branches', {
+                code: el('branchCode').value, name: el('branchName').value
+            }, 'branchResult', loadBranches).then(function (ok) {
+                if (ok) { el('branchCode').value = ''; el('branchName').value = ''; }
+            });
+        });
+
+        var subjectForm = el('subjectForm');
+        if (subjectForm) subjectForm.addEventListener('submit', function (event) {
+            event.preventDefault();
+            submitCatalog('/api/subjects', {
+                code: el('subjectCode').value, name: el('subjectName').value,
+                department: el('subjectBranch').value, type: el('subjectType').value
+            }, 'subjectResult', loadSubjects).then(function (ok) {
+                if (ok) { el('subjectCode').value = ''; el('subjectName').value = ''; }
+            });
+        });
+
+        var classForm = el('classForm');
+        if (classForm) classForm.addEventListener('submit', function (event) {
+            event.preventDefault();
+            submitCatalog('/api/classes', {
+                code: el('classCode').value, department: el('classBranch').value,
+                semester: el('classSemester').value, academicYear: el('classYear').value
+            }, 'classResult', loadClasses).then(function (ok) {
+                if (ok) { el('classCode').value = ''; el('classSemester').value = ''; }
+            });
+        });
+
+        if (el('subjectFilter')) el('subjectFilter').addEventListener('change', loadSubjects);
+        if (el('classFilter')) el('classFilter').addEventListener('change', loadClasses);
+
+        // Method cards on Add Timetable jump to the import view.
+        Array.prototype.forEach.call(document.querySelectorAll('[data-goto]'), function (button) {
+            button.addEventListener('click', function () { showView(button.dataset.goto); });
+        });
+
 
         var initial = viewFromHash();
         if (initial) showView(initial, false);

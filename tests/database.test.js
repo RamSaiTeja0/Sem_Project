@@ -189,9 +189,19 @@ async function run() {
     await new Promise(resolve => server.once('listening', resolve));
     base = `http://localhost:${server.address().port}`;
 
+    // The demo timetable fills every class completely, so free a slot first by
+    // removing one entry through the API. That exercises the delete path and
+    // gives the add/edit tests below a genuinely empty coordinate to write to.
+    const seeded = await call('GET', '/api/timetable/entries?class=CSE-A');
+    assert.ok(seeded.body.entries.length, 'CSE-A must have seeded entries');
+    const vacated = seeded.body.entries[0];
+    const removed = await call('DELETE', '/api/timetable/entries/' + vacated.id);
+    assert.strictEqual(removed.status, 200, 'freeing a slot must succeed');
+
     const grid = await call('GET', '/api/timetable?class=CSE-A');
     const freeCell = grid.body.cells.find(c => c.status === 'free');
-    assert.ok(freeCell, 'the demo timetable must leave at least one CSE-A slot free');
+    assert.ok(freeCell, 'the vacated CSE-A slot must now read as free');
+    const freeClass = 'CSE-A';
 
     const slotBefore = await call('POST', '/api/availability',
         { day: freeCell.day, period: freeCell.period });
@@ -200,7 +210,7 @@ async function run() {
     // Two classes other than CSE-A, taken from the dataset rather than named
     // literally, so this suite survives a change to the demo classes.
     const reference = (await call('GET', '/api/timetable/entries/reference')).body;
-    const otherClasses = reference.classes.map(c => c.code).filter(code => code !== 'CSE-A');
+    const otherClasses = reference.classes.map(c => c.code).filter(code => code !== freeClass);
     assert.ok(otherClasses.length >= 2, 'the demo data needs at least three classes');
 
     // Two theory subjects, again taken from the data rather than named here.

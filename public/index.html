@@ -31,6 +31,9 @@
       <div class="nav-label">Manage</div>
       <button type="button" class="nav-item" data-view="timetable">Master Timetable</button>
       <button type="button" class="nav-item" data-view="manage">Add Timetable</button>
+      <button type="button" class="nav-item" data-view="branches">Branch Management</button>
+      <button type="button" class="nav-item" data-view="subjects">Subject Management</button>
+      <button type="button" class="nav-item" data-view="classes">Class Management</button>
       <button type="button" class="nav-item" data-view="faculty">Faculty Directory</button>
       <button type="button" class="nav-item" data-view="reports">Availability Summary</button>
       <button type="button" class="nav-item" data-view="validation">Validation Report</button>
@@ -169,6 +172,38 @@
       <!-- ------------------- ADJUST / SUBSTITUTE --------------------- -->
       <!-- ----------------------- ADD TIMETABLE ----------------------- -->
       <section class="view" id="view-manage">
+        <div class="card">
+          <div class="card-head">
+            <div>
+              <h2>Add Timetable</h2>
+              <p>Three ways to get a timetable into the system. All remain available.</p>
+            </div>
+          </div>
+          <div class="card-body">
+            <div class="method-grid">
+              <div class="method is-active">
+                <h3>A · Manual Timetable Entry</h3>
+                <p>Enter one period at a time using the form below — branch, class,
+                   semester, day, period, subject, faculty, room and session type.</p>
+                <span class="badge badge-neutral">Available below</span>
+              </div>
+              <div class="method">
+                <h3>B · Import from Excel</h3>
+                <p>Upload an existing .xlsx or .xls timetable. Parsed, validated and
+                   previewed before anything is loaded.</p>
+                <button type="button" class="btn btn-secondary" data-goto="import">Open Excel import</button>
+              </div>
+              <div class="method">
+                <h3>C · Import Image / PDF</h3>
+                <p>Read a timetable from a photo or PDF when a document extraction
+                   provider is configured.</p>
+                <button type="button" class="btn btn-secondary" data-goto="import">Open document import</button>
+                <div id="manageDocStatus" class="muted" style="margin-top:8px;"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
         <div class="card">
           <div class="card-head">
             <div>
@@ -518,6 +553,109 @@ Dr. Priya Sharma, FREE, DBMS, DBMS"></textarea>
             <p class="muted" style="margin-top:12px;">
               Each cell shows how many faculty are free at that slot, out of the full roster.
             </p>
+          </div>
+        </div>
+      </section>
+
+      <!-- --------------------- BRANCH MANAGEMENT --------------------- -->
+      <section class="view" id="view-branches">
+        <div class="card">
+          <div class="card-head">
+            <div>
+              <h2>Branch Management</h2>
+              <p>A branch is an academic programme (CSE). A class/section such as CSE-A
+                 lives inside a branch and is managed under Class Management.</p>
+            </div>
+            <span class="pill" id="branchBackend">Checking storage…</span>
+          </div>
+          <div class="card-body">
+            <div id="branchStorageNote"></div>
+            <form id="branchForm" class="form-grid">
+              <label class="field"><span>Branch code *</span>
+                <input type="text" id="branchCode" placeholder="e.g. AIDS" maxlength="16" /></label>
+              <label class="field" style="flex:2 1 280px;"><span>Branch name *</span>
+                <input type="text" id="branchName" placeholder="e.g. Artificial Intelligence and Data Science" /></label>
+              <button type="submit" class="btn" id="branchSubmit">Add branch</button>
+            </form>
+            <div id="branchResult" style="margin-top:12px;"></div>
+            <div class="table-scroll" style="margin-top:16px;">
+              <table class="data">
+                <thead><tr><th>Code</th><th>Name</th><th class="num">Faculty</th><th>Actions</th></tr></thead>
+                <tbody id="branchBody"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- -------------------- SUBJECT MANAGEMENT --------------------- -->
+      <section class="view" id="view-subjects">
+        <div class="card">
+          <div class="card-head">
+            <div>
+              <h2>Subject Management</h2>
+              <p>Subjects belong to one branch. A subject added to AIDS does not appear under CSE.</p>
+            </div>
+            <span class="pill" id="subjectBackend">Checking storage…</span>
+          </div>
+          <div class="card-body">
+            <div id="subjectStorageNote"></div>
+            <form id="subjectForm" class="form-grid">
+              <label class="field"><span>Subject code *</span>
+                <input type="text" id="subjectCode" placeholder="e.g. AI301" /></label>
+              <label class="field" style="flex:2 1 240px;"><span>Subject name *</span>
+                <input type="text" id="subjectName" placeholder="e.g. Machine Learning" /></label>
+              <label class="field"><span>Branch *</span><select id="subjectBranch"></select></label>
+              <label class="field"><span>Type</span>
+                <select id="subjectType"><option value="theory">Theory</option><option value="lab">Lab</option></select></label>
+              <button type="submit" class="btn" id="subjectSubmit">Add subject</button>
+            </form>
+            <div id="subjectResult" style="margin-top:12px;"></div>
+            <div class="controls" style="margin-top:16px;">
+              <label class="field"><span>Filter by branch</span><select id="subjectFilter"></select></label>
+            </div>
+            <div class="table-scroll" style="margin-top:10px;">
+              <table class="data">
+                <thead><tr><th>Code</th><th>Name</th><th>Branch</th><th>Type</th><th>Actions</th></tr></thead>
+                <tbody id="subjectBody"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- --------------------- CLASS MANAGEMENT ---------------------- -->
+      <section class="view" id="view-classes">
+        <div class="card">
+          <div class="card-head">
+            <div>
+              <h2>Class Management</h2>
+              <p>Classes/sections inside a branch — AIDS-A and AIDS-B both belong to AIDS.</p>
+            </div>
+            <span class="pill" id="classBackend">Checking storage…</span>
+          </div>
+          <div class="card-body">
+            <div id="classStorageNote"></div>
+            <form id="classForm" class="form-grid">
+              <label class="field"><span>Class code *</span>
+                <input type="text" id="classCode" placeholder="e.g. AIDS-A" /></label>
+              <label class="field"><span>Branch *</span><select id="classBranch"></select></label>
+              <label class="field"><span>Semester</span>
+                <input type="text" id="classSemester" placeholder="e.g. 5" /></label>
+              <label class="field"><span>Academic year</span>
+                <input type="text" id="classYear" placeholder="e.g. 2025-26" /></label>
+              <button type="submit" class="btn" id="classSubmit">Add class</button>
+            </form>
+            <div id="classResult" style="margin-top:12px;"></div>
+            <div class="controls" style="margin-top:16px;">
+              <label class="field"><span>Filter by branch</span><select id="classFilter"></select></label>
+            </div>
+            <div class="table-scroll" style="margin-top:10px;">
+              <table class="data">
+                <thead><tr><th>Code</th><th>Branch</th><th class="num">Semester</th><th>Academic year</th><th>Actions</th></tr></thead>
+                <tbody id="classBody"></tbody>
+              </table>
+            </div>
           </div>
         </div>
       </section>

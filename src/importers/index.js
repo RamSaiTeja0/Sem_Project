@@ -10,6 +10,7 @@ const path = require('path');
 
 const excelImporter = require('./excelImporter');
 const csvImporter = require('./csvImporter');
+const documentImporter = require('./documentImporter');
 const { normalize } = require('../core/normalizer');
 const { validate } = require('../core/validator');
 const store = require('../data/store');
@@ -17,18 +18,26 @@ const store = require('../data/store');
 const IMPORTERS = {
     '.xlsx': excelImporter,
     '.xlsm': excelImporter,
-    '.csv': csvImporter
+    '.xls': excelImporter,
+    '.csv': csvImporter,
+    // Image and PDF go to the adapter, which reports honestly that extraction
+    // is not configured rather than guessing at the table.
+    '.png': documentImporter,
+    '.jpg': documentImporter,
+    '.jpeg': documentImporter,
+    '.webp': documentImporter,
+    '.pdf': documentImporter
 };
 
-const SUPPORTED = ['.xlsx', '.csv'];
+const SUPPORTED = ['.xlsx', '.xls', '.csv', '.png', '.jpg', '.jpeg', '.webp', '.pdf'];
+const SPREADSHEET_FORMATS = ['.xlsx', '.xls', '.csv'];
 
 function importerFor(filename) {
     const ext = path.extname(String(filename || '')).toLowerCase();
     const importer = IMPORTERS[ext];
     if (!importer) {
         const error = new Error(
-            `Unsupported file type "${ext || filename}". Upload ${SUPPORTED.join(' or ')}.` +
-            (ext === '.xls' ? ' Legacy .xls must be re-saved as .xlsx.' : ''));
+            `Unsupported file type "${ext || filename}". Supported: ${SUPPORTED.join(', ')}.`);
         error.code = 'UNSUPPORTED_FILE_TYPE';
         throw error;
     }
@@ -94,4 +103,8 @@ async function commit(buffer, filename, options = {}) {
     return { ...result, loaded: true };
 }
 
-module.exports = { preview, commit, analyse, importerFor, buildPreview, SUPPORTED };
+module.exports = {
+    preview, commit, analyse, importerFor, buildPreview,
+    SUPPORTED, SPREADSHEET_FORMATS,
+    documentImporter
+};

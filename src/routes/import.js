@@ -24,14 +24,23 @@ const upload = multer({
 router.get('/formats', (req, res) => {
     res.json({
         supported: importer.SUPPORTED,
+        spreadsheet: importer.SPREADSHEET_FORMATS,
         primary: '.xlsx',
         layouts: {
             matrix: 'Faculty | Monday P1 | Monday P2 | ... — a cell reading FREE or blank means not teaching',
             long: 'Faculty | Day | Period | Subject | Class | Room'
         },
         maxUploadMB: Math.round(config.maxUploadBytes / (1024 * 1024)),
-        note: 'Excel and CSV run through the same normalizer, so both produce identical data.'
+        note: 'Excel and CSV run through the same normalizer, so both produce identical data.',
+        // Image/PDF is served by a pluggable provider; the UI shows this
+        // verbatim so it can never imply extraction works when it does not.
+        document: importer.documentImporter.status()
     });
+});
+
+/** Extraction status on its own, for the Image/PDF tab. */
+router.get('/document-status', (req, res) => {
+    res.json(importer.documentImporter.status());
 });
 
 function handleUpload(action) {
@@ -59,11 +68,12 @@ function handleUpload(action) {
                 origin: store.origin
             });
         } catch (err) {
-            const status = err.code === 'VALIDATION_FAILED' ? 422 : 400;
+            const status = err.status || (err.code === 'VALIDATION_FAILED' ? 422 : 400);
             res.status(status).json({
                 error: err.message,
                 code: err.code || 'IMPORT_FAILED',
-                report: err.report || null
+                report: err.report || null,
+                alternatives: err.alternatives || null
             });
         }
     };

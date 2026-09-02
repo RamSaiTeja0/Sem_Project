@@ -27,6 +27,28 @@ const DESIGNATIONS = [
 const STATUSES = ['active', 'on_leave', 'inactive'];
 
 /** Deliberately permissive: enough to catch a typo, not to police addresses. */
+/**
+ * Branch codes that currently exist — from the database when one is serving,
+ * otherwise the bundled list plus anything already on the roster. Read live so
+ * a branch created through /api/branches is usable immediately, with no code
+ * change and no restart.
+ */
+async function knownBranchCodes() {
+    if (db.isConfigured() && store.usingDatabase) {
+        try {
+            const rows = await repository.listDepartments();
+            if (rows.length) return rows.map(r => String(r.code).toUpperCase());
+        } catch (err) {
+            // Fall through to the bundled list rather than blocking the write.
+        }
+    }
+    const codes = new Set(DEPARTMENTS.map(d => d.code.toUpperCase()));
+    store.engine.getFaculty().forEach(f => {
+        if (f.department) codes.add(String(f.department).toUpperCase());
+    });
+    return [...codes];
+}
+
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 function requireDatabase(req, res, next) {
@@ -123,7 +145,7 @@ router.get('/', (req, res) => {
  * Validate a submitted faculty member, reporting every problem at once.
  * @returns {{ member }} or {{ errors: string[] }}
  */
-function parseFaculty(body) {
+function parseFaculty(body, knownCodes) {
     const text = value => (value == null ? '' : String(value).trim());
     const errors = [];
 
@@ -139,8 +161,8 @@ function parseFaculty(body) {
 
     const department = text(body.department).toUpperCase();
     if (!department) errors.push('Department is required');
-    else if (!findDepartment(department)) {
-        errors.push(`Unknown department "${department}". Valid: ${DEPARTMENTS.map(d => d.code).join(', ')}`);
+    else if (!knownCodes.includes(department)) {
+        errors.push(`Unknown department "${department}". Valid: ${knownCodes.join(', ')}`);
     }
 
     const email = text(body.email);
@@ -170,7 +192,7 @@ function parseFaculty(body) {
 }
 
 router.post('/', requireDatabase, async (req, res, next) => {
-    const parsed = parseFaculty(req.body || {});
+    const parsed = parseFaculty(req.body || {}, await knownBranchCodes());
     if (parsed.errors) {
         return res.status(400).json({
             error: parsed.errors.join('; '), code: 'INVALID_FACULTY', problems: parsed.errors
