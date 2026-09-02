@@ -78,7 +78,7 @@ async function run() {
     const openTimetable = await call(OPEN, 'GET', '/api/timetable');
     check('the demo timetable stays browsable without signing in', () => {
         assert.strictEqual(openTimetable.status, 200);
-        assert.strictEqual(openTimetable.body.cells.length, 35);
+        assert.strictEqual(openTimetable.body.cells.length, 42);
     });
 
     const accounts = await call(OPEN, 'GET', '/api/auth/accounts');
@@ -86,7 +86,7 @@ async function run() {
         assert.strictEqual(accounts.status, 200);
         const names = accounts.body.accounts.map(a => a.username);
         assert.ok(names.includes('admin'), 'the coordinator account must exist');
-        assert.strictEqual(accounts.body.accounts.length, 22, '1 coordinator + 21 faculty');
+        assert.strictEqual(accounts.body.accounts.length, 18, '1 coordinator + 17 faculty');
         // A password must never be attached to an account record.
         accounts.body.accounts.forEach(a =>
             assert.strictEqual(a.password, undefined, 'accounts must not carry passwords'));
@@ -135,12 +135,12 @@ async function run() {
     });
 
     const facultyLogin = await call(OPEN, 'POST', '/api/auth/login',
-        { username: 'arjun.rao', password: 'tecsub123' });
+        { username: 'b.gopala.rao', password: 'tecsub123' });
     check('a faculty account signs in and carries its own faculty name', () => {
         assert.strictEqual(facultyLogin.status, 200);
         assert.strictEqual(facultyLogin.body.user.role, 'faculty');
-        assert.strictEqual(facultyLogin.body.user.facultyName, 'Dr. Arjun Rao');
-        assert.strictEqual(facultyLogin.body.user.department, 'CSE');
+        assert.strictEqual(facultyLogin.body.user.facultyName, 'Sri B. Gopala Rao');
+        assert.strictEqual(facultyLogin.body.user.department, 'CME');
     });
 
     const loggedOut = await call(OPEN, 'POST', '/api/auth/logout', {}, cookie);
@@ -176,7 +176,7 @@ async function run() {
     });
 
     const lockedLogin = await call(LOCKED, 'POST', '/api/auth/login',
-        { username: 'arjun.rao', password: 'tecsub123' });
+        { username: 'b.gopala.rao', password: 'tecsub123' });
     check('signing in works while the guard is on', () => {
         assert.strictEqual(lockedLogin.status, 200);
         assert.ok(lockedLogin.cookie);
@@ -185,7 +185,7 @@ async function run() {
     const afterLogin = await call(LOCKED, 'GET', '/api/timetable', null, lockedLogin.cookie);
     check('the same API call succeeds once signed in', () => {
         assert.strictEqual(afterLogin.status, 200);
-        assert.strictEqual(afterLogin.body.cells.length, 35);
+        assert.strictEqual(afterLogin.body.cells.length, 42);
     });
 
     const pageAfterLogin = await call(LOCKED, 'GET', '/dashboard', null, lockedLogin.cookie);

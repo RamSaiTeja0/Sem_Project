@@ -352,7 +352,7 @@
               </div>
               <div class="controls" style="margin-top:14px;">
                 <label class="field"><span>Class name (optional)</span>
-                  <input type="text" id="importClass" placeholder="e.g. CSE-A" /></label>
+                  <input type="text" id="importClass" placeholder="e.g. CME-A" /></label>
                 <button type="button" class="btn" id="importPreview">Process &amp; preview</button>
               </div>
               <p class="muted" id="formatNote" style="margin-top:10px;"></p>
@@ -368,12 +368,12 @@
               <label class="field">
                 <span>Pasted timetable</span>
                 <textarea id="pasteText" placeholder="Faculty, Monday P1, Monday P2, Tuesday P1
-Dr. Arjun Rao, Data Structures, FREE, Data Structures
-Dr. Priya Sharma, FREE, DBMS, DBMS"></textarea>
+Ms. B. Kusuma, Python Programming, Python Programming, FREE
+Ms. G. Sandhya Rani, FREE, FREE, Big Data &amp; Cloud Computing"></textarea>
               </label>
               <div class="controls" style="margin-top:12px;">
                 <label class="field"><span>Class name (optional)</span>
-                  <input type="text" id="pasteClass" placeholder="e.g. CSE-A" /></label>
+                  <input type="text" id="pasteClass" placeholder="e.g. CME-A" /></label>
                 <button type="button" class="btn" id="pastePreview">Process &amp; preview</button>
                 <button type="button" class="btn btn-secondary" id="pasteClear">Clear</button>
               </div>
@@ -563,7 +563,7 @@ Dr. Priya Sharma, FREE, DBMS, DBMS"></textarea>
           <div class="card-head">
             <div>
               <h2>Branch Management</h2>
-              <p>A branch is an academic programme (CSE). A class/section such as CSE-A
+              <p>A branch is an academic programme (CME). A class/section such as CME-A
                  lives inside a branch and is managed under Class Management.</p>
             </div>
             <span class="pill" id="branchBackend">Checking storage…</span>
@@ -572,9 +572,9 @@ Dr. Priya Sharma, FREE, DBMS, DBMS"></textarea>
             <div id="branchStorageNote"></div>
             <form id="branchForm" class="form-grid">
               <label class="field"><span>Branch code *</span>
-                <input type="text" id="branchCode" placeholder="e.g. AIDS" maxlength="16" /></label>
+                <input type="text" id="branchCode" placeholder="e.g. EE" maxlength="16" /></label>
               <label class="field" style="flex:2 1 280px;"><span>Branch name *</span>
-                <input type="text" id="branchName" placeholder="e.g. Artificial Intelligence and Data Science" /></label>
+                <input type="text" id="branchName" placeholder="e.g. Electrical Engineering" /></label>
               <button type="submit" class="btn" id="branchSubmit">Add branch</button>
             </form>
             <div id="branchResult" style="margin-top:12px;"></div>
@@ -594,7 +594,7 @@ Dr. Priya Sharma, FREE, DBMS, DBMS"></textarea>
           <div class="card-head">
             <div>
               <h2>Subject Management</h2>
-              <p>Subjects belong to one branch. A subject added to AIDS does not appear under CSE.</p>
+              <p>Subjects belong to one branch. A subject added to ECE does not appear under CME.</p>
             </div>
             <span class="pill" id="subjectBackend">Checking storage…</span>
           </div>

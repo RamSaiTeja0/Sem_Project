@@ -60,7 +60,8 @@ function createEngine(normalized) {
                     phone: record.phone || null,
                     className: record.className,
                     room: record.room,
-                    status: 'busy'
+                    type: record.type,
+                    status: record.status || (record.faculty ? 'busy' : 'activity')
                 }
                 : {
                     day, period,

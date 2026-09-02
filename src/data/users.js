@@ -16,7 +16,7 @@ const store = require('./store');
 function slug(name) {
     return String(name)
         .toLowerCase()
-        .replace(/^(dr|prof|mr|mrs|ms)\.?\s+/, '')
+        .replace(/^(dr|prof|mr|mrs|ms|sri)\.?\s+/, '')
         .replace(/[^a-z0-9]+/g, '.')
         .replace(/^\.|\.$/g, '');
 }

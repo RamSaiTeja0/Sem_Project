@@ -25,6 +25,7 @@ function validate(normalized) {
     // A faculty cannot teach two classes in the same slot.
     const bySlot = new Map();
     busy.forEach(record => {
+        if (!record.faculty) return;
         const key = `${record.faculty}|${record.day}|${record.period}`;
         const existing = bySlot.get(key);
         if (existing && existing.className !== record.className) {

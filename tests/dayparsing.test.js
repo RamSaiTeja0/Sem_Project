@@ -154,12 +154,15 @@ async function importTests() {
 function providerTests() {
     console.log('\n[3] PDF.co document extraction provider');
 
-    check('with no API key, extraction reports it is not configured', () => {
+    const config = require('../src/config');
+    check('extraction status matches key configuration', () => {
         const status = documentImporter.status();
-        assert.strictEqual(status.available, false);
+        assert.strictEqual(status.available, Boolean(config.pdfcoApiKey));
         assert.strictEqual(status.configuredVia, 'PDFCO_API_KEY');
-        assert.match(status.message, /Add PDFCO_API_KEY/);
-        assert.match(status.message, /no extraction has been attempted/i);
+        if (!config.pdfcoApiKey) {
+            assert.match(status.message, /Add PDFCO_API_KEY/);
+            assert.match(status.message, /no extraction has been attempted/i);
+        }
     });
 
     check('an unconfigured provider refuses rather than inventing a timetable', () => {
@@ -338,7 +341,7 @@ async function httpTests() {
     });
 
     const casing = await upload(BASE, '/api/timetable/import/preview', 'tt.csv',
-        Buffer.from(LONG_FORM_CSV), { defaultClass: 'cse-a' });
+        Buffer.from(LONG_FORM_CSV), { defaultClass: 'cme-a' });
     check('a class typed in the wrong case is accepted and corrected', () => {
         assert.strictEqual(casing.status, 200);
     });

@@ -57,7 +57,8 @@ function isFreeToken(value) {
 /** Session kinds a source may state directly. */
 const TYPE_ALIASES = {
     LAB: 'lab', LABORATORY: 'lab', PRACTICAL: 'lab', PRAC: 'lab',
-    THEORY: 'theory', LECTURE: 'theory', LEC: 'theory', CLASS: 'theory'
+    THEORY: 'theory', LECTURE: 'theory', LEC: 'theory', CLASS: 'theory',
+    ACTIVITY: 'activity'
 };
 
 /**
@@ -209,6 +210,23 @@ function normalize(source) {
     const busyRecords = [];
     const seen = new Map();
 
+    function pushActivity(day, period, subject, className, room, type) {
+        const record = {
+            faculty: null,
+            facultyId: null,
+            department: null,
+            phone: null,
+            day,
+            period,
+            subject,
+            className: className || null,
+            room: room || null,
+            type: type || 'activity',
+            status: 'activity'
+        };
+        busyRecords.push(record);
+    }
+
     function pushBusy(member, day, period, subject, className, room, type, context) {
         const key = `${member.name}|${day}|${period}`;
         if (seen.has(key)) {
@@ -254,12 +272,19 @@ function normalize(source) {
         }
         if (isFreeToken(entry.subject)) return; // an explicit free slot adds nothing
 
+        const subj = text(entry.subject);
+        if (!entry.faculty && subj) {
+            pushActivity(day, period, subj, text(entry.class || entry.className),
+                text(entry.room), entry.type || 'activity');
+            return;
+        }
+
         const member = resolveFaculty(entry.faculty, line);
         if (!member) {
             add('error', 'MISSING_FACULTY', `Entry ${index + 1}: no faculty name`, line);
             return;
         }
-        pushBusy(member, day, period, text(entry.subject), text(entry.class || entry.className),
+        pushBusy(member, day, period, subj, text(entry.class || entry.className),
             text(entry.room), entry.type, line);
     });
 
@@ -299,6 +324,15 @@ function normalize(source) {
                 }
                 if (isFreeToken(cell.subject)) return;
 
+                const subj = text(cell.subject);
+                if (!cell.faculty && subj) {
+                    for (let p = start; p <= end; p++) {
+                        pushActivity(day, p, subj, className, text(cell.room) || defaultRoom,
+                            cell.type || 'activity');
+                    }
+                    return;
+                }
+
                 const member = resolveFaculty(cell.faculty, { className, day, period: start });
                 if (!member) {
                     add('error', 'MISSING_FACULTY',
@@ -309,7 +343,7 @@ function normalize(source) {
                 // A lab spanning several periods becomes one record per period,
                 // so every coordinate is independently addressable.
                 for (let p = start; p <= end; p++) {
-                    pushBusy(member, day, p, text(cell.subject), className, text(cell.room) || defaultRoom,
+                    pushBusy(member, day, p, subj, className, text(cell.room) || defaultRoom,
                         cell.type, { className, day, period: p });
                 }
             });

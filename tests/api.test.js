@@ -68,22 +68,22 @@ async function run() {
     const meta = await get('/api/timetable/meta');
     check('GET /api/timetable/meta returns days, periods and classes', () => {
         assert.strictEqual(meta.status, 200);
-        assert.deepStrictEqual(meta.body.days, ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday']);
+        assert.deepStrictEqual(meta.body.days, ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']);
         assert.deepStrictEqual(meta.body.periods, [1, 2, 3, 4, 5, 6, 7]);
-        assert.strictEqual(meta.body.primaryClass, 'CSE-A');
-        assert.strictEqual(meta.body.facultyCount, 21);
+        assert.strictEqual(meta.body.primaryClass, 'CME-A');
+        assert.strictEqual(meta.body.facultyCount, 17);
         assert.deepStrictEqual(meta.body.classes.slice().sort(),
-            ['CIVIL-A', 'CME-A', 'CSE-A', 'CSE-B', 'ECE-A', 'ECE-B', 'EEE-A', 'MEC-A']);
+            ['CME-A', 'ECE-A', 'ECE-B', 'EE-A', 'MEC-A']);
     });
 
     const grid = await get('/api/timetable');
     check('GET /api/timetable returns the primary class grid', () => {
         assert.strictEqual(grid.status, 200);
-        assert.strictEqual(grid.body.name, 'CSE-A');
-        assert.strictEqual(grid.body.cells.length, 35);
+        assert.strictEqual(grid.body.name, 'CME-A');
+        assert.strictEqual(grid.body.cells.length, 42);
         const cell = grid.body.cells.find(c => c.day === 'Monday' && c.period === 2);
-        assert.strictEqual(cell.subject, 'Operating Systems');
-        assert.strictEqual(cell.faculty, 'Prof. Kiran Reddy');
+        assert.strictEqual(cell.subject, 'Python Programming');
+        assert.strictEqual(cell.faculty, 'Ms. B. Kusuma');
     });
 
     check('every grid cell carries the metadata a click needs', () => {
@@ -92,15 +92,15 @@ async function run() {
                 assert.ok(key in cell, `cell is missing ${key}`);
             });
         });
-        assert.strictEqual(new Set(grid.body.cells.map(c => `${c.day}|${c.period}`)).size, 35);
+        assert.strictEqual(new Set(grid.body.cells.map(c => `${c.day}|${c.period}`)).size, 42);
     });
 
-    const otherClass = await get('/api/timetable?class=CSE-B');
-    const facultyGrid = await get('/api/timetable?faculty=' + encodeURIComponent('Dr. Arjun Rao'));
+    const otherClass = await get('/api/timetable?class=ECE-A');
+    const facultyGrid = await get('/api/timetable?faculty=' + encodeURIComponent('Ms. B. Kusuma'));
     check('the grid can be viewed by class or by faculty', () => {
-        assert.strictEqual(otherClass.body.name, 'CSE-B');
+        assert.strictEqual(otherClass.body.name, 'ECE-A');
         assert.strictEqual(facultyGrid.body.view, 'faculty');
-        assert.strictEqual(facultyGrid.body.cells.filter(c => c.status === 'busy').length, 13);
+        assert.strictEqual(facultyGrid.body.cells.filter(c => c.status === 'busy').length, 9);
     });
 
     const missingClass = await get('/api/timetable?class=NOPE');
@@ -112,7 +112,7 @@ async function run() {
     const faculty = await get('/api/faculty');
     check('GET /api/faculty returns the roster with free/busy counts', () => {
         assert.strictEqual(faculty.status, 200);
-        assert.strictEqual(faculty.body.count, 21);
+        assert.strictEqual(faculty.body.count, 17);
         faculty.body.faculty.forEach(f => {
             assert.strictEqual(f.busyPeriods + f.freePeriods, f.totalPeriods);
             assert.ok(f.id && f.name && f.department);
@@ -120,29 +120,29 @@ async function run() {
     });
 
     const filtered = await get('/api/faculty?department=ECE');
-    const searched = await get('/api/faculty?search=arjun');
+    const searched = await get('/api/faculty?search=Kusuma');
     check('faculty filters by department and by name', () => {
         assert.strictEqual(filtered.body.count, 4);
         filtered.body.faculty.forEach(f => assert.strictEqual(f.department, 'ECE'));
         assert.strictEqual(searched.body.count, 1);
-        assert.strictEqual(searched.body.faculty[0].name, 'Dr. Arjun Rao');
+        assert.strictEqual(searched.body.faculty[0].name, 'Ms. B. Kusuma');
     });
 
     const departments = await get('/api/faculty/departments');
-    check('GET /api/faculty/departments lists all six branches with counts', () => {
+    check('GET /api/faculty/departments lists all four branches with counts', () => {
         assert.strictEqual(departments.status, 200);
         assert.deepStrictEqual(departments.body.departments.slice().sort(),
-            ['CIVIL', 'CME', 'CSE', 'ECE', 'EEE', 'MEC']);
+            ['CME', 'ECE', 'EE', 'MEC']);
         departments.body.details.forEach(d => {
             assert.ok(d.name && d.name !== d.code, `${d.code} has no full name`);
             assert.ok(Number.isInteger(d.facultyCount), `${d.code} has no roster count`);
         });
         const total = departments.body.details.reduce((sum, d) => sum + d.facultyCount, 0);
-        assert.strictEqual(total, 21, 'the branch counts must add up to the roster');
+        assert.strictEqual(total, 17, 'the branch counts must add up to the roster');
     });
 
     const perBranch = await Promise.all(
-        ['CSE', 'ECE', 'EEE', 'CME', 'MEC', 'CIVIL'].map(code =>
+        ['EE', 'ECE', 'MEC', 'CME'].map(code =>
             get('/api/faculty?department=' + code).then(res => ({ code, res }))));
     check('every branch filter returns only that branch', () => {
         perBranch.forEach(({ code, res }) => {
@@ -155,7 +155,7 @@ async function run() {
     check('a faculty record carries the full profile', () => {
         const member = profiled.body.faculty[0];
         assert.strictEqual(member.id, 'FAC001');
-        assert.strictEqual(member.department, 'CSE');
+        assert.strictEqual(member.department, 'CME');
         assert.ok(member.designation, 'designation is reported');
         assert.ok(member.phone, 'phone is reported');
         assert.match(member.email, /@/);
@@ -168,7 +168,7 @@ async function run() {
         assert.strictEqual(atSlot.status, 200);
         assert.deepStrictEqual(atSlot.body.slot, { day: 'Monday', period: 2 });
         const busy = atSlot.body.faculty.filter(f => f.availability.status === 'busy');
-        assert.strictEqual(busy.length, 8);
+        assert.strictEqual(busy.length, 4);
         busy.forEach(f => assert.ok(f.availability.subject));
     });
 
@@ -178,7 +178,7 @@ async function run() {
         assert.strictEqual(badSlot.body.code, 'INVALID_DAY');
     });
 
-    const addWithoutDb = await post('/api/faculty', { id: 'X1', name: 'Dr. Nobody', department: 'CSE' });
+    const addWithoutDb = await post('/api/faculty', { id: 'X1', name: 'Dr. Nobody', department: 'CME' });
     check('adding faculty without a database is refused, not faked', () => {
         assert.strictEqual(addWithoutDb.status, 503);
         assert.strictEqual(addWithoutDb.body.code, 'DATABASE_REQUIRED');
@@ -188,7 +188,7 @@ async function run() {
     const records = await get('/api/timetable/records?day=Monday&period=2&status=busy');
     check('GET /api/timetable/records filters normalized records', () => {
         assert.strictEqual(records.status, 200);
-        assert.strictEqual(records.body.count, 8);
+        assert.strictEqual(records.body.count, 4);
         records.body.records.forEach(r => {
             assert.strictEqual(r.day, 'Monday');
             assert.strictEqual(r.period, 2);
@@ -201,7 +201,7 @@ async function run() {
         assert.strictEqual(refData.status, 200);
         assert.ok(Array.isArray(refData.body.departments));
         const deptCodes = refData.body.departments.map(d => d.code);
-        ['CSE', 'ECE', 'EEE', 'CME', 'MEC', 'CIVIL'].forEach(dept => {
+        ['EE', 'ECE', 'MEC', 'CME'].forEach(dept => {
             assert.ok(deptCodes.includes(dept), `department ${dept} must be in reference departments`);
         });
 
@@ -211,39 +211,45 @@ async function run() {
             assert.ok(s.department, `subject ${s.name} must have a department`);
         });
 
-        ['CSE', 'ECE', 'EEE', 'CME', 'MEC', 'CIVIL'].forEach(dept => {
+        ['EE', 'ECE', 'MEC', 'CME'].forEach(dept => {
             const deptSubjects = refData.body.subjects.filter(s => s.department === dept);
             assert.ok(deptSubjects.length > 0, `department ${dept} must have subjects`);
         });
 
-        // Specific checks for Civil vs CSE vs others
-        const civilSubjects = refData.body.subjects.filter(s => s.department === 'CIVIL').map(s => s.name);
-        assert.ok(civilSubjects.includes('Structural Engineering'));
-        assert.ok(civilSubjects.includes('Surveying'));
-        assert.ok(!civilSubjects.includes('Programming'));
-        assert.ok(!civilSubjects.includes('Cloud Computing'));
+        // Specific checks for CME vs EE vs others
+        const cmeSubjects = refData.body.subjects.filter(s => s.department === 'CME').map(s => s.name);
+        assert.ok(cmeSubjects.includes('Industrial Management and Entrepreneurship'));
+        assert.ok(cmeSubjects.includes('Big Data & Cloud Computing'));
+        assert.ok(cmeSubjects.includes('Android Programming'));
+        assert.ok(cmeSubjects.includes('Internet Of Things'));
+        assert.ok(cmeSubjects.includes('Python Programming'));
+        assert.ok(cmeSubjects.includes('Android Programming Lab'));
+        assert.ok(cmeSubjects.includes('Python Programming Lab'));
+        assert.ok(cmeSubjects.includes('Life Skills'));
+        assert.ok(cmeSubjects.includes('Project work'));
+        assert.ok(!cmeSubjects.includes('Power Systems'));
 
-        const cseSubjects = refData.body.subjects.filter(s => s.department === 'CSE').map(s => s.name);
-        assert.ok(cseSubjects.includes('Data Structures'));
-        assert.ok(cseSubjects.includes('Database Management Systems'));
-        assert.ok(!cseSubjects.includes('Structural Engineering'));
+        const eeSubjects = refData.body.subjects.filter(s => s.department === 'EE').map(s => s.name);
+        assert.ok(eeSubjects.includes('Power Systems'));
+        assert.ok(eeSubjects.includes('Electrical Machines'));
+        assert.ok(!eeSubjects.includes('Android Programming'));
 
-        const civilClasses = refData.body.classes.filter(c => c.department === 'CIVIL').map(c => c.code);
-        assert.deepStrictEqual(civilClasses, ['CIVIL-A']);
+        const cmeClasses = refData.body.classes.filter(c => c.department === 'CME').map(c => c.code);
+        assert.deepStrictEqual(cmeClasses, ['CME-A']);
 
-        const cseClasses = refData.body.classes.filter(c => c.department === 'CSE').map(c => c.code);
-        assert.deepStrictEqual(cseClasses.sort(), ['CSE-A', 'CSE-B']);
+        const eceClasses = refData.body.classes.filter(c => c.department === 'ECE').map(c => c.code);
+        assert.deepStrictEqual(eceClasses.sort(), ['ECE-A', 'ECE-B']);
     });
 
     console.log('\n[2] Availability endpoint');
 
     const availability = await post('/api/availability',
-        { day: 'Monday', period: 2, subject: 'Operating Systems' });
+        { day: 'Monday', period: 2, subject: 'Python Programming' });
     check('[test 10] POST /api/availability returns the documented shape', () => {
         assert.strictEqual(availability.status, 200);
         assert.strictEqual(availability.body.day, 'Monday');
         assert.strictEqual(availability.body.period, 2);
-        assert.strictEqual(availability.body.subject, 'Operating Systems');
+        assert.strictEqual(availability.body.subject, 'Python Programming');
         assert.strictEqual(availability.body.totalAvailable, 13);
         assert.ok(Array.isArray(availability.body.availableFaculty));
         assert.strictEqual(availability.body.readOnly, true);
@@ -252,8 +258,7 @@ async function run() {
     check('busy faculty never appear in availableFaculty', () => {
         const busy = availability.body.busy.map(b => b.faculty);
         assert.deepStrictEqual(busy.sort(), [
-            'Dr. Anitha Menon', 'Dr. Meera Joshi', 'Dr. Neha Kulkarni', 'Dr. Rahul Varma',
-            'Dr. Rajesh Pillai', 'Prof. Kiran Reddy', 'Prof. Lakshmi Devi', 'Prof. Naveen Reddy'
+            'Dr. Kavya Rao', 'Dr. Mahesh Gupta', 'Dr. Rajesh Pillai', 'Ms. B. Kusuma'
         ]);
         busy.forEach(name => assert.ok(!availability.body.availableFaculty.includes(name)));
     });
@@ -279,10 +284,10 @@ async function run() {
     const summary = await get('/api/availability/summary?day=Monday&period=2');
     check('GET /api/availability/summary reports totals for a slot', () => {
         assert.strictEqual(summary.status, 200);
-        assert.strictEqual(summary.body.totalFaculty, 21);
+        assert.strictEqual(summary.body.totalFaculty, 17);
         assert.strictEqual(summary.body.selected.available, 13);
-        assert.strictEqual(summary.body.selected.busy, 8);
-        assert.strictEqual(summary.body.slots.length, 35);
+        assert.strictEqual(summary.body.selected.busy, 4);
+        assert.strictEqual(summary.body.slots.length, 42);
     });
 
     const unknown = await get('/api/availability/does-not-exist');
@@ -295,6 +300,7 @@ async function run() {
 
     console.log('\n[3] Import');
 
+    const config = require('../src/config');
     const formats = await get('/api/timetable/import/formats');
     check('GET /api/timetable/import/formats documents the layouts', () => {
         assert.strictEqual(formats.status, 200);
@@ -303,8 +309,7 @@ async function run() {
         ['.xlsx', '.xls', '.csv', '.png', '.jpg', '.jpeg', '.webp', '.pdf']
             .forEach(ext => assert.ok(formats.body.supported.includes(ext), ext));
         assert.strictEqual(formats.body.primary, '.xlsx');
-        assert.strictEqual(formats.body.document.available, false,
-            'no extraction provider is configured by default');
+        assert.strictEqual(formats.body.document.available, Boolean(config.pdfcoApiKey));
     });
 
     const csvPreview = await upload(BASE, '/api/timetable/import/preview', 'tt.csv', Buffer.from(CSV_MATRIX));
@@ -324,8 +329,8 @@ async function run() {
 
     const stillDemo = await get('/api/timetable/meta');
     check('previewing did not change the loaded timetable', () => {
-        assert.strictEqual(stillDemo.body.facultyCount, 21);
-        assert.strictEqual(stillDemo.body.primaryClass, 'CSE-A');
+        assert.strictEqual(stillDemo.body.facultyCount, 17);
+        assert.strictEqual(stillDemo.body.primaryClass, 'CME-A');
     });
 
     const workbook = await buildWorkbook();
@@ -364,7 +369,7 @@ async function run() {
 
     const afterFailures = await get('/api/timetable/meta');
     check('failed imports leave the loaded timetable untouched', () => {
-        assert.strictEqual(afterFailures.body.facultyCount, 21);
+        assert.strictEqual(afterFailures.body.facultyCount, 17);
         assert.strictEqual(afterFailures.body.origin, 'demo-data');
     });
 
@@ -379,7 +384,7 @@ async function run() {
     }
     const after = await get('/api/timetable');
     const afterFaculty = await get('/api/faculty');
-    check('35 availability calls changed no timetable or faculty data', () => {
+    check('availability calls changed no timetable or faculty data', () => {
         assert.deepStrictEqual(after.body, before.body);
         assert.deepStrictEqual(afterFaculty.body, beforeFaculty.body);
     });
@@ -397,7 +402,7 @@ async function run() {
     // The class box is resolved against the real class catalog, so it names an
     // existing class. A file that carries its own Class column does not need it.
     const commit = await upload(BASE, '/api/timetable/import', 'tt.csv', Buffer.from(CSV_MATRIX),
-        { defaultClass: 'CSE-A' });
+        { defaultClass: 'CME-A' });
     check('POST /api/timetable/import loads the file', () => {
         assert.strictEqual(commit.status, 200);
         assert.strictEqual(commit.body.loaded, true);

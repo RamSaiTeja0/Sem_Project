@@ -12,12 +12,10 @@
  */
 
 const DEPARTMENTS = [
-    { code: 'CSE', name: 'Computer Science and Engineering' },
+    { code: 'EE', name: 'Electrical Engineering' },
     { code: 'ECE', name: 'Electronics and Communication Engineering' },
-    { code: 'EEE', name: 'Electrical and Electronics Engineering' },
-    { code: 'CME', name: 'Computer Engineering' },
     { code: 'MEC', name: 'Mechanical Engineering' },
-    { code: 'CIVIL', name: 'Civil Engineering' }
+    { code: 'CME', name: 'Computer Engineering' }
 ];
 
 const BY_CODE = new Map(DEPARTMENTS.map(d => [d.code.toUpperCase(), d]));

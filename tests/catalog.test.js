@@ -34,13 +34,15 @@ const importer = require('../src/importers');
 function adapterTests() {
     console.log('\n[1] Image / PDF extraction adapter');
 
-    check('no provider is configured by default', () => {
-        assert.strictEqual(documentImporter.hasProvider(), false);
+    const config = require('../src/config');
+    check('extraction status matches provider configuration', () => {
+        assert.strictEqual(documentImporter.hasProvider(), Boolean(config.pdfcoApiKey));
         const status = documentImporter.status();
-        assert.strictEqual(status.available, false);
-        assert.match(status.message, /not configured/i);
-        // It must not imply an attempt was made or data produced.
-        assert.match(status.message, /no extraction has been attempted/i);
+        assert.strictEqual(status.available, Boolean(config.pdfcoApiKey));
+        if (!config.pdfcoApiKey) {
+            assert.match(status.message, /not configured/i);
+            assert.match(status.message, /no extraction has been attempted/i);
+        }
         assert.ok(status.alternatives.length >= 3, 'it must offer working alternatives');
     });
 
@@ -71,7 +73,6 @@ function adapterTests() {
         } finally {
             documentImporter.setProvider(null);
         }
-        assert.strictEqual(documentImporter.hasProvider(), false);
     });
 
     check('a provider without extract() is refused', () => {
@@ -82,17 +83,18 @@ function adapterTests() {
 async function adapterOverHttp() {
     console.log('\n[2] Extraction over HTTP');
 
+    const config = require('../src/config');
     const status = await get('/api/timetable/import/document-status');
-    check('GET /document-status reports extraction as unavailable', () => {
+    check('GET /document-status reports extraction status', () => {
         assert.strictEqual(status.status, 200);
-        assert.strictEqual(status.body.available, false);
+        assert.strictEqual(status.body.available, Boolean(config.pdfcoApiKey));
         assert.ok(status.body.alternatives.includes('Manual Timetable Entry'));
     });
 
     const formats = await get('/api/timetable/import/formats');
     check('GET /formats lists image/PDF and the extraction status together', () => {
         assert.ok(formats.body.supported.includes('.pdf'));
-        assert.strictEqual(formats.body.document.available, false);
+        assert.strictEqual(formats.body.document.available, Boolean(config.pdfcoApiKey));
     });
 }
 
@@ -103,9 +105,9 @@ async function readTests() {
     const branches = await get('/api/branches');
     check('GET /api/branches lists every branch', () => {
         assert.strictEqual(branches.status, 200);
-        assert.ok(branches.body.count >= 6, 'the six seeded branches at least');
+        assert.ok(branches.body.count >= 4, 'the four seeded branches at least');
         const codes = branches.body.branches.map(b => b.code);
-        ['CSE', 'ECE', 'EEE', 'CME', 'MEC', 'CIVIL'].forEach(code => {
+        ['EE', 'ECE', 'MEC', 'CME'].forEach(code => {
             assert.ok(codes.includes(code), `${code} must still be listed`);
         });
         assert.strictEqual(typeof branches.body.writable, 'boolean');
@@ -120,17 +122,17 @@ async function readTests() {
         assert.ok(classes.body.count > 0);
     });
 
-    const filtered = await get('/api/subjects?branch=CSE');
+    const filtered = await get('/api/subjects?branch=CME');
     check('subjects filter by branch', () => {
         assert.strictEqual(filtered.status, 200);
         filtered.body.subjects.forEach(s =>
-            assert.strictEqual(String(s.department).toUpperCase(), 'CSE'));
+            assert.strictEqual(String(s.department).toUpperCase(), 'CME'));
     });
 
-    const filteredClasses = await get('/api/classes?branch=CSE');
+    const filteredClasses = await get('/api/classes?branch=CME');
     check('classes filter by branch', () => {
         filteredClasses.body.classes.forEach(c =>
-            assert.strictEqual(String(c.department).toUpperCase(), 'CSE'));
+            assert.strictEqual(String(c.department).toUpperCase(), 'CME'));
     });
 
     if (!CONNECTION) {

@@ -138,16 +138,16 @@ async function browserRun(playwright) {
             assert.match(await page.locator('#loginMessage').textContent(), /Incorrect username or password/);
 
             // The demo chip fills the form; the right password signs in.
-            await page.click('.demo-chip[data-user="kiran.reddy"]');
+            await page.click('.demo-chip[data-user="g.sandhya.rani"]');
             await page.click('#loginSubmit');
             await page.waitForURL(/\/dashboard/);
             await page.waitForSelector('#ttBody .slot-btn', { state: 'attached' });
         });
 
         await checkAsync('the top bar shows who is signed in, with a logout control', async () => {
-            assert.strictEqual(await page.locator('#userName').textContent(), 'Prof. Kiran Reddy');
-            assert.match(await page.locator('#userRole').textContent(), /Faculty · CSE/);
-            assert.strictEqual(await page.locator('#userAvatar').textContent(), 'KR');
+            assert.strictEqual(await page.locator('#userName').textContent(), 'Ms. G. Sandhya Rani');
+            assert.match(await page.locator('#userRole').textContent(), /Faculty · CME/);
+            assert.strictEqual(await page.locator('#userAvatar').textContent(), 'GS');
             assert.ok(await page.locator('#logoutBtn').isVisible(), 'the logout button is shown');
             assert.ok(!(await page.locator('#loginLink').isVisible()), 'the login link is hidden');
         });
@@ -172,7 +172,7 @@ async function browserRun(playwright) {
                 .map(t => t.trim());
             ['Total faculty', 'Available faculty', 'Busy faculty', 'Timetable slots', 'Conflicts']
                 .forEach(label => assert.ok(labels.includes(label), 'missing stat card: ' + label));
-            assert.match(await page.locator('#topbarMeta').textContent(), /21 faculty/);
+            assert.match(await page.locator('#topbarMeta').textContent(), /17 faculty/);
             assert.ok((await page.locator('#workloadCard table.data tbody tr').count()) > 0, 'workload rows');
         });
 
@@ -187,12 +187,12 @@ async function browserRun(playwright) {
         });
 
         // -------------------------------------------------- master timetable
-        await checkAsync('the master timetable renders 35 clickable cells', async () => {
+        await checkAsync('the master timetable renders 42 clickable cells', async () => {
             await page.click('.nav-item[data-view="timetable"]');
             await page.waitForSelector('#ttBody .slot-btn', { state: 'visible' });
-            assert.strictEqual(await page.locator('#ttBody .slot-btn').count(), 35);
+            assert.strictEqual(await page.locator('#ttBody .slot-btn').count(), 42);
             assert.strictEqual(await page.locator('#ttHead th').count(), 8);
-            assert.strictEqual(await page.locator('#ttBody tr').count(), 5);
+            assert.strictEqual(await page.locator('#ttBody tr').count(), 6);
             // Free and scheduled cells are visually distinct states.
             assert.ok((await page.locator('#ttBody .slot-btn.is-empty').count()) > 0, 'free cells');
             assert.strictEqual(await page.locator('.legend').first().locator('span').count(), 3);
@@ -203,9 +203,9 @@ async function browserRun(playwright) {
                 .evaluate(el => ({ ...el.dataset }));
             assert.strictEqual(meta.day, 'Monday');
             assert.strictEqual(meta.period, '2');
-            assert.strictEqual(meta.subject, 'Operating Systems');
-            assert.strictEqual(meta.faculty, 'Prof. Kiran Reddy');
-            assert.strictEqual(meta.class, 'CSE-A');
+            assert.strictEqual(meta.subject, 'Python Programming');
+            assert.strictEqual(meta.faculty, 'Ms. B. Kusuma');
+            assert.strictEqual(meta.class, 'CME-A');
             assert.strictEqual(meta.status, 'busy');
         });
 
@@ -222,28 +222,28 @@ async function browserRun(playwright) {
             const sent = JSON.parse(posted.body);
             assert.strictEqual(sent.day, 'Monday');
             assert.strictEqual(sent.period, 2);
-            assert.strictEqual(sent.subject, 'Operating Systems');
+            assert.strictEqual(sent.subject, 'Python Programming');
 
             const shown = (await page.locator('#availResult ul.faculty-list:not(.busy-list) li').allTextContents())
                 .map(t => t.replace(/✓/g, '').trim());
             assert.strictEqual(shown.length, 13);
-            assert.ok(!shown.some(t => t.startsWith('Prof. Kiran Reddy')), 'the teaching faculty is excluded');
-            assert.ok(!shown.some(t => t.startsWith('Prof. Lakshmi Devi')), 'busy elsewhere, excluded');
+            assert.ok(!shown.some(t => t.startsWith('Ms. B. Kusuma')), 'the teaching faculty is excluded');
+            assert.ok(!shown.some(t => t.startsWith('Dr. Kavya Rao')), 'busy elsewhere, excluded');
 
             assert.strictEqual(await page.locator('#availBody .slot-btn.is-selected').count(), 1);
             assert.match(await page.locator('#availResult .slot-title').textContent(), /Monday — Period 2/);
 
             // The selected cell is described in full.
             const panel = await page.locator('#availResult').textContent();
-            assert.match(panel, /Class\s*CSE-A/);
-            assert.match(panel, /Subject\s*Operating Systems/);
-            assert.match(panel, /Current Faculty\s*Prof\. Kiran Reddy/);
+            assert.match(panel, /Class\s*CME-A/);
+            assert.match(panel, /Subject\s*Python Programming/);
+            assert.match(panel, /Current Faculty\s*Ms\. B\. Kusuma/);
 
             // Busy faculty are listed alongside the free ones.
             const busy = (await page.locator('#availResult .busy-list li').allTextContents())
                 .map(t => t.replace(/✗/g, '').trim());
-            // Seven others teach at Monday P2, in other classes and branches.
-            assert.strictEqual(busy.length, 7, 'seven faculty are busy elsewhere');
+            // Three others teach at Monday P2, in other classes and branches.
+            assert.strictEqual(busy.length, 3, 'three faculty are busy elsewhere');
             busy.forEach(entry => assert.ok(!shown.includes(entry), 'busy faculty are never listed free'));
 
             // The read-only guarantee is stated where the result is read.
@@ -295,22 +295,22 @@ async function browserRun(playwright) {
         await checkAsync('My Schedule shows the signed-in faculty\'s own week', async () => {
             await page.click('.nav-item[data-view="schedule"]');
             await page.waitForSelector('#schedBody .slot-btn');
-            assert.strictEqual(await page.locator('#schedFaculty').inputValue(), 'Prof. Kiran Reddy');
-            assert.strictEqual(await page.locator('#schedBody .slot-btn').count(), 35);
+            assert.strictEqual(await page.locator('#schedFaculty').inputValue(), 'Ms. G. Sandhya Rani');
+            assert.strictEqual(await page.locator('#schedBody .slot-btn').count(), 42);
             assert.ok((await page.locator('#schedStats .stat').count()) >= 4, 'schedule stat cards');
 
             // Clicking one of her own periods lists who could cover it.
-            await page.click('#schedBody .slot-btn[data-day="Monday"][data-period="2"]');
+            await page.click('#schedBody .slot-btn[data-day="Tuesday"][data-period="1"]');
             await page.waitForSelector('#schedResult ul.faculty-list:not(.busy-list)');
             const shown = await page.locator('#schedResult ul.faculty-list:not(.busy-list) li').allTextContents();
-            assert.ok(!shown.some(t => t.includes('Prof. Kiran Reddy')),
+            assert.ok(!shown.some(t => t.includes('Ms. G. Sandhya Rani')),
                 'the teaching faculty cannot cover for themselves');
         });
 
         // ------------------------------------------------ adjust / substitute
         await checkAsync('Adjust / Substitute lists cover for a whole day', async () => {
             await page.click('.nav-item[data-view="substitute"]');
-            await page.selectOption('#subFaculty', 'Dr. Arjun Rao');
+            await page.selectOption('#subFaculty', 'Ms. B. Kusuma');
             await page.selectOption('#subDay', 'Monday');
             await page.click('#subFind');
             await page.waitForSelector('#subResult table.data tbody tr');
@@ -322,19 +322,19 @@ async function browserRun(playwright) {
         await checkAsync('faculty directory and reports render, with working filters', async () => {
             await page.click('.nav-item[data-view="faculty"]');
             await page.waitForSelector('#facBody tr');
-            assert.strictEqual(await page.locator('#facBody tr').count(), 21);
+            assert.strictEqual(await page.locator('#facBody tr').count(), 17);
 
             await page.selectOption('#facDept', 'ECE');
             await page.waitForFunction(() => document.querySelectorAll('#facBody tr').length === 4);
 
-            await page.fill('#facSearch', 'anitha');
+            await page.fill('#facSearch', 'sandhya');
             await page.waitForFunction(() => document.querySelectorAll('#facBody tr').length === 1);
             await page.fill('#facSearch', '');
             await page.selectOption('#facDept', '');
 
             await page.click('.nav-item[data-view="reports"]');
             await page.waitForSelector('#heatTable td');
-            assert.strictEqual(await page.locator('#heatTable tbody tr').count(), 5);
+            assert.strictEqual(await page.locator('#heatTable tbody tr').count(), 6);
         });
 
         // ------------------------------------------------------- attendance
@@ -364,67 +364,48 @@ async function browserRun(playwright) {
             await page.click('.nav-item[data-view="manage"]');
             await page.waitForSelector('#manageDept');
 
-            // 1. Select CIVIL
-            await page.selectOption('#manageDept', 'CIVIL');
+            // 1. Select EE
+            await page.selectOption('#manageDept', 'EE');
             let subjects = await page.locator('#manageSubject option').allTextContents();
             let classes = await page.locator('#manageClass option').allTextContents();
             let faculty = await page.locator('#manageFaculty option').allTextContents();
 
             assert.ok(subjects.length > 0);
-            assert.ok(subjects.includes('Structural Engineering'));
-            assert.ok(subjects.includes('Surveying'));
-            assert.ok(!subjects.includes('Programming'));
-            assert.ok(!subjects.includes('Cloud Computing'));
-            assert.ok(!subjects.includes('Data Structures'));
-            assert.deepStrictEqual(classes, ['CIVIL-A']);
-            assert.ok(faculty.includes('Dr. Venkat Prasad'));
-            assert.ok(!faculty.includes('Dr. Arjun Rao'));
+            assert.ok(subjects.includes('Power Systems'));
+            assert.ok(subjects.includes('Electrical Machines'));
+            assert.ok(!subjects.includes('Android Programming'));
+            assert.deepStrictEqual(classes, ['EE-A']);
+            assert.ok(faculty.includes('Dr. Suresh Babu'));
+            assert.ok(!faculty.includes('Ms. B. Kusuma'));
 
-            // 2. Switch to CSE
-            await page.selectOption('#manageDept', 'CSE');
+            // 2. Switch to ECE
+            await page.selectOption('#manageDept', 'ECE');
             subjects = await page.locator('#manageSubject option').allTextContents();
             classes = await page.locator('#manageClass option').allTextContents();
             faculty = await page.locator('#manageFaculty option').allTextContents();
 
-            assert.ok(subjects.includes('Data Structures'));
-            assert.ok(subjects.includes('Database Management Systems'));
-            assert.ok(!subjects.includes('Structural Engineering'));
-            assert.ok(!subjects.includes('Surveying'));
-            assert.deepStrictEqual(classes.sort(), ['CSE-A', 'CSE-B']);
-            assert.ok(faculty.includes('Dr. Arjun Rao'));
-            assert.ok(!faculty.includes('Dr. Venkat Prasad'));
-
-            // 3. Switch to ECE
-            await page.selectOption('#manageDept', 'ECE');
-            subjects = await page.locator('#manageSubject option').allTextContents();
-            classes = await page.locator('#manageClass option').allTextContents();
             assert.ok(subjects.includes('Digital Electronics'));
-            assert.ok(!subjects.includes('Data Structures'));
-            assert.deepStrictEqual(classes.sort(), ['ECE-A', 'ECE-B']);
-
-            // 4. Switch to EEE
-            await page.selectOption('#manageDept', 'EEE');
-            subjects = await page.locator('#manageSubject option').allTextContents();
-            classes = await page.locator('#manageClass option').allTextContents();
-            assert.ok(subjects.includes('Power Systems'));
-            assert.ok(!subjects.includes('Digital Electronics'));
-            assert.deepStrictEqual(classes, ['EEE-A']);
-
-            // 5. Switch to CME
-            await page.selectOption('#manageDept', 'CME');
-            subjects = await page.locator('#manageSubject option').allTextContents();
-            classes = await page.locator('#manageClass option').allTextContents();
-            assert.ok(subjects.includes('Computer Architecture'));
             assert.ok(!subjects.includes('Power Systems'));
-            assert.deepStrictEqual(classes, ['CME-A']);
+            assert.deepStrictEqual(classes.sort(), ['ECE-A', 'ECE-B']);
+            assert.ok(faculty.includes('Prof. Naveen Reddy'));
+            assert.ok(!faculty.includes('Dr. Suresh Babu'));
 
-            // 6. Switch to MEC
+            // 3. Switch to MEC
             await page.selectOption('#manageDept', 'MEC');
             subjects = await page.locator('#manageSubject option').allTextContents();
             classes = await page.locator('#manageClass option').allTextContents();
             assert.ok(subjects.includes('Engineering Mechanics'));
-            assert.ok(!subjects.includes('Computer Architecture'));
+            assert.ok(!subjects.includes('Digital Electronics'));
             assert.deepStrictEqual(classes, ['MEC-A']);
+
+            // 4. Switch to CME
+            await page.selectOption('#manageDept', 'CME');
+            subjects = await page.locator('#manageSubject option').allTextContents();
+            classes = await page.locator('#manageClass option').allTextContents();
+            assert.ok(subjects.includes('Python Programming'));
+            assert.ok(subjects.includes('Industrial Management and Entrepreneurship'));
+            assert.ok(!subjects.includes('Power Systems'));
+            assert.deepStrictEqual(classes, ['CME-A']);
         });
 
         // ------------------------------------------------ upload paper sheet
@@ -444,7 +425,7 @@ async function browserRun(playwright) {
 
             // The loaded timetable is untouched until the user confirms.
             await page.click('.nav-item[data-view="timetable"]');
-            assert.strictEqual(await page.locator('#ttBody .slot-btn').count(), 35);
+            assert.strictEqual(await page.locator('#ttBody .slot-btn').count(), 42);
             await page.click('.nav-item[data-view="import"]');
             await page.click('#importCancel');
         });
@@ -455,7 +436,7 @@ async function browserRun(playwright) {
             await page.click('#importPreview');
             await page.waitForSelector('#importResult .notice-warn');
             assert.match(await page.locator('#importResult').textContent(),
-                /OCR key, which is not configured|Unsupported file type/);
+                /OCR key, which is not configured|Unsupported file type|PDF\.co|Extraction/i);
         });
 
         await checkAsync('a department preset fills Quick Paste and previews through the same importer', async () => {
@@ -527,10 +508,10 @@ async function httpRun() {
         request(BASE, 'GET', '/api/timetable'),
         request(BASE, 'GET', '/api/timetable/meta')
     ]);
-    const rosterCount = meta.body.facultyCount || 21;
+    const rosterCount = meta.body.facultyCount || 17;
 
     await checkAsync('the grid exposes every clickable coordinate', async () => {
-        assert.strictEqual(grid.body.cells.length, 35);
+        assert.strictEqual(grid.body.cells.length, 42);
     });
 
     await checkAsync('a clicked cell payload returns the free faculty', async () => {

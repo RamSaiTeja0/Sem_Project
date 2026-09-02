@@ -106,7 +106,7 @@ async function run() {
         assert.strictEqual(seededCounts.faculty, demo.faculty.length);
         assert.strictEqual(seededCounts.classes, demo.classes.length);
         assert.strictEqual(seededCounts.departments, demo.departments.length);
-        assert.strictEqual(seededCounts.departments, 6, 'all six branches are seeded');
+        assert.strictEqual(seededCounts.departments, 4, 'all four branches are seeded');
         assert.strictEqual(seededCounts.rooms, demo.rooms.length);
         assert.ok(seededCounts.timetable > 100, 'a full week of periods must be stored');
         assert.strictEqual(seededCounts.users, demo.faculty.length + 1, 'faculty + coordinator');
@@ -146,7 +146,7 @@ async function run() {
             assert.ok(c.academicYear, `${c.code} has no academic year`);
         });
         const branches = [...new Set(classes.map(c => c.department))].sort();
-        assert.deepStrictEqual(branches, ['CIVIL', 'CME', 'CSE', 'ECE', 'EEE', 'MEC']);
+        assert.deepStrictEqual(branches, ['CME', 'ECE', 'EE', 'MEC']);
     });
 
     console.log('\n[2] Round-trip through PostgreSQL');
@@ -192,16 +192,17 @@ async function run() {
     // The demo timetable fills every class completely, so free a slot first by
     // removing one entry through the API. That exercises the delete path and
     // gives the add/edit tests below a genuinely empty coordinate to write to.
-    const seeded = await call('GET', '/api/timetable/entries?class=CSE-A');
-    assert.ok(seeded.body.entries.length, 'CSE-A must have seeded entries');
+    const primaryClass = demo.meta.primaryClass || 'CME-A';
+    const seeded = await call('GET', '/api/timetable/entries?class=' + primaryClass);
+    assert.ok(seeded.body.entries.length, primaryClass + ' must have seeded entries');
     const vacated = seeded.body.entries[0];
     const removed = await call('DELETE', '/api/timetable/entries/' + vacated.id);
     assert.strictEqual(removed.status, 200, 'freeing a slot must succeed');
 
-    const grid = await call('GET', '/api/timetable?class=CSE-A');
+    const grid = await call('GET', '/api/timetable?class=' + primaryClass);
     const freeCell = grid.body.cells.find(c => c.status === 'free');
-    assert.ok(freeCell, 'the vacated CSE-A slot must now read as free');
-    const freeClass = 'CSE-A';
+    assert.ok(freeCell, `the vacated ${primaryClass} slot must now read as free`);
+    const freeClass = primaryClass;
 
     const slotBefore = await call('POST', '/api/availability',
         { day: freeCell.day, period: freeCell.period });
@@ -233,8 +234,8 @@ async function run() {
     await checkAsync('POST /entries adds an entry and stores it', async () => {
         const before = (await call('GET', '/api/timetable/entries')).body.count;
         const res = await call('POST', '/api/timetable/entries', {
-            class: 'CSE-A', day: freeCell.day, period: freeCell.period,
-            subject: SUBJECT_A, faculty: substitute, room: 'A-101', type: 'theory'
+            class: freeClass, day: freeCell.day, period: freeCell.period,
+            subject: SUBJECT_A, faculty: substitute, room: 'C-401', type: 'theory'
         });
         assert.strictEqual(res.status, 201, JSON.stringify(res.body));
         assert.strictEqual(res.body.saved, true);
@@ -245,7 +246,7 @@ async function run() {
     });
 
     await checkAsync('the new entry reaches the grid and the availability engine', async () => {
-        const cell = (await call('GET', '/api/timetable?class=CSE-A')).body.cells
+        const cell = (await call('GET', '/api/timetable?class=' + freeClass)).body.cells
             .find(c => c.day === freeCell.day && c.period === freeCell.period);
         assert.strictEqual(cell.status, 'busy');
         assert.strictEqual(cell.faculty, substitute);
@@ -259,8 +260,8 @@ async function run() {
 
     await checkAsync('a duplicate entry for the same class slot is rejected', async () => {
         const res = await call('POST', '/api/timetable/entries', {
-            class: 'CSE-A', day: freeCell.day, period: freeCell.period,
-            subject: SUBJECT_A, faculty: substitute, room: 'A-101'
+            class: freeClass, day: freeCell.day, period: freeCell.period,
+            subject: SUBJECT_A, faculty: substitute, room: 'C-401'
         });
         assert.strictEqual(res.status, 400);
         assert.strictEqual(res.body.code, 'SLOT_CONFLICT');
@@ -269,7 +270,7 @@ async function run() {
     await checkAsync('a faculty conflict across classes is rejected', async () => {
         const res = await call('POST', '/api/timetable/entries', {
             class: otherClasses[0], day: freeCell.day, period: freeCell.period,
-            subject: SUBJECT_A, faculty: substitute, room: 'A-102'
+            subject: SUBJECT_A, faculty: substitute, room: 'P-301'
         });
         assert.strictEqual(res.status, 400);
         assert.strictEqual(res.body.code, 'SLOT_CONFLICT');
@@ -281,7 +282,7 @@ async function run() {
             { day: freeCell.day, period: freeCell.period })).body.availableFaculty[0];
         const res = await call('POST', '/api/timetable/entries', {
             class: otherClasses[1], day: freeCell.day, period: freeCell.period,
-            subject: SUBJECT_A, faculty: other, room: 'A-101'
+            subject: SUBJECT_A, faculty: other, room: 'C-401'
         });
         assert.strictEqual(res.status, 400);
         assert.ok(res.body.conflicts.some(c => c.code === 'ROOM_BUSY'),
@@ -298,7 +299,7 @@ async function run() {
 
     await checkAsync('an unknown subject, class or faculty is rejected', async () => {
         const res = await call('POST', '/api/timetable/entries', {
-            class: 'CSE-A', day: freeCell.day, period: freeCell.period === 1 ? 2 : 1,
+            class: freeClass, day: freeCell.day, period: freeCell.period === 1 ? 2 : 1,
             subject: 'Astral Projection', faculty: substitute
         });
         assert.strictEqual(res.status, 400);
@@ -307,23 +308,23 @@ async function run() {
 
     await checkAsync('PUT /entries/:id edits an entry', async () => {
         const res = await call('PUT', `/api/timetable/entries/${createdId}`, {
-            class: 'CSE-A', day: freeCell.day, period: freeCell.period,
-            subject: SUBJECT_B, faculty: substitute, room: 'A-101', type: 'theory'
+            class: freeClass, day: freeCell.day, period: freeCell.period,
+            subject: SUBJECT_B, faculty: substitute, room: 'C-401', type: 'theory'
         });
         assert.strictEqual(res.status, 200, JSON.stringify(res.body));
         assert.strictEqual(res.body.entry.subject, SUBJECT_B);
 
-        const cell = (await call('GET', '/api/timetable?class=CSE-A')).body.cells
+        const cell = (await call('GET', '/api/timetable?class=' + freeClass)).body.cells
             .find(c => c.day === freeCell.day && c.period === freeCell.period);
         assert.strictEqual(cell.subject, SUBJECT_B);
     });
 
     await checkAsync('editing into an occupied slot is rejected', async () => {
-        const busyCell = (await call('GET', '/api/timetable?class=CSE-A')).body.cells
+        const busyCell = (await call('GET', '/api/timetable?class=' + freeClass)).body.cells
             .find(c => c.status === 'busy' && !(c.day === freeCell.day && c.period === freeCell.period));
         const res = await call('PUT', `/api/timetable/entries/${createdId}`, {
-            class: 'CSE-A', day: busyCell.day, period: busyCell.period,
-            subject: SUBJECT_B, faculty: substitute, room: 'A-101'
+            class: freeClass, day: busyCell.day, period: busyCell.period,
+            subject: SUBJECT_B, faculty: substitute, room: 'C-401'
         });
         assert.strictEqual(res.status, 400);
         assert.strictEqual(res.body.code, 'SLOT_CONFLICT');
@@ -331,7 +332,7 @@ async function run() {
 
     await checkAsync('editing a non-existent entry is a 404', async () => {
         const res = await call('PUT', '/api/timetable/entries/99999999', {
-            class: 'CSE-A', day: freeCell.day, period: freeCell.period,
+            class: freeClass, day: freeCell.day, period: freeCell.period,
             subject: SUBJECT_B, faculty: substitute
         });
         assert.strictEqual(res.status, 404);
@@ -342,7 +343,7 @@ async function run() {
         assert.strictEqual(res.status, 200);
         assert.strictEqual(res.body.deleted, true);
 
-        const cell = (await call('GET', '/api/timetable?class=CSE-A')).body.cells
+        const cell = (await call('GET', '/api/timetable?class=' + freeClass)).body.cells
             .find(c => c.day === freeCell.day && c.period === freeCell.period);
         assert.strictEqual(cell.status, 'free', 'the slot is free again');
 
@@ -378,7 +379,7 @@ async function run() {
 
     await checkAsync('a duplicate faculty ID is rejected', async () => {
         const res = await call('POST', '/api/faculty',
-            { id: 'FAC001', name: 'Dr. Somebody Else', department: 'CSE' });
+            { id: 'FAC001', name: 'Dr. Somebody Else', department: 'CME' });
         assert.strictEqual(res.status, 409);
         assert.strictEqual(res.body.code, 'DUPLICATE_FACULTY');
         assert.match(res.body.error, /already in use/);
@@ -387,7 +388,7 @@ async function run() {
     await checkAsync('a duplicate email is rejected', async () => {
         const existing = (await call('GET', '/api/faculty?search=FAC002')).body.faculty[0];
         const res = await call('POST', '/api/faculty',
-            { id: 'FAC901', name: 'Dr. Another Person', department: 'CSE', email: existing.email });
+            { id: 'FAC901', name: 'Dr. Another Person', department: 'CME', email: existing.email });
         assert.strictEqual(res.status, 409);
         assert.match(res.body.error, /Email .* already in use/);
     });
@@ -395,13 +396,13 @@ async function run() {
     await checkAsync('POST /api/faculty stores a valid record', async () => {
         const before = (await call('GET', '/api/faculty')).body.count;
         const res = await call('POST', '/api/faculty', {
-            id: ADDED, name: 'Dr. Test Appointee', department: 'CIVIL',
+            id: ADDED, name: 'Dr. Test Appointee', department: 'CME',
             designation: 'Assistant Professor', email: 'test.appointee@college.edu',
             phone: '+91-90000-00000', maxWeeklyPeriods: 18, status: 'active'
         });
         assert.strictEqual(res.status, 201, JSON.stringify(res.body));
         assert.strictEqual(res.body.faculty.id, ADDED);
-        assert.strictEqual(res.body.faculty.department, 'CIVIL');
+        assert.strictEqual(res.body.faculty.department, 'CME');
         assert.strictEqual(res.body.faculty.designation, 'Assistant Professor');
 
         const after = (await call('GET', '/api/faculty')).body.count;
@@ -417,7 +418,7 @@ async function run() {
         assert.ok(availability.body.availableFaculty.includes('Dr. Test Appointee'),
             'the new member is offered as a substitute');
 
-        const branch = await call('GET', '/api/faculty?department=CIVIL');
+        const branch = await call('GET', '/api/faculty?department=CME');
         assert.ok(branch.body.faculty.some(f => f.id === ADDED), 'they appear under their branch');
 
         const reference = await call('GET', '/api/timetable/entries/reference');
@@ -425,8 +426,8 @@ async function run() {
             'they are selectable when adding a timetable entry');
 
         const departments = await call('GET', '/api/faculty/departments');
-        const civil = departments.body.details.find(d => d.code === 'CIVIL');
-        assert.strictEqual(civil.facultyCount, 4, 'the branch count includes them');
+        const cme = departments.body.details.find(d => d.code === 'CME');
+        assert.strictEqual(cme.facultyCount, 8, 'the branch count includes them');
     });
 
     await checkAsync('a sign-in account is created for the new faculty member', async () => {

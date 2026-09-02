@@ -972,14 +972,14 @@
     }
 
     var PRESETS = {
-        'CSE — Semester V': {
-            className: 'CSE-A',
+        'CME — Semester V': {
+            className: 'CME-A',
             text: [
                 'Faculty,Monday P1,Monday P2,Monday P3,Tuesday P1,Tuesday P2,Tuesday P3',
-                'Dr. Arjun Rao,Data Structures,FREE,FREE,FREE,Data Structures,FREE',
-                'Dr. Priya Sharma,FREE,Database Management Systems,FREE,FREE,FREE,Database Management Systems',
-                'Prof. Kiran Reddy,FREE,FREE,Operating Systems,Operating Systems,FREE,FREE',
-                'Dr. Ananya Iyer,FREE,FREE,FREE,FREE,FREE,FREE'
+                'Ms. B. Kusuma,Python Programming,Python Programming,FREE,FREE,FREE,FREE',
+                'Sri B. Gopala Rao,FREE,FREE,Industrial Management and Entrepreneurship,FREE,FREE,FREE',
+                'Ms. G. Sandhya Rani,FREE,FREE,FREE,Big Data & Cloud Computing,FREE,Big Data & Cloud Computing',
+                'Mrs. A. Sravanthi,FREE,FREE,FREE,FREE,Internet Of Things,FREE'
             ].join('\n')
         },
         'ECE — Semester III': {
@@ -992,12 +992,12 @@
             ].join('\n')
         },
         'Long-form (Day / Period rows)': {
-            className: 'CSE-B',
+            className: 'CME-A',
             text: [
                 'Faculty,Day,Period,Subject,Class,Room',
-                'Dr. Arjun Rao,Monday,1,Database Management Systems,CSE-B,B-201',
-                'Prof. Meera Joshi,Monday,2,Data Structures,CSE-B,B-201',
-                'Prof. Kiran Reddy,Tuesday,1,Computer Networks,CSE-B,B-201'
+                'Ms. B. Kusuma,Monday,1,Python Programming,CME-A,C-401',
+                'Ms. B. Kusuma,Monday,2,Python Programming,CME-A,C-401',
+                'Sri B. Gopala Rao,Monday,3,Industrial Management and Entrepreneurship,CME-A,C-401'
             ].join('\n')
         }
     };
@@ -1806,7 +1806,7 @@
     /* ==================================================================
      * Catalog management — branches, subjects and classes.
      *
-     * A BRANCH is a programme (CSE). A CLASS is a section inside one (CSE-A).
+     * A BRANCH is a programme (CME). A CLASS is a section inside one (CME-A).
      * Branch lists are fetched from the API rather than hardcoded, so a branch
      * created here appears in every dropdown without a code change.
      * ================================================================== */
