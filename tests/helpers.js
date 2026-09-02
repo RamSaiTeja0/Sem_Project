@@ -85,7 +85,7 @@ function upload(base, path, filename, buffer, fields = {}) {
     });
 }
 
-function waitForServer(base, attempts = 40) {
+function waitForServer(base, attempts = 80) {
     return new Promise((resolve, reject) => {
         const tick = n => request(base, 'GET', '/api/health')
             .then(resolve)

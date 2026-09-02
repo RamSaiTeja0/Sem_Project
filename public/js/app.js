@@ -1431,6 +1431,15 @@
         }
         state.editingId = entry ? entry.id : null;
         el('manageId').value = entry ? entry.id : '';
+
+        if (entry && entry.className && state.classMeta[entry.className]) {
+            var dept = state.classMeta[entry.className].department || '';
+            el('manageDept').value = dept;
+            applyManageDepartment();
+        } else if (!entry) {
+            applyManageDepartment();
+        }
+
         set('manageClass', entry && entry.className, true);
         set('manageDay', entry && entry.day, true);
         set('managePeriod', entry && entry.period, true);
@@ -1513,26 +1522,25 @@
                 (reference.departments || []).map(function (d) {
                     return { value: d.code, label: d.code + ' — ' + d.name };
                 })), el('manageDept').value);
-            applyManageDepartment();
             fillSelect(el('manageDay'), reference.days);
             fillSelect(el('managePeriod'), reference.periods.map(function (p) {
                 return { value: p, label: 'Period ' + p };
             }));
-            fillSelect(el('manageSubject'), reference.subjects.map(function (s) { return s.name; }));
-            fillSelect(el('manageFaculty'), reference.faculty.map(function (f) { return f.name; }));
             fillSelect(el('manageRoom'), [{ value: '', label: '— none —' }].concat(
                 reference.rooms.map(function (r) { return r.code; })));
+
+            applyManageDepartment();
 
             var filter = el('manageFilterClass');
             var previous = filter.value;
             fillSelect(filter, [{ value: '', label: 'All classes' }].concat(
                 reference.classes.map(function (c) { return c.code; })), previous);
 
-            el('manageClass').onchange = describeManageClass;
+            el('manageClass').onchange = onManageClassChange;
 
             // A lab subject implies a lab session; the user can still override.
             el('manageSubject').onchange = function () {
-                var chosen = reference.subjects.filter(function (s) {
+                var chosen = (reference.subjects || []).filter(function (s) {
                     return s.name === el('manageSubject').value;
                 })[0];
                 if (chosen && chosen.type) el('manageType').value = chosen.type;
@@ -1550,21 +1558,78 @@
         });
     }
 
-    /** Narrow the Add Timetable class list to the chosen department. */
+    /** When class changes and no department is locked in, sync subjects & faculty to that class's branch. */
+    function onManageClassChange() {
+        describeManageClass();
+        var reference = state.reference;
+        if (!reference) return;
+        if (!el('manageDept').value) {
+            var clsMeta = state.classMeta[el('manageClass').value];
+            var classDept = clsMeta && clsMeta.department;
+            if (classDept) {
+                var subjects = (reference.subjects || []).filter(function (s) {
+                    return s.department === classDept;
+                });
+                if (subjects.length) {
+                    var prevSub = el('manageSubject').value;
+                    var keepSub = subjects.some(function (s) { return s.name === prevSub; })
+                        ? prevSub : (subjects[0] && subjects[0].name);
+                    fillSelect(el('manageSubject'), subjects.map(function (s) { return s.name; }), keepSub);
+                    if (el('manageSubject').onchange) el('manageSubject').onchange();
+                }
+                var faculty = (reference.faculty || []).filter(function (f) {
+                    return f.department === classDept;
+                });
+                if (faculty.length) {
+                    var prevFac = el('manageFaculty').value;
+                    var keepFac = faculty.some(function (f) { return f.name === prevFac; })
+                        ? prevFac : (faculty[0] && faculty[0].name);
+                    fillSelect(el('manageFaculty'), faculty.map(function (f) { return f.name; }), keepFac);
+                }
+            }
+        }
+    }
+
+    /** Narrow the Add Timetable class, subject, and faculty lists to the chosen department. */
     function applyManageDepartment() {
         var reference = state.reference;
         if (!reference) return;
         var wanted = el('manageDept').value;
-        var classes = reference.classes.filter(function (c) {
+
+        // 1. Filter classes
+        var classes = (reference.classes || []).filter(function (c) {
             return !wanted || c.department === wanted;
         });
-        if (!classes.length) classes = reference.classes.slice();
+        if (!classes.length) classes = (reference.classes || []).slice();
 
-        var previous = el('manageClass').value;
-        var keep = classes.some(function (c) { return c.code === previous; })
-            ? previous : (classes[0] && classes[0].code);
-        fillSelect(el('manageClass'), classes.map(function (c) { return c.code; }), keep);
+        var previousClass = el('manageClass').value;
+        var keepClass = classes.some(function (c) { return c.code === previousClass; })
+            ? previousClass : (classes[0] && classes[0].code);
+        fillSelect(el('manageClass'), classes.map(function (c) { return c.code; }), keepClass);
         describeManageClass();
+
+        // 2. Filter subjects (strictly show only subjects belonging to the selected department)
+        var subjects = (reference.subjects || []).filter(function (s) {
+            return !wanted || s.department === wanted;
+        });
+        if (!subjects.length && !wanted) subjects = (reference.subjects || []).slice();
+
+        var previousSubject = el('manageSubject').value;
+        var keepSubject = subjects.some(function (s) { return s.name === previousSubject; })
+            ? previousSubject : (subjects[0] && subjects[0].name);
+        fillSelect(el('manageSubject'), subjects.map(function (s) { return s.name; }), keepSubject);
+        if (el('manageSubject').onchange) el('manageSubject').onchange();
+
+        // 3. Filter faculty (show department faculty)
+        var faculty = (reference.faculty || []).filter(function (f) {
+            return !wanted || f.department === wanted;
+        });
+        if (!faculty.length && !wanted) faculty = (reference.faculty || []).slice();
+
+        var previousFaculty = el('manageFaculty').value;
+        var keepFaculty = faculty.some(function (f) { return f.name === previousFaculty; })
+            ? previousFaculty : (faculty[0] && faculty[0].name);
+        fillSelect(el('manageFaculty'), faculty.map(function (f) { return f.name; }), keepFaculty);
     }
 
     /** Show the selected class's branch, semester and academic year. */

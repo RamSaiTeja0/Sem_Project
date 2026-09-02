@@ -196,6 +196,45 @@ async function run() {
         });
     });
 
+    const refData = await get('/api/timetable/entries/reference');
+    check('GET /api/timetable/entries/reference provides department-mapped subjects, classes and faculty', () => {
+        assert.strictEqual(refData.status, 200);
+        assert.ok(Array.isArray(refData.body.departments));
+        const deptCodes = refData.body.departments.map(d => d.code);
+        ['CSE', 'ECE', 'EEE', 'CME', 'MEC', 'CIVIL'].forEach(dept => {
+            assert.ok(deptCodes.includes(dept), `department ${dept} must be in reference departments`);
+        });
+
+        assert.ok(Array.isArray(refData.body.subjects));
+        refData.body.subjects.forEach(s => {
+            assert.ok(s.name, 'subject must have a name');
+            assert.ok(s.department, `subject ${s.name} must have a department`);
+        });
+
+        ['CSE', 'ECE', 'EEE', 'CME', 'MEC', 'CIVIL'].forEach(dept => {
+            const deptSubjects = refData.body.subjects.filter(s => s.department === dept);
+            assert.ok(deptSubjects.length > 0, `department ${dept} must have subjects`);
+        });
+
+        // Specific checks for Civil vs CSE vs others
+        const civilSubjects = refData.body.subjects.filter(s => s.department === 'CIVIL').map(s => s.name);
+        assert.ok(civilSubjects.includes('Structural Engineering'));
+        assert.ok(civilSubjects.includes('Surveying'));
+        assert.ok(!civilSubjects.includes('Programming'));
+        assert.ok(!civilSubjects.includes('Cloud Computing'));
+
+        const cseSubjects = refData.body.subjects.filter(s => s.department === 'CSE').map(s => s.name);
+        assert.ok(cseSubjects.includes('Data Structures'));
+        assert.ok(cseSubjects.includes('Database Management Systems'));
+        assert.ok(!cseSubjects.includes('Structural Engineering'));
+
+        const civilClasses = refData.body.classes.filter(c => c.department === 'CIVIL').map(c => c.code);
+        assert.deepStrictEqual(civilClasses, ['CIVIL-A']);
+
+        const cseClasses = refData.body.classes.filter(c => c.department === 'CSE').map(c => c.code);
+        assert.deepStrictEqual(cseClasses.sort(), ['CSE-A', 'CSE-B']);
+    });
+
     console.log('\n[2] Availability endpoint');
 
     const availability = await post('/api/availability',

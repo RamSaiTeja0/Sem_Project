@@ -23,7 +23,7 @@ const router = express.Router();
 const store = require('../data/store');
 const db = require('../db/pool');
 const repository = require('../db/repository');
-const { nameFor: departmentName } = require('../data/departments');
+const { DEPARTMENTS, nameFor: departmentName } = require('../data/departments');
 
 const TYPES = ['theory', 'lab'];
 
@@ -44,6 +44,45 @@ function classesFromDataset() {
             room: match.room || null
         };
     });
+}
+
+/**
+ * Subject records from the live dataset, used when no database is serving.
+ * Retains the department code and theory/lab type so the form can filter
+ * subjects by branch.
+ */
+function subjectsFromDataset() {
+    const declared = (store.source && store.source.subjects) || [];
+    if (declared.length) {
+        return declared.map(s => ({
+            code: s.code || null,
+            name: s.name,
+            department: s.department || null,
+            type: s.type || (/lab/i.test(s.name) ? 'lab' : 'theory')
+        }));
+    }
+    const busy = (store.normalized && store.normalized.busyRecords) || [];
+    const subjectsMap = new Map();
+    busy.forEach(r => {
+        if (r.subject && !subjectsMap.has(r.subject)) {
+            let dept = null;
+            if (r.className) {
+                const cls = ((store.source && store.source.classes) || []).find(c => (c.class || c.name) === r.className);
+                if (cls && cls.department) dept = cls.department;
+            }
+            if (!dept && r.faculty) {
+                const fac = ((store.normalized && store.normalized.faculty) || []).find(f => f.name === r.faculty);
+                if (fac && fac.department) dept = fac.department;
+            }
+            subjectsMap.set(r.subject, {
+                code: null,
+                name: r.subject,
+                department: dept,
+                type: r.type || (/lab/i.test(r.subject) ? 'lab' : 'theory')
+            });
+        }
+    });
+    return Array.from(subjectsMap.values()).sort((a, b) => a.name.localeCompare(b.name));
 }
 
 /** Writes need a database; reads of reference data do not. */
@@ -117,8 +156,7 @@ router.get('/reference', async (req, res, next) => {
             ? await Promise.all([repository.listClasses(), repository.listSubjects(), repository.listRooms()])
             : [
                 classesFromDataset(),
-                [...new Set(store.normalized.busyRecords.map(r => r.subject).filter(Boolean))]
-                    .sort().map(name => ({ code: null, name, type: /lab/i.test(name) ? 'lab' : 'theory' })),
+                subjectsFromDataset(),
                 [...new Set(store.normalized.busyRecords.map(r => r.room).filter(Boolean))]
                     .sort().map(code => ({ code, type: /lab/i.test(code) ? 'lab' : 'classroom' }))
             ];
@@ -128,13 +166,18 @@ router.get('/reference', async (req, res, next) => {
             departmentName: cls.department ? departmentName(cls.department) : null
         }));
 
+        const deptCodes = [...new Set([
+            ...DEPARTMENTS.map(d => d.code),
+            ...withNames.map(c => c.department).filter(Boolean),
+            ...subjects.map(s => s.department).filter(Boolean)
+        ])].sort();
+
         res.json({
             days: engine.getDays(),
             periods: engine.getPeriods(),
             types: TYPES,
             classes: withNames,
-            departments: [...new Set(withNames.map(c => c.department).filter(Boolean))].sort()
-                .map(code => ({ code, name: departmentName(code) })),
+            departments: deptCodes.map(code => ({ code, name: departmentName(code) })),
             subjects,
             rooms,
             faculty: engine.getFaculty(),

@@ -359,6 +359,74 @@ async function browserRun(playwright) {
                 !document.querySelector('#attBody .mark.is-on'));
         });
 
+        // ------------------------------------------------ add timetable department & subject filtering
+        await checkAsync('Add Timetable dynamically filters subjects, classes, and faculty by department', async () => {
+            await page.click('.nav-item[data-view="manage"]');
+            await page.waitForSelector('#manageDept');
+
+            // 1. Select CIVIL
+            await page.selectOption('#manageDept', 'CIVIL');
+            let subjects = await page.locator('#manageSubject option').allTextContents();
+            let classes = await page.locator('#manageClass option').allTextContents();
+            let faculty = await page.locator('#manageFaculty option').allTextContents();
+
+            assert.ok(subjects.length > 0);
+            assert.ok(subjects.includes('Structural Engineering'));
+            assert.ok(subjects.includes('Surveying'));
+            assert.ok(!subjects.includes('Programming'));
+            assert.ok(!subjects.includes('Cloud Computing'));
+            assert.ok(!subjects.includes('Data Structures'));
+            assert.deepStrictEqual(classes, ['CIVIL-A']);
+            assert.ok(faculty.includes('Dr. Venkat Prasad'));
+            assert.ok(!faculty.includes('Dr. Arjun Rao'));
+
+            // 2. Switch to CSE
+            await page.selectOption('#manageDept', 'CSE');
+            subjects = await page.locator('#manageSubject option').allTextContents();
+            classes = await page.locator('#manageClass option').allTextContents();
+            faculty = await page.locator('#manageFaculty option').allTextContents();
+
+            assert.ok(subjects.includes('Data Structures'));
+            assert.ok(subjects.includes('Database Management Systems'));
+            assert.ok(!subjects.includes('Structural Engineering'));
+            assert.ok(!subjects.includes('Surveying'));
+            assert.deepStrictEqual(classes.sort(), ['CSE-A', 'CSE-B']);
+            assert.ok(faculty.includes('Dr. Arjun Rao'));
+            assert.ok(!faculty.includes('Dr. Venkat Prasad'));
+
+            // 3. Switch to ECE
+            await page.selectOption('#manageDept', 'ECE');
+            subjects = await page.locator('#manageSubject option').allTextContents();
+            classes = await page.locator('#manageClass option').allTextContents();
+            assert.ok(subjects.includes('Digital Electronics'));
+            assert.ok(!subjects.includes('Data Structures'));
+            assert.deepStrictEqual(classes.sort(), ['ECE-A', 'ECE-B']);
+
+            // 4. Switch to EEE
+            await page.selectOption('#manageDept', 'EEE');
+            subjects = await page.locator('#manageSubject option').allTextContents();
+            classes = await page.locator('#manageClass option').allTextContents();
+            assert.ok(subjects.includes('Power Systems'));
+            assert.ok(!subjects.includes('Digital Electronics'));
+            assert.deepStrictEqual(classes, ['EEE-A']);
+
+            // 5. Switch to CME
+            await page.selectOption('#manageDept', 'CME');
+            subjects = await page.locator('#manageSubject option').allTextContents();
+            classes = await page.locator('#manageClass option').allTextContents();
+            assert.ok(subjects.includes('Computer Architecture'));
+            assert.ok(!subjects.includes('Power Systems'));
+            assert.deepStrictEqual(classes, ['CME-A']);
+
+            // 6. Switch to MEC
+            await page.selectOption('#manageDept', 'MEC');
+            subjects = await page.locator('#manageSubject option').allTextContents();
+            classes = await page.locator('#manageClass option').allTextContents();
+            assert.ok(subjects.includes('Engineering Mechanics'));
+            assert.ok(!subjects.includes('Computer Architecture'));
+            assert.deepStrictEqual(classes, ['MEC-A']);
+        });
+
         // ------------------------------------------------ upload paper sheet
         await checkAsync('the upload view previews a CSV without loading it', async () => {
             await page.click('.nav-item[data-view="import"]');
