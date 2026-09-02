@@ -100,10 +100,14 @@ function branchesFromDataset() {
     // Every declared branch is listed even with no faculty: dropping an empty
     // one would make a newly created branch look as though it never existed.
     const seen = new Map();
-    DEPARTMENTS.forEach(d => seen.set(d.code.toUpperCase(),
-        { code: d.code, name: d.name, facultyCount: counts.get(d.code.toUpperCase()) || 0 }));
+    DEPARTMENTS.forEach(d => seen.set(d.code.toUpperCase(), {
+        code: d.code, name: d.name, active: d.active !== false,
+        facultyCount: counts.get(d.code.toUpperCase()) || 0
+    }));
     counts.forEach((n, code) => {
-        if (!seen.has(code)) seen.set(code, { code, name: departmentName(code), facultyCount: n });
+        if (!seen.has(code)) {
+            seen.set(code, { code, name: departmentName(code), active: true, facultyCount: n });
+        }
     });
 
     return [...seen.values()].sort((a, b) => a.code.localeCompare(b.code));
@@ -120,8 +124,16 @@ router.get('/branches', branchScope.guard(), async (req, res) => {
         const scope = req.branchScope;
         if (scope.branch) {
             branches = branches.filter(b => branchScope.code(b.code) === scope.branch);
+        } else if (!scope.includeArchived) {
+            // An archived branch is not an application: it is listed only to a
+            // coordinator, who is the one role that can bring it back.
+            branches = branches.filter(b => branchScope.isActiveBranch(b.code));
         }
+        // `active` says whether a branch is an application. It is always
+        // reported so a caller can tell an archived branch from a missing one.
+        branches = branches.map(b => ({ ...b, active: b.active !== false }));
         res.json({ count: branches.length, branches, writable: db.isConfigured(),
+                   activeBranches: branches.filter(b => b.active).map(b => b.code),
                    branch: scope.branch || null });
     } catch (err) { fail(res, err); }
 });
@@ -201,7 +213,8 @@ function byBranch(list, branch) {
 router.get('/subjects', branchScope.guard(req => req.query.branch), async (req, res) => {
     try {
         const scope = req.branchScope;
-        const all = db.isConfigured() ? await repository.listSubjects() : subjectsFromDataset();
+        const all = (db.isConfigured() ? await repository.listSubjects() : subjectsFromDataset())
+            .filter(item => branchScope.allows(scope, item.department));
         const subjects = byBranch(all, scope.branch || req.query.branch);
         res.json({ count: subjects.length, subjects, writable: db.isConfigured(),
                    branch: scope.branch || null });
@@ -283,7 +296,8 @@ function classesFromDataset() {
 router.get('/classes', branchScope.guard(req => req.query.branch), async (req, res) => {
     try {
         const scope = req.branchScope;
-        const all = db.isConfigured() ? await repository.listClasses() : classesFromDataset();
+        const all = (db.isConfigured() ? await repository.listClasses() : classesFromDataset())
+            .filter(item => branchScope.allows(scope, item.department));
         const classes = byBranch(all, scope.branch || req.query.branch);
         res.json({ count: classes.length, classes, writable: db.isConfigured(),
                    branch: scope.branch || null });

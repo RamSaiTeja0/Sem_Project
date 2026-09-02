@@ -110,6 +110,10 @@ router.get('/departments', branchScope.guard(), async (req, res, next) => {
             // Count what this branch actually sees, visiting lecturers included.
             const pool = branchScope.facultyPoolOf(scope.branch);
             details = details.map(d => ({ ...d, facultyCount: pool.size }));
+        } else if (!scope.includeArchived) {
+            // Unscoped, but an archived branch is not an application: only a
+            // coordinator is shown one.
+            details = details.filter(d => branchScope.isActiveBranch(d.code));
         }
 
         res.json({
@@ -147,13 +151,14 @@ router.get('/', branchScope.guard(req => req.query.department), (req, res) => {
 
     let stats = engine.getFacultyStats(options);
 
+    // Everyone this caller may see: for a branch account its own faculty plus
+    // visiting lecturers who teach one of its classes, and unscoped everyone in
+    // an ACTIVE branch. Visitors are presented as belonging to the viewing
+    // branch, so a foreign home branch is never disclosed.
+    const pool = branchScope.visibleFacultyNames(scope);
+    stats = stats.filter(f => pool.has(f.name));
     if (scope.branch) {
-        // Everyone this branch may see: its own faculty plus visiting lecturers
-        // who teach one of its classes. Visitors are presented as belonging to
-        // this branch, so a foreign home branch is never disclosed.
-        const pool = branchScope.facultyPoolOf(scope.branch);
-        stats = branchScope.projectFacultyList(
-            stats.filter(f => pool.has(f.name)), scope.branch);
+        stats = branchScope.projectFacultyList(stats, scope.branch);
     } else if (department) {
         const wanted = String(department).trim().toUpperCase();
         stats = stats.filter(f => (f.department || '').toUpperCase() === wanted);

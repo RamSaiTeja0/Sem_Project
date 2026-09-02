@@ -19,12 +19,47 @@
  */
 
 const store = require('../data/store');
+const departments = require('../data/departments');
 
 /** Roles that may look across branches. Everyone else is pinned to their own. */
 const CROSS_BRANCH_ROLES = new Set(['coordinator']);
 
 function code(value) {
-    return String(value == null ? '' : value).trim().toUpperCase();
+    // Resolve an older spelling to the branch it actually names, so "EE" and
+    // "EEE" can never behave as two branches anywhere in the application.
+    return departments.canonical(value);
+}
+
+/**
+ * The branches that are applications right now.
+ *
+ * Read live from whichever backing is serving — the database's
+ * departments.active column, or the bundled list — so archiving a branch is a
+ * data decision, not a code change. Falls back to the bundled active set when
+ * the source carries no flags at all.
+ */
+function activeBranches() {
+    const declared = (store.source && store.source.departments) || [];
+    const flagged = declared.filter(entry => typeof entry.active === 'boolean');
+
+    const codes = flagged.length
+        ? flagged.filter(entry => entry.active).map(entry => code(entry.code))
+        : departments.activeCodes().map(code);
+
+    return new Set(codes.filter(Boolean));
+}
+
+/** Is this branch an application someone may sign in to? */
+function isActiveBranch(branch) {
+    const wanted = code(branch);
+    if (!wanted) return false;
+    const active = activeBranches();
+    // A branch created at runtime is not in the bundled list; only an explicit
+    // archival makes a branch inactive, so an unknown code stays usable.
+    const declared = (store.source && store.source.departments) || [];
+    const known = declared.some(entry => code(entry.code) === wanted) ||
+        departments.find(wanted) !== null;
+    return known ? active.has(wanted) : true;
 }
 
 /**
@@ -48,6 +83,44 @@ function branchOfClass(className) {
 function classesOf(branch) {
     const wanted = code(branch);
     return store.engine.getMeta().classes.filter(name => branchOfClass(name) === wanted);
+}
+
+/** May this scope see anything belonging to this branch? */
+function allows(scope, branch) {
+    const wanted = code(branch);
+    if (!wanted) return true;                       // unattributed data
+    if (scope && scope.branch) return wanted === scope.branch;
+    if (scope && scope.includeArchived) return true;
+    return isActiveBranch(wanted);
+}
+
+/**
+ * The classes a scope may see: its own branch's when it has one, otherwise
+ * every ACTIVE branch's. An archived branch's classes are visible only to a
+ * coordinator, so no ordinary screen can reach them.
+ */
+function visibleClasses(scope) {
+    if (scope && scope.branch) return classesOf(scope.branch);
+    return store.engine.getMeta().classes.filter(name => allows(scope, branchOfClass(name)));
+}
+
+/** The faculty a scope may see, by name. */
+function visibleFacultyNames(scope) {
+    if (scope && scope.branch) return facultyPoolOf(scope.branch);
+
+    const names = new Set();
+    store.engine.getFaculty().forEach(member => {
+        if (allows(scope, member.department)) names.add(member.name);
+    });
+    // Anyone teaching a class this scope can see is relevant to it, whatever
+    // their home branch — that is what makes cross-branch teaching work.
+    store.engine.getRecords().forEach(record => {
+        if (record.status === 'busy' && record.faculty &&
+            allows(scope, branchOfClass(record.className))) {
+            names.add(record.faculty);
+        }
+    });
+    return names;
 }
 
 /**
@@ -85,7 +158,15 @@ function facultyInBranch(facultyName, branch) {
  * `crossBranch: true` marks the visitor without naming where they came from.
  */
 function projectFaculty(member, branch) {
-    if (!member) return member;
+    // With no viewing branch there is nothing to project onto: a coordinator
+    // sees each person's real home branch.
+    if (!member || !branch) return member;
+
+    // A record that carries no home branch — a timetable entry, say — discloses
+    // nothing, so there is nothing to hide and nothing to relabel. Marking it
+    // `crossBranch` would be a plain falsehood about the branch's own staff.
+    if (member.department == null) return member;
+
     const wanted = code(branch);
     const isHome = code(member.department) === wanted;
 
@@ -94,6 +175,24 @@ function projectFaculty(member, branch) {
         projected.crossBranch = true;
         // Never leak the home branch of a visiting lecturer.
         delete projected.homeBranch;
+
+        // A roster record also lists what they teach and where. Left whole,
+        // those name the home branch just as plainly as the branch code does
+        // ("classes: EEE-A"), so they are trimmed to this branch's own work.
+        // The busy/free counts stay whole on purpose: a visitor teaching
+        // elsewhere really is unavailable, and availability must say so.
+        if (Array.isArray(projected.classes) || Array.isArray(projected.subjects)) {
+            const mine = new Set(classesOf(wanted));
+            if (Array.isArray(projected.classes)) {
+                projected.classes = projected.classes.filter(name => mine.has(name));
+            }
+            if (Array.isArray(projected.subjects)) {
+                const here = new Set(store.engine.getRecords()
+                    .filter(r => r.faculty === member.name && mine.has(r.className))
+                    .map(r => r.subject));
+                projected.subjects = projected.subjects.filter(name => here.has(name));
+            }
+        }
     }
     return projected;
 }
@@ -150,9 +249,29 @@ function resolve(req, requested) {
     const sessionBranch = session ? code(session.department) : null;
     const asked = requested ? code(requested) : null;
 
-    // A coordinator administers every branch, so may name one explicitly.
+    // A coordinator administers every branch, archived ones included: they are
+    // the only role that can un-archive one, so it must stay reachable to them.
     if (role && CROSS_BRANCH_ROLES.has(role)) {
-        return { branch: asked || null, crossBranch: true, role };
+        return { branch: asked || null, crossBranch: true, includeArchived: true, role };
+    }
+
+    // An account whose branch has been archived has no application to enter.
+    // Said plainly rather than served an empty one that looks broken.
+    if (sessionBranch && !isActiveBranch(sessionBranch)) {
+        return {
+            error: `The ${sessionBranch} branch is archived and is no longer an active application.`,
+            code: 'BRANCH_ARCHIVED',
+            status: 403
+        };
+    }
+
+    // Nobody else may name an archived branch, whatever their own branch is.
+    if (asked && !isActiveBranch(asked)) {
+        return {
+            error: `The ${asked} branch is archived and is no longer an active application.`,
+            code: 'BRANCH_ARCHIVED',
+            status: 403
+        };
     }
 
     // Anyone else is pinned to their own branch. An explicit request for a
@@ -167,12 +286,12 @@ function resolve(req, requested) {
     }
 
     if (!sessionBranch) {
-        // No signed-in branch (sign-in optional in demo mode): treat as
-        // unscoped so the public demo keeps working exactly as before.
-        return { branch: asked || null, crossBranch: true, role: role || null };
+        // No signed-in branch (sign-in optional in demo mode): unscoped across
+        // the ACTIVE branches, but never across an archived one.
+        return { branch: asked || null, crossBranch: true, includeArchived: false, role: role || null };
     }
 
-    return { branch: sessionBranch, crossBranch: false, role };
+    return { branch: sessionBranch, crossBranch: false, includeArchived: false, role };
 }
 
 /**
@@ -197,6 +316,11 @@ function guard(pick) {
 module.exports = {
     resolve,
     guard,
+    activeBranches,
+    isActiveBranch,
+    allows,
+    visibleClasses,
+    visibleFacultyNames,
     branchOfClass,
     classesOf,
     facultyPoolOf,

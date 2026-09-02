@@ -98,13 +98,20 @@ async function run(playwright) {
         const admin = await browser.newContext();
         const adminPage = await admin.newPage();
         await signIn(adminPage, 'admin');
-        const branches = await adminPage.evaluate(() =>
-            fetch('/api/branches').then(r => r.json()).then(d => d.branches.map(b => b.code)));
+        const listed = await adminPage.evaluate(() =>
+            fetch('/api/branches').then(r => r.json()).then(d => d.branches));
         await admin.close();
+
+        // Only the ACTIVE branches are applications, and only they have
+        // accounts to sign in with. An archived branch is checked separately,
+        // by confirming it is nowhere to be seen.
+        const branches = listed.filter(b => b.active !== false).map(b => b.code);
+        const archived = listed.filter(b => b.active === false).map(b => b.code);
 
         assert.ok(branches.length >= 2,
             'this test needs at least two branches to prove one cannot see the other');
-        console.log(`\n  Branches under test: ${branches.join(', ')}`);
+        console.log(`\n  Active branches:   ${branches.join(', ')}`);
+        console.log(`  Archived branches: ${archived.join(', ') || 'none'}`);
 
         for (const branch of branches) {
             const username = 'hos.' + branch.toLowerCase();
@@ -121,7 +128,9 @@ async function run(playwright) {
 
             await signIn(page, username);
 
-            const others = branches.filter(other => other !== branch);
+            // Nothing from another active branch, and nothing from an archived
+            // one, may appear on this branch's screens.
+            const others = branches.filter(other => other !== branch).concat(archived);
 
             await checkAsync(`${branch}: the header names the branch this application serves`, async () => {
                 const badge = await page.textContent('#brandBranch');
@@ -204,6 +213,77 @@ async function run(playwright) {
 
             await context.close();
         }
+
+        // ------------------------------------------- a faculty member's own week
+        await checkAsync('a faculty member sees, and can only see, their own upload form', async () => {
+            const adminCtx = await browser.newContext();
+            const adminPg = await adminCtx.newPage();
+            await signIn(adminPg, 'admin');
+            const accounts = await adminPg.evaluate(() =>
+                fetch('/api/auth/accounts').then(r => r.json()).then(d => d.accounts));
+            await adminCtx.close();
+
+            const person = accounts.find(a => a.role === 'faculty');
+            assert.ok(person, 'the roster must provide a faculty account');
+
+            const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
+            const page = await context.newPage();
+            await signIn(page, person.username);
+            await page.click('.nav-item[data-view="schedule"]');
+            await page.waitForSelector('#ownUploadCard', { state: 'visible', timeout: 10000 });
+
+            // The form names them, and has no field for whose week it is.
+            const who = await page.textContent('#ownUploadWho');
+            assert.strictEqual(who.trim(), person.name);
+            const facultyFields = await page.$$eval('#ownUploadCard input, #ownUploadCard select',
+                els => els.map(e => e.id));
+            assert.ok(!facultyFields.some(id => /faculty/i.test(id)),
+                'the upload form must not offer a way to name another faculty member');
+
+            // It round-trips their real week.
+            await page.click('#ownUploadSample');
+            const filled = await page.inputValue('#ownUploadJson');
+            const payload = JSON.parse(filled);
+            assert.ok(Array.isArray(payload.entries));
+            assert.ok(!JSON.stringify(payload).includes('"faculty"'),
+                'the payload names no faculty — the server takes it from the session');
+
+            await context.close();
+        });
+
+        // A head of section is not a faculty member, so has no own timetable.
+        await checkAsync('a head of section is offered no personal upload form', async () => {
+            const context = await browser.newContext();
+            const page = await context.newPage();
+            await signIn(page, 'hos.' + branches[0].toLowerCase());
+            await page.click('.nav-item[data-view="schedule"]');
+            await page.waitForTimeout(1200);
+            const visible = await page.$eval('#ownUploadCard', el => el.offsetParent !== null)
+                .catch(() => false);
+            assert.strictEqual(visible, false);
+            await context.close();
+        });
+
+        await checkAsync('an archived branch offers no way in at the sign-in page', async () => {
+            if (!archived.length) return;
+            const context = await browser.newContext();
+            const page = await context.newPage();
+            await page.goto(`${BASE}/login`);
+            await page.waitForTimeout(1500);
+            const text = await page.textContent('body');
+            for (const code of archived) {
+                assert.ok(!new RegExp('\\b' + code + '\\b').test(text),
+                    `the sign-in page offers the archived branch ${code}`);
+            }
+            // ...and its account really is refused.
+            await page.fill('#username', 'hos.' + archived[0].toLowerCase());
+            await page.fill('#password', PASSWORD);
+            await page.click('button[type=submit]');
+            await page.waitForTimeout(2000);
+            assert.ok(/login/.test(page.url()),
+                'an archived branch account must not reach the dashboard');
+            await context.close();
+        });
 
         // A branch account cannot reach an institution-level screen by hand.
         const sneaky = await browser.newContext();

@@ -36,10 +36,10 @@ module.exports = {
         }
     },
     departments: [
-        { code: "EE", name: "Electrical Engineering" },
-        { code: "ECE", name: "Electronics and Communication Engineering" },
-        { code: "MEC", name: "Mechanical Engineering" },
-        { code: "CME", name: "Computer Engineering" }
+        { code: "CME", name: "Computer Engineering", active: true },
+        { code: "EEE", name: "Electrical and Electronics Engineering", active: true },
+        { code: "MEC", name: "Mechanical Engineering", active: true },
+        { code: "ECE", name: "Electronics and Communication Engineering", active: false }
     ],
     rooms: [
         { code: "C-401", name: "Block C — Room 401", type: "classroom", capacity: 60 },
@@ -48,7 +48,7 @@ module.exports = {
         { code: "E-202", name: "Block E — Room 202", type: "classroom", capacity: 60 },
         { code: "M-501", name: "Block M — Room 501", type: "classroom", capacity: 60 },
         { code: "CM-LAB-1", name: "Computer Engineering Lab", type: "lab", capacity: 35 },
-        { code: "EE-LAB-1", name: "Electrical Machines Lab", type: "lab", capacity: 30 },
+        { code: "EEE-LAB-1", name: "Electrical Machines Lab", type: "lab", capacity: 30 },
         { code: "EC-LAB-1", name: "Electronics Lab 1", type: "lab", capacity: 30 },
         { code: "EC-LAB-2", name: "Electronics Lab 2", type: "lab", capacity: 30 },
         { code: "ME-WORKSHOP", name: "Mechanical Workshop", type: "lab", capacity: 40 }
@@ -63,14 +63,14 @@ module.exports = {
         { code: "CM-507", name: "Python Programming Lab", department: "CME", type: "lab" },
         { code: "CM-508", name: "Life Skills", department: "CME", type: "theory" },
         { code: "CM-509", name: "Project work", department: "CME", type: "theory" },
-        { code: "EE501", name: "Power Systems", department: "EE", type: "theory" },
-        { code: "EE502", name: "Electrical Machines", department: "EE", type: "theory" },
-        { code: "EE503", name: "Control Systems", department: "EE", type: "theory" },
-        { code: "EE504", name: "Power Electronics", department: "EE", type: "theory" },
-        { code: "EE505", name: "Electromagnetic Fields", department: "EE", type: "theory" },
-        { code: "EE506", name: "Transmission and Distribution", department: "EE", type: "theory" },
-        { code: "EE551", name: "Electrical Machines Lab", department: "EE", type: "lab" },
-        { code: "EE552", name: "Power Systems Lab", department: "EE", type: "lab" },
+        { code: "EE501", name: "Power Systems", department: "EEE", type: "theory" },
+        { code: "EE502", name: "Electrical Machines", department: "EEE", type: "theory" },
+        { code: "EE503", name: "Control Systems", department: "EEE", type: "theory" },
+        { code: "EE504", name: "Power Electronics", department: "EEE", type: "theory" },
+        { code: "EE505", name: "Electromagnetic Fields", department: "EEE", type: "theory" },
+        { code: "EE506", name: "Transmission and Distribution", department: "EEE", type: "theory" },
+        { code: "EE551", name: "Electrical Machines Lab", department: "EEE", type: "lab" },
+        { code: "EE552", name: "Power Systems Lab", department: "EEE", type: "lab" },
         { code: "EC501", name: "Digital Electronics", department: "ECE", type: "theory" },
         { code: "EC502", name: "Signals and Systems", department: "ECE", type: "theory" },
         { code: "EC503", name: "Microprocessors", department: "ECE", type: "theory" },
@@ -163,7 +163,7 @@ module.exports = {
         {
             id: "FAC008",
             name: "Dr. Suresh Babu",
-            department: "EE",
+            department: "EEE",
             designation: "Professor",
             phone: "+91 90000 10008",
             email: "suresh.babu@college.edu",
@@ -173,7 +173,7 @@ module.exports = {
         {
             id: "FAC009",
             name: "Prof. Lakshmi Devi",
-            department: "EE",
+            department: "EEE",
             designation: "Associate Professor",
             phone: "+91 90000 10009",
             email: "lakshmi.devi@college.edu",
@@ -183,7 +183,7 @@ module.exports = {
         {
             id: "FAC010",
             name: "Dr. Mahesh Gupta",
-            department: "EE",
+            department: "EEE",
             designation: "Assistant Professor",
             phone: "+91 90000 10010",
             email: "mahesh.gupta@college.edu",
@@ -435,8 +435,8 @@ module.exports = {
             }
         },
         {
-            class: "EE-A",
-            department: "EE",
+            class: "EEE-A",
+            department: "EEE",
             semester: 5,
             academicYear: "2026-27",
             room: "P-301",
@@ -452,7 +452,14 @@ module.exports = {
                     },
                     { period: 3, subject: "Electrical Machines", faculty: "Prof. Lakshmi Devi", room: "P-301", type: "theory" },
                     { period: 4, subject: "Electromagnetic Fields", faculty: "Prof. Lakshmi Devi", room: "P-301", type: "theory" },
-                    { period: 5, spanTo: 7, subject: "Power Systems Lab", faculty: "Dr. Suresh Babu", room: "EE-LAB-1", type: "lab" }
+                    {
+                        period: 5,
+                        spanTo: 7,
+                        subject: "Power Systems Lab",
+                        faculty: "Dr. Suresh Babu",
+                        room: "EEE-LAB-1",
+                        type: "lab"
+                    }
                 ],
                 Tuesday: [
                     { period: 1, subject: "Power Systems", faculty: "Dr. Suresh Babu", room: "P-301", type: "theory" },
@@ -495,7 +502,7 @@ module.exports = {
                         spanTo: 7,
                         subject: "Electrical Machines Lab",
                         faculty: "Prof. Lakshmi Devi",
-                        room: "EE-LAB-1",
+                        room: "EEE-LAB-1",
                         type: "lab"
                     }
                 ],

@@ -40,6 +40,7 @@
         faculty: [],
         formats: null,
         reference: null,     // form options for Add Timetable
+        ownEntries: [],      // the signed-in faculty member's own periods
         classMeta: {},       // class code -> department, semester, academic year
         editingId: null,     // entry currently loaded into the form
         activity: [],
@@ -185,7 +186,7 @@
         if (name === 'subjects') loadSubjects();
         if (name === 'classes') loadClasses();
         if (name === 'attendance') loadAttendance();
-        if (name === 'schedule') loadSchedule();
+        if (name === 'schedule') { loadSchedule(); loadOwnUpload(); }
         if (name === 'manage') loadManage();
         if (name === 'validation') loadValidation();
 
@@ -1541,6 +1542,118 @@
         });
     }
 
+    /* ---------------------------------------------- my own timetable
+     * A faculty member uploading their own week. The server takes the identity
+     * from the session, so nothing here can address anyone else's timetable —
+     * this form simply has no field for whose week it is.
+     */
+    function ownUploadNote(message, kind) {
+        var box = el('ownUploadResult');
+        if (box) {
+            box.innerHTML = message
+                ? '<div class="notice notice-' + (kind || 'info') + '">' + message + '</div>' : '';
+        }
+    }
+
+    function loadOwnUpload() {
+        var card = el('ownUploadCard');
+        if (!card) return Promise.resolve();
+
+        // Only an account that IS a faculty member has an own timetable.
+        var mine = state.user && state.user.facultyName;
+        card.hidden = !mine;
+        if (!mine) return Promise.resolve();
+
+        el('ownUploadWho').textContent = mine;
+        return getJson('/api/timetable/entries/mine').then(function (data) {
+            state.ownEntries = data.entries || [];
+            var chip = el('ownUploadBackend');
+            if (chip) {
+                chip.textContent = data.editable ? 'Saving to PostgreSQL' : 'Read-only — no database';
+                chip.className = 'pill ' + (data.editable ? 'pill-ok' : 'pill-warn');
+            }
+            el('ownUploadSave').disabled = !data.editable;
+            var note = el('ownUploadNote');
+            if (note) {
+                note.innerHTML = data.editable ? '' :
+                    '<div class="notice notice-warn">Your timetable cannot be saved because no ' +
+                    'database is configured. Set <code>DATABASE_URL</code> and restart. Viewing ' +
+                    'your week still works.</div>';
+            }
+            ownUploadNote('You currently have <strong>' + data.count + '</strong> period' +
+                (data.count === 1 ? '' : 's') + ' on record.', 'info');
+        }).catch(function (err) {
+            ownUploadNote('Could not read your timetable: ' + esc(err.message), 'error');
+        });
+    }
+
+    function fillOwnUploadSample() {
+        var rows = (state.ownEntries || [])
+            // A period in another branch is shown as occupied but not detailed,
+            // so it cannot be round-tripped and is left out of the sample.
+            .filter(function (entry) { return entry.className; })
+            .map(function (entry) {
+                return {
+                    day: entry.day, period: entry.period, class: entry.className,
+                    subject: entry.subject, room: entry.room || null, type: entry.type || 'theory'
+                };
+            });
+        el('ownUploadJson').value = JSON.stringify({ mode: el('ownUploadMode').value, entries: rows }, null, 2);
+    }
+
+    function saveOwnUpload() {
+        var raw = el('ownUploadJson').value.trim();
+        if (!raw) { ownUploadNote('Paste the rows to upload first.', 'warn'); return; }
+
+        var parsed;
+        try {
+            parsed = JSON.parse(raw);
+        } catch (err) {
+            ownUploadNote('That is not valid JSON: ' + esc(err.message), 'error');
+            return;
+        }
+        var entries = Array.isArray(parsed) ? parsed : parsed.entries;
+        if (!Array.isArray(entries)) {
+            ownUploadNote('Send an <code>entries</code> array of timetable rows.', 'error');
+            return;
+        }
+
+        var button = el('ownUploadSave');
+        button.disabled = true;
+        ownUploadNote('Uploading…', 'info');
+
+        postJson('/api/timetable/entries/mine',
+            { mode: el('ownUploadMode').value, entries: entries }).then(function (res) {
+            button.disabled = false;
+            if (res.status >= 400) {
+                ownUploadNote(rejectionHtml(res.body), 'error');
+                return;
+            }
+            ownUploadNote('Saved <strong>' + res.body.created + '</strong> period' +
+                (res.body.created === 1 ? '' : 's') +
+                (res.body.mode === 'replace'
+                    ? ', replacing ' + res.body.replaced + ' previously on record.'
+                    : '.'), 'ok');
+            logActivity('Uploaded own timetable (' + res.body.created + ' periods)');
+            // The week changed, so every view built on it is stale.
+            loadOwnUpload();
+            loadSchedule();
+            bootstrapRefresh();
+        }).catch(function (err) {
+            button.disabled = false;
+            ownUploadNote('Could not upload: ' + esc(err.message), 'error');
+        });
+    }
+
+    /** Re-read the parts of the dashboard a timetable change invalidates. */
+    function bootstrapRefresh() {
+        return Promise.all([
+            loadDashboard(el('dashDay').value, el('dashPeriod').value).catch(function () {}),
+            loadGrid(ttQuery(), 'ttHead', 'ttBody', jumpToAvailability).catch(function () {}),
+            loadGrid(availabilityQuery(), 'availHead', 'availBody', onAvailabilitySelect).catch(function () {})
+        ]);
+    }
+
     // ------------------------------------------------- add / edit timetable
     /**
      * The Add Timetable view. Reads its options from the server rather than
@@ -1815,6 +1928,16 @@
      * repeat the list, so show a lead-in and the list; with one, show it plain.
      */
     function rejectionHtml(body, fallback) {
+        // A bulk upload reports per-row problems, so the row number is shown
+        // with each one: "which of my 30 rows is wrong" is the only useful
+        // answer here.
+        if (body && Array.isArray(body.rejected) && body.rejected.length) {
+            return '<strong>Nothing was saved.</strong> ' + esc(body.error || '') +
+                '<ul style="margin:8px 0 0 18px;">' + body.rejected.map(function (row) {
+                    return '<li>Row ' + (row.index + 1) + ': ' +
+                        esc((row.problems || []).join('; ')) + '</li>';
+                }).join('') + '</ul>';
+        }
         var problems = (body && (body.problems ||
             (body.conflicts || []).map(function (c) { return c.message; }))) || [];
         if (problems.length > 1) {
@@ -2185,6 +2308,10 @@
 
         // --- faculty directory
         el('facDept').addEventListener('change', loadFacultyTable);
+
+        // --- my own timetable
+        if (el('ownUploadSave')) el('ownUploadSave').addEventListener('click', saveOwnUpload);
+        if (el('ownUploadSample')) el('ownUploadSample').addEventListener('click', fillOwnUploadSample);
         el('facSearch').addEventListener('input', loadFacultyTable);
 
         // --- substitute

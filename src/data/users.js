@@ -12,6 +12,7 @@
 const crypto = require('crypto');
 const config = require('../config');
 const store = require('./store');
+const branchScope = require('../core/branchScope');
 
 function slug(name) {
     return String(name)
@@ -39,7 +40,11 @@ const ADMIN = {
  * account belong to two branches.
  */
 function list() {
-    const roster = store.engine.getFaculty();
+    // Only the branches that are applications. A faculty member whose branch
+    // has been archived keeps their record and their history, but has nothing
+    // to sign in to, so no account is offered for them at all.
+    const roster = store.engine.getFaculty()
+        .filter(member => branchScope.isActiveBranch(member.department));
 
     const faculty = roster.map(member => ({
         id: member.id,

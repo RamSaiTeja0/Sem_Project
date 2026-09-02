@@ -103,13 +103,18 @@ async function readTests() {
     console.log('\n[3] Catalog reads (work without a database)');
 
     const branches = await get('/api/branches');
-    check('GET /api/branches lists every branch', () => {
+    check('GET /api/branches lists the active branches', () => {
         assert.strictEqual(branches.status, 200);
-        assert.ok(branches.body.count >= 4, 'the four seeded branches at least');
         const codes = branches.body.branches.map(b => b.code);
-        ['EE', 'ECE', 'MEC', 'CME'].forEach(code => {
+        ['EEE', 'MEC', 'CME'].forEach(code => {
             assert.ok(codes.includes(code), `${code} must still be listed`);
         });
+        // Archived: its records are kept, but it is not an application, so an
+        // ordinary caller is never offered it.
+        assert.ok(!codes.includes('ECE'), 'an archived branch must not be listed');
+        assert.ok(!codes.includes('EE'), 'EE is a spelling of EEE, not a branch');
+        branches.body.branches.forEach(b =>
+            assert.strictEqual(b.active, true, `${b.code} should be active`));
         assert.strictEqual(typeof branches.body.writable, 'boolean');
     });
 

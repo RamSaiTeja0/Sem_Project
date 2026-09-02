@@ -57,7 +57,7 @@ check('the demo dataset never double-books a faculty member or a room', () => {
 check('the roster covers all four branches, each with a profile', () => {
     const stats = engine.getFacultyStats();
     const branches = [...new Set(stats.map(f => f.department))].sort();
-    assert.deepStrictEqual(branches, ['CME', 'ECE', 'EE', 'MEC']);
+    assert.deepStrictEqual(branches, ['CME', 'ECE', 'EEE', 'MEC']);
     assert.ok(stats.length >= 15 && stats.length <= 25, `roster of ${stats.length} is outside 15-25`);
     stats.forEach(f => {
         assert.ok(f.designation, `${f.name} has no designation`);

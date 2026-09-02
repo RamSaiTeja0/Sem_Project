@@ -133,6 +133,75 @@ function parseEntry(body) {
     return { entry: { day, period, className, subject, faculty, room, type } };
 }
 
+/**
+ * Everything a write must be true about, beyond the fields being present.
+ *
+ * `parseEntry` only proves the shape is right. This proves the entry belongs
+ * where it claims: the class and the subject must be the caller's branch's, the
+ * faculty must be someone that branch may schedule, and the room must exist.
+ * Imported JSON is never trusted on any of these points.
+ *
+ * CROSS-BRANCH TEACHING. A timetable entry IS the teaching assignment: putting
+ * an EEE lecturer on a CME period is what makes them part of CME's pool, and it
+ * is the only way that link is ever created. So a head of section may name a
+ * lecturer who is not yet in their pool — that is them making the assignment —
+ * while a faculty account cannot (it may only write its own periods anyway).
+ * Nobody is ever duplicated: the same single faculty record is referenced.
+ *
+ * @returns {Promise<string[]>} every problem found, empty when the entry is fine
+ */
+async function branchProblems(entry, branch, options = {}) {
+    if (!branch) return [];
+    const problems = [];
+
+    const classes = db.isConfigured() && store.usingDatabase
+        ? await repository.listClasses()
+        : classesFromDataset();
+    const subjects = db.isConfigured() && store.usingDatabase
+        ? await repository.listSubjects()
+        : subjectsFromDataset();
+
+    const cls = classes.find(c => c.code === entry.className);
+    if (!cls) {
+        const mine = classes
+            .filter(c => branchScope.code(c.department) === branch)
+            .map(c => c.code);
+        problems.push(`Unknown class "${entry.className}". ${branch} classes: ${mine.join(', ') || 'none'}`);
+    } else if (branchScope.code(cls.department) !== branch) {
+        // Reported as "not yours" rather than naming the branch that owns it.
+        problems.push(`Class "${entry.className}" does not belong to ${branch}`);
+    }
+
+    // A subject with no branch is shared vocabulary (library, counselling) and
+    // is allowed anywhere; one that names a branch must name this one.
+    const subject = subjects.find(sub => sub.name === entry.subject || sub.code === entry.subject);
+    if (!subject) {
+        problems.push(`Unknown subject "${entry.subject}"`);
+    } else if (subject.department && branchScope.code(subject.department) !== branch &&
+               branchScope.code(subject.department) !== branchScope.code('General')) {
+        problems.push(`Subject "${entry.subject}" does not belong to ${branch}`);
+    }
+
+    if (entry.faculty && !branchScope.facultyInBranch(entry.faculty, branch) &&
+        !options.mayAssignOutsideFaculty) {
+        problems.push(`"${entry.faculty}" does not teach in ${branch}`);
+    }
+
+    return problems;
+}
+
+/**
+ * May this caller create a cross-branch teaching assignment?
+ *
+ * Only a head of section or a coordinator: they are the ones who decide that an
+ * outside lecturer teaches a period here. A faculty account never can — it is
+ * confined to its own periods by authorizeWrite regardless.
+ */
+function mayAssign(req) {
+    const role = req.session ? String(req.session.role || '').toLowerCase() : null;
+    return role === 'hos' || role === 'coordinator';
+}
+
 /** Map a repository error onto an HTTP response. */
 function fail(res, err) {
     const status = err.status || 500;
@@ -200,8 +269,12 @@ router.get('/reference', branchScope.guard(), async (req, res, next) => {
             ...cls,
             departmentName: cls.department ? departmentName(cls.department) : null
         }));
-        let visibleSubjects = subjects;
-        let visibleFaculty = engine.getFaculty();
+        // Unscoped, the reference lists still exclude archived branches: only a
+        // coordinator may see one, and only branch data is offered otherwise.
+        let visibleSubjects = subjects.filter(item => branchScope.allows(scope, item.department));
+        let visibleFaculty = engine.getFaculty()
+            .filter(member => branchScope.visibleFacultyNames(scope).has(member.name));
+        withNames = withNames.filter(cls => branchScope.allows(scope, cls.department));
 
         let deptCodes = [...new Set([
             ...DEPARTMENTS.map(d => d.code),
@@ -249,6 +322,199 @@ router.get('/reference', branchScope.guard(), async (req, res, next) => {
             source: fromDatabase ? 'database' : 'in-memory demo dataset'
         });
     } catch (err) { next(err); }
+});
+
+/* ======================================================================
+ * A faculty member's OWN timetable.
+ *
+ *   GET    /api/timetable/entries/mine    read it
+ *   POST   /api/timetable/entries/mine    upload or replace it
+ *   DELETE /api/timetable/entries/mine    clear it
+ *
+ * The identity is taken from the SIGNED SESSION and nowhere else. A `faculty`,
+ * `facultyId` or `facultyName` field in the body is ignored outright for a
+ * faculty account, so nobody can write a colleague's week by editing the JSON.
+ *
+ * A head of section or coordinator may name a faculty member with `?faculty=`
+ * or a `faculty` field — but only one their own branch may schedule, which is
+ * what makes this the same endpoint an automated extractor will post to later.
+ * ====================================================================== */
+
+/**
+ * Whose timetable is this request about?
+ * @returns {{faculty}} or {{error, code, status}}
+ */
+function resolveOwner(req) {
+    const session = req.session || null;
+    const role = session ? String(session.role || '').toLowerCase() : null;
+    const scope = req.branchScope || { branch: null };
+
+    if (!session) {
+        return { error: 'Sign in to manage a timetable.', code: 'NOT_SIGNED_IN', status: 401 };
+    }
+
+    if (role === 'faculty') {
+        // Deliberately ignores anything the browser sent: a faculty account is
+        // only ever its own faculty member.
+        if (!session.facultyName) {
+            return {
+                error: 'This account is not linked to a faculty record, so it has no timetable.',
+                code: 'NO_FACULTY_IDENTITY', status: 403
+            };
+        }
+        return { faculty: session.facultyName, self: true };
+    }
+
+    const asked = (req.body && (req.body.faculty || req.body.facultyName)) ||
+        req.query.faculty || null;
+    if (!asked) {
+        return {
+            error: 'Name the faculty member whose timetable this is, with a "faculty" field.',
+            code: 'FACULTY_REQUIRED', status: 400
+        };
+    }
+    const name = String(asked).trim();
+    if (scope.branch && !branchScope.facultyInBranch(name, scope.branch)) {
+        // Not someone this branch may schedule: reported as unknown rather
+        // than confirming that another branch holds them.
+        return {
+            error: `No faculty named "${name}" in ${scope.branch}`,
+            code: 'NOT_FOUND', status: 404
+        };
+    }
+    return { faculty: name, self: false };
+}
+
+router.get('/mine', branchScope.guard(), async (req, res, next) => {
+    const owner = resolveOwner(req);
+    if (owner.error) return res.status(owner.status).json({ error: owner.error, code: owner.code });
+
+    try {
+        const scope = req.branchScope;
+        // Readable without a database: the demo dataset answers from the engine,
+        // so a faculty member can always see their own week.
+        const entries = db.isConfigured() && store.usingDatabase
+            ? await repository.listEntries({ faculty: owner.faculty })
+            : store.engine.getRecords()
+                .filter(r => r.status === 'busy' && r.faculty === owner.faculty)
+                .map(r => ({
+                    id: null, className: r.className, day: r.day, period: r.period,
+                    subject: r.subject, faculty: r.faculty, room: r.room, type: r.type || 'theory'
+                }));
+
+        const visible = new Set(branchScope.visibleClasses(scope));
+        res.json({
+            faculty: owner.faculty,
+            branch: scope.branch || null,
+            editable: Boolean(db.isConfigured() && store.usingDatabase),
+            count: entries.length,
+            // A cross-branch lecturer's periods in their other branch are not
+            // this branch's to display, but they are still shown as occupied.
+            entries: entries.map(entry => (visible.has(entry.className)
+                ? entry
+                : { ...entry, className: null, subject: null, room: null, otherBranch: true }))
+        });
+    } catch (err) { next(err); }
+});
+
+router.post('/mine', requireDatabase, branchScope.guard(), async (req, res, next) => {
+    const owner = resolveOwner(req);
+    if (owner.error) return res.status(owner.status).json({ error: owner.error, code: owner.code });
+
+    const body = req.body || {};
+    const rows = Array.isArray(body.entries) ? body.entries
+        : (Array.isArray(body) ? body : null);
+    if (!rows) {
+        return res.status(400).json({
+            error: 'Send an "entries" array of timetable rows.', code: 'INVALID_UPLOAD'
+        });
+    }
+    if (!rows.length) {
+        return res.status(400).json({
+            error: 'The upload contains no entries.', code: 'EMPTY_UPLOAD'
+        });
+    }
+
+    const mode = String(body.mode || 'merge').toLowerCase();
+    if (!['merge', 'replace'].includes(mode)) {
+        return res.status(400).json({
+            error: 'Mode must be "merge" or "replace".', code: 'INVALID_UPLOAD'
+        });
+    }
+
+    // Validate EVERY row before writing any of them, and report all the
+    // problems together — a half-applied upload is worse than a rejected one.
+    const scope = req.branchScope;
+    const parsed = [];          // { index: the caller's row number, entry }
+    const rejected = [];
+    for (let index = 0; index < rows.length; index++) {
+        // The faculty is forced to the resolved owner: a facultyId in the row
+        // cannot redirect it to someone else.
+        const attempt = parseEntry({ ...rows[index], faculty: owner.faculty });
+        if (attempt.errors) {
+            rejected.push({ index, problems: attempt.errors });
+            continue;
+        }
+        const problems = await branchProblems(attempt.entry, scope.branch, {
+            mayAssignOutsideFaculty: mayAssign(req)
+        });
+        if (problems.length) {
+            rejected.push({ index, problems });
+            continue;
+        }
+        parsed.push({ index, entry: attempt.entry });
+    }
+
+    // Duplicate slots inside one upload never reach the database's own unique
+    // constraint as a useful message, so they are caught here by coordinate.
+    // The SECOND occurrence is the one reported, at the row number the caller
+    // sent it as.
+    const seen = new Map();
+    parsed.forEach(({ index, entry }) => {
+        const key = `${entry.day}|${entry.period}`;
+        if (seen.has(key)) {
+            rejected.push({
+                index,
+                problems: [`${entry.day} P${entry.period} appears more than once in this upload ` +
+                           `(already given as row ${seen.get(key)})`]
+            });
+        } else {
+            seen.set(key, index);
+        }
+    });
+
+    if (rejected.length) {
+        return res.status(400).json({
+            error: `${rejected.length} of ${rows.length} entries were rejected; nothing was saved.`,
+            code: 'INVALID_ENTRIES',
+            rejected: rejected.sort((a, b) => a.index - b.index)
+        });
+    }
+
+    try {
+        const result = await repository.replaceFacultyEntries(
+            owner.faculty, parsed.map(row => row.entry), { mode });
+        await store.reloadFromDatabase();
+        res.status(201).json({
+            saved: true,
+            faculty: owner.faculty,
+            branch: scope.branch || null,
+            mode: result.mode,
+            replaced: result.removed,
+            created: result.created,
+            entries: result.entries
+        });
+    } catch (err) { fail(res, err); void next; }
+});
+
+router.delete('/mine', requireDatabase, branchScope.guard(), async (req, res, next) => {
+    const owner = resolveOwner(req);
+    if (owner.error) return res.status(owner.status).json({ error: owner.error, code: owner.code });
+    try {
+        const result = await repository.replaceFacultyEntries(owner.faculty, [], { mode: 'replace' });
+        await store.reloadFromDatabase();
+        res.json({ cleared: true, faculty: owner.faculty, removed: result.removed });
+    } catch (err) { fail(res, err); void next; }
 });
 
 router.get('/', requireDatabase, branchScope.guard(req => branchScope.branchOfClass(req.query.class)),
@@ -307,6 +573,14 @@ router.post('/', requireDatabase, branchScope.guard(req => branchScope.branchOfC
     const denied = authorizeWrite(req, parsed.entry);
     if (denied) return res.status(denied.status).json({ error: denied.error, code: denied.code });
     try {
+        const problems = await branchProblems(parsed.entry, req.branchScope.branch, {
+            mayAssignOutsideFaculty: mayAssign(req)
+        });
+        if (problems.length) {
+            return res.status(400).json({
+                error: problems.join('; '), code: 'INVALID_ENTRY', problems
+            });
+        }
         const entry = await repository.addEntry(parsed.entry);
         await store.reloadFromDatabase();
         res.status(201).json({ entry, saved: true });
@@ -332,6 +606,15 @@ router.put('/:id(\\d+)', requireDatabase, branchScope.guard(req => branchScope.b
         }
         const denied = authorizeWrite(req, parsed.entry);
         if (denied) return res.status(denied.status).json({ error: denied.error, code: denied.code });
+
+        const problems = await branchProblems(parsed.entry, req.branchScope.branch, {
+            mayAssignOutsideFaculty: mayAssign(req)
+        });
+        if (problems.length) {
+            return res.status(400).json({
+                error: problems.join('; '), code: 'INVALID_ENTRY', problems
+            });
+        }
     } catch (err) { return next(err); }
     try {
         const entry = await repository.updateEntry(parseInt(req.params.id, 10), parsed.entry);

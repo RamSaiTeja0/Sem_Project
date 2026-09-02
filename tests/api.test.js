@@ -71,9 +71,12 @@ async function run() {
         assert.deepStrictEqual(meta.body.days, ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']);
         assert.deepStrictEqual(meta.body.periods, [1, 2, 3, 4, 5, 6, 7]);
         assert.strictEqual(meta.body.primaryClass, 'CME-A');
-        assert.strictEqual(meta.body.facultyCount, 17);
+        // The ACTIVE branches only. ECE is archived: its records are still in
+        // the dataset but it is no longer an application, so no ordinary caller
+        // is offered its classes or counted its faculty.
+        assert.strictEqual(meta.body.facultyCount, 13);
         assert.deepStrictEqual(meta.body.classes.slice().sort(),
-            ['CME-A', 'ECE-A', 'ECE-B', 'EE-A', 'MEC-A']);
+            ['CME-A', 'EEE-A', 'MEC-A']);
     });
 
     const grid = await get('/api/timetable');
@@ -95,12 +98,18 @@ async function run() {
         assert.strictEqual(new Set(grid.body.cells.map(c => `${c.day}|${c.period}`)).size, 42);
     });
 
-    const otherClass = await get('/api/timetable?class=ECE-A');
+    const otherClass = await get('/api/timetable?class=EEE-A');
+    const archivedClass = await get('/api/timetable?class=ECE-A');
     const facultyGrid = await get('/api/timetable?faculty=' + encodeURIComponent('Ms. B. Kusuma'));
     check('the grid can be viewed by class or by faculty', () => {
-        assert.strictEqual(otherClass.body.name, 'ECE-A');
+        assert.strictEqual(otherClass.body.name, 'EEE-A');
         assert.strictEqual(facultyGrid.body.view, 'faculty');
         assert.strictEqual(facultyGrid.body.cells.filter(c => c.status === 'busy').length, 9);
+    });
+
+    check('an archived branch\'s class is not readable', () => {
+        assert.ok(archivedClass.status === 403 || archivedClass.status === 404,
+            `ECE-A must not be readable (got ${archivedClass.status})`);
     });
 
     const missingClass = await get('/api/timetable?class=NOPE');
@@ -112,37 +121,50 @@ async function run() {
     const faculty = await get('/api/faculty');
     check('GET /api/faculty returns the roster with free/busy counts', () => {
         assert.strictEqual(faculty.status, 200);
-        assert.strictEqual(faculty.body.count, 17);
+        assert.strictEqual(faculty.body.count, 13, 'the three active branches');
         faculty.body.faculty.forEach(f => {
             assert.strictEqual(f.busyPeriods + f.freePeriods, f.totalPeriods);
             assert.ok(f.id && f.name && f.department);
         });
     });
 
-    const filtered = await get('/api/faculty?department=ECE');
+    const filtered = await get('/api/faculty?department=EEE');
+    const archived = await get('/api/faculty?department=ECE');
     const searched = await get('/api/faculty?search=Kusuma');
     check('faculty filters by department and by name', () => {
-        assert.strictEqual(filtered.body.count, 4);
-        filtered.body.faculty.forEach(f => assert.strictEqual(f.department, 'ECE'));
+        assert.strictEqual(filtered.body.count, 3);
+        filtered.body.faculty.forEach(f => assert.strictEqual(f.department, 'EEE'));
         assert.strictEqual(searched.body.count, 1);
         assert.strictEqual(searched.body.faculty[0].name, 'Ms. B. Kusuma');
     });
 
+    check('an archived branch cannot be reached by naming it', () => {
+        assert.strictEqual(archived.status, 403);
+        assert.strictEqual(archived.body.code, 'BRANCH_ARCHIVED');
+    });
+
+    const oldSpelling = await get('/api/faculty?department=EE');
+    check('the old EE spelling resolves to EEE rather than being a second branch', () => {
+        assert.strictEqual(oldSpelling.status, 200);
+        assert.strictEqual(oldSpelling.body.count, 3);
+        oldSpelling.body.faculty.forEach(f => assert.strictEqual(f.department, 'EEE'));
+    });
+
     const departments = await get('/api/faculty/departments');
-    check('GET /api/faculty/departments lists all four branches with counts', () => {
+    check('GET /api/faculty/departments lists the active branches with counts', () => {
         assert.strictEqual(departments.status, 200);
         assert.deepStrictEqual(departments.body.departments.slice().sort(),
-            ['CME', 'ECE', 'EE', 'MEC']);
+            ['CME', 'EEE', 'MEC']);
         departments.body.details.forEach(d => {
             assert.ok(d.name && d.name !== d.code, `${d.code} has no full name`);
             assert.ok(Number.isInteger(d.facultyCount), `${d.code} has no roster count`);
         });
         const total = departments.body.details.reduce((sum, d) => sum + d.facultyCount, 0);
-        assert.strictEqual(total, 17, 'the branch counts must add up to the roster');
+        assert.strictEqual(total, 13, 'the branch counts must add up to the active roster');
     });
 
     const perBranch = await Promise.all(
-        ['EE', 'ECE', 'MEC', 'CME'].map(code =>
+        ['EEE', 'MEC', 'CME'].map(code =>
             get('/api/faculty?department=' + code).then(res => ({ code, res }))));
     check('every branch filter returns only that branch', () => {
         perBranch.forEach(({ code, res }) => {
@@ -168,8 +190,11 @@ async function run() {
         assert.strictEqual(atSlot.status, 200);
         assert.deepStrictEqual(atSlot.body.slot, { day: 'Monday', period: 2 });
         const busy = atSlot.body.faculty.filter(f => f.availability.status === 'busy');
-        assert.strictEqual(busy.length, 4);
+        // One per active class teaching at that slot — the archived branch's
+        // classes are not listed and its faculty are not counted.
+        assert.strictEqual(busy.length, 3);
         busy.forEach(f => assert.ok(f.availability.subject));
+        assert.strictEqual(atSlot.body.faculty.length, 13);
     });
 
     const badSlot = await get('/api/faculty?day=Funday&period=2');
@@ -188,11 +213,13 @@ async function run() {
     const records = await get('/api/timetable/records?day=Monday&period=2&status=busy');
     check('GET /api/timetable/records filters normalized records', () => {
         assert.strictEqual(records.status, 200);
-        assert.strictEqual(records.body.count, 4);
+        // One per ACTIVE class: the archived branch's periods are not served.
+        assert.strictEqual(records.body.count, 3);
         records.body.records.forEach(r => {
             assert.strictEqual(r.day, 'Monday');
             assert.strictEqual(r.period, 2);
             assert.strictEqual(r.status, 'busy');
+            assert.ok(!/^ECE-/.test(r.className), 'an archived branch\'s period was served');
         });
     });
 
@@ -201,7 +228,7 @@ async function run() {
         assert.strictEqual(refData.status, 200);
         assert.ok(Array.isArray(refData.body.departments));
         const deptCodes = refData.body.departments.map(d => d.code);
-        ['EE', 'ECE', 'MEC', 'CME'].forEach(dept => {
+        ['EEE', 'MEC', 'CME'].forEach(dept => {
             assert.ok(deptCodes.includes(dept), `department ${dept} must be in reference departments`);
         });
 
@@ -211,7 +238,7 @@ async function run() {
             assert.ok(s.department, `subject ${s.name} must have a department`);
         });
 
-        ['EE', 'ECE', 'MEC', 'CME'].forEach(dept => {
+        ['EEE', 'MEC', 'CME'].forEach(dept => {
             const deptSubjects = refData.body.subjects.filter(s => s.department === dept);
             assert.ok(deptSubjects.length > 0, `department ${dept} must have subjects`);
         });
@@ -229,7 +256,7 @@ async function run() {
         assert.ok(cmeSubjects.includes('Project work'));
         assert.ok(!cmeSubjects.includes('Power Systems'));
 
-        const eeSubjects = refData.body.subjects.filter(s => s.department === 'EE').map(s => s.name);
+        const eeSubjects = refData.body.subjects.filter(s => s.department === 'EEE').map(s => s.name);
         assert.ok(eeSubjects.includes('Power Systems'));
         assert.ok(eeSubjects.includes('Electrical Machines'));
         assert.ok(!eeSubjects.includes('Android Programming'));
@@ -237,8 +264,13 @@ async function run() {
         const cmeClasses = refData.body.classes.filter(c => c.department === 'CME').map(c => c.code);
         assert.deepStrictEqual(cmeClasses, ['CME-A']);
 
-        const eceClasses = refData.body.classes.filter(c => c.department === 'ECE').map(c => c.code);
-        assert.deepStrictEqual(eceClasses.sort(), ['ECE-A', 'ECE-B']);
+        const eeeClasses = refData.body.classes.filter(c => c.department === 'EEE').map(c => c.code);
+        assert.deepStrictEqual(eeeClasses.sort(), ['EEE-A']);
+
+        // The archived branch is absent from every reference list, so no form
+        // can offer its classes, subjects or faculty.
+        assert.deepStrictEqual(refData.body.classes.filter(c => c.department === 'ECE'), []);
+        assert.deepStrictEqual(refData.body.subjects.filter(sub => sub.department === 'ECE'), []);
     });
 
     console.log('\n[2] Availability endpoint');
@@ -250,15 +282,19 @@ async function run() {
         assert.strictEqual(availability.body.day, 'Monday');
         assert.strictEqual(availability.body.period, 2);
         assert.strictEqual(availability.body.subject, 'Python Programming');
-        assert.strictEqual(availability.body.totalAvailable, 13);
+        // 13 active-branch faculty, 3 of them teaching at Monday P2.
+        assert.strictEqual(availability.body.totalFaculty, 13);
+        assert.strictEqual(availability.body.totalAvailable, 10);
         assert.ok(Array.isArray(availability.body.availableFaculty));
         assert.strictEqual(availability.body.readOnly, true);
     });
 
     check('busy faculty never appear in availableFaculty', () => {
         const busy = availability.body.busy.map(b => b.faculty);
+        // Dr. Kavya Rao teaches ECE, which is archived, so she is neither in
+        // the pool nor reported busy to an ordinary caller.
         assert.deepStrictEqual(busy.sort(), [
-            'Dr. Kavya Rao', 'Dr. Mahesh Gupta', 'Dr. Rajesh Pillai', 'Ms. B. Kusuma'
+            'Dr. Mahesh Gupta', 'Dr. Rajesh Pillai', 'Ms. B. Kusuma'
         ]);
         busy.forEach(name => assert.ok(!availability.body.availableFaculty.includes(name)));
     });
@@ -284,9 +320,9 @@ async function run() {
     const summary = await get('/api/availability/summary?day=Monday&period=2');
     check('GET /api/availability/summary reports totals for a slot', () => {
         assert.strictEqual(summary.status, 200);
-        assert.strictEqual(summary.body.totalFaculty, 17);
-        assert.strictEqual(summary.body.selected.available, 13);
-        assert.strictEqual(summary.body.selected.busy, 4);
+        assert.strictEqual(summary.body.totalFaculty, 13);
+        assert.strictEqual(summary.body.selected.available, 10);
+        assert.strictEqual(summary.body.selected.busy, 3);
         assert.strictEqual(summary.body.slots.length, 42);
     });
 
@@ -329,7 +365,7 @@ async function run() {
 
     const stillDemo = await get('/api/timetable/meta');
     check('previewing did not change the loaded timetable', () => {
-        assert.strictEqual(stillDemo.body.facultyCount, 17);
+        assert.strictEqual(stillDemo.body.facultyCount, 13);
         assert.strictEqual(stillDemo.body.primaryClass, 'CME-A');
     });
 
@@ -369,7 +405,7 @@ async function run() {
 
     const afterFailures = await get('/api/timetable/meta');
     check('failed imports leave the loaded timetable untouched', () => {
-        assert.strictEqual(afterFailures.body.facultyCount, 17);
+        assert.strictEqual(afterFailures.body.facultyCount, 13);
         assert.strictEqual(afterFailures.body.origin, 'demo-data');
     });
 

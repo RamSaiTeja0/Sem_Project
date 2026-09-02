@@ -172,7 +172,7 @@ async function browserRun(playwright) {
                 .map(t => t.trim());
             ['Total faculty', 'Available faculty', 'Busy faculty', 'Timetable slots', 'Conflicts']
                 .forEach(label => assert.ok(labels.includes(label), 'missing stat card: ' + label));
-            assert.match(await page.locator('#topbarMeta').textContent(), /17 faculty/);
+            assert.match(await page.locator('#topbarMeta').textContent(), /13 faculty/);
             assert.ok((await page.locator('#workloadCard table.data tbody tr').count()) > 0, 'workload rows');
         });
 
@@ -226,9 +226,11 @@ async function browserRun(playwright) {
 
             const shown = (await page.locator('#availResult ul.faculty-list:not(.busy-list) li').allTextContents())
                 .map(t => t.replace(/✓/g, '').trim());
-            assert.strictEqual(shown.length, 13);
+            // 13 faculty across the three active branches, 3 of them teaching
+            // at Monday P2.
+            assert.strictEqual(shown.length, 10);
             assert.ok(!shown.some(t => t.startsWith('Ms. B. Kusuma')), 'the teaching faculty is excluded');
-            assert.ok(!shown.some(t => t.startsWith('Dr. Kavya Rao')), 'busy elsewhere, excluded');
+            assert.ok(!shown.some(t => t.startsWith('Dr. Kavya Rao')), 'archived branch, not listed');
 
             assert.strictEqual(await page.locator('#availBody .slot-btn.is-selected').count(), 1);
             assert.match(await page.locator('#availResult .slot-title').textContent(), /Monday — Period 2/);
@@ -322,10 +324,10 @@ async function browserRun(playwright) {
         await checkAsync('faculty directory and reports render, with working filters', async () => {
             await page.click('.nav-item[data-view="faculty"]');
             await page.waitForSelector('#facBody tr');
-            assert.strictEqual(await page.locator('#facBody tr').count(), 17);
+            assert.strictEqual(await page.locator('#facBody tr').count(), 13);
 
-            await page.selectOption('#facDept', 'ECE');
-            await page.waitForFunction(() => document.querySelectorAll('#facBody tr').length === 4);
+            await page.selectOption('#facDept', 'EEE');
+            await page.waitForFunction(() => document.querySelectorAll('#facBody tr').length === 3);
 
             await page.fill('#facSearch', 'sandhya');
             await page.waitForFunction(() => document.querySelectorAll('#facBody tr').length === 1);
@@ -365,7 +367,7 @@ async function browserRun(playwright) {
             await page.waitForSelector('#manageDept');
 
             // 1. Select EE
-            await page.selectOption('#manageDept', 'EE');
+            await page.selectOption('#manageDept', 'EEE');
             let subjects = await page.locator('#manageSubject option').allTextContents();
             let classes = await page.locator('#manageClass option').allTextContents();
             let faculty = await page.locator('#manageFaculty option').allTextContents();
@@ -508,7 +510,7 @@ async function httpRun() {
         request(BASE, 'GET', '/api/timetable'),
         request(BASE, 'GET', '/api/timetable/meta')
     ]);
-    const rosterCount = meta.body.facultyCount || 17;
+    const rosterCount = meta.body.facultyCount || 13;
 
     await checkAsync('the grid exposes every clickable coordinate', async () => {
         assert.strictEqual(grid.body.cells.length, 42);
@@ -521,7 +523,7 @@ async function httpRun() {
             faculty: cell.faculty, class: cell.className
         });
         assert.strictEqual(res.status, 200);
-        assert.strictEqual(res.body.totalAvailable, 13);
+        assert.strictEqual(res.body.totalAvailable, 10);
         assert.ok(!res.body.availableFaculty.includes(cell.faculty));
     });
 

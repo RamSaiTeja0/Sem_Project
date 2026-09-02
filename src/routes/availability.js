@@ -50,18 +50,18 @@ function handle(input, res, scope) {
     //
     // A visitor busy in their HOME branch is also busy, and must stay excluded
     // from the free list; but this branch is not told which class holds them.
-    if (scope && scope.branch) {
-        const pool = branchScope.facultyPoolOf(scope.branch);
-        const ourClasses = new Set(branchScope.classesOf(scope.branch));
+    {
+        const pool = branchScope.visibleFacultyNames(scope);
+        const ourClasses = new Set(branchScope.visibleClasses(scope));
 
         result.available = branchScope.projectFacultyList(
-            result.available.filter(f => pool.has(f.faculty)), scope.branch);
+            result.available.filter(f => pool.has(f.faculty)), scope && scope.branch);
         result.availableFaculty = result.available.map(f => f.faculty);
 
         result.busy = result.busy
             .filter(f => pool.has(f.faculty))
             .map(entry => {
-                const projected = branchScope.projectFaculty(entry, scope.branch);
+                const projected = branchScope.projectFaculty(entry, scope && scope.branch);
                 if (entry.className && !ourClasses.has(entry.className)) {
                     // Busy elsewhere: report the fact, never the other branch.
                     return { ...projected, className: null, subject: null, room: null,
@@ -108,20 +108,33 @@ router.get('/summary', scopeGuard, (req, res) => {
     const { day, period } = req.query;
 
     function scoped(summary) {
-        if (!scope.branch) return summary;
-        const pool = branchScope.facultyPoolOf(scope.branch);
-        const classes = new Set(branchScope.classesOf(scope.branch));
+        const pool = branchScope.visibleFacultyNames(scope);
+        const classes = new Set(branchScope.visibleClasses(scope));
         const total = pool.size;
+
+        function countBusy(day, period) {
+            const slot = engine.getSlot(day, period);
+            return slot ? slot.busy.filter(r => pool.has(r.faculty)).length : 0;
+        }
+
+        // `selected` is recomputed too, not just the week grid: leaving it on
+        // the engine's unscoped totals would report another branch's teaching
+        // load straight back to the dashboard.
+        const selected = summary.selected
+            ? (() => {
+                const busy = countBusy(summary.selected.day, summary.selected.period);
+                return { ...summary.selected, busy, available: total - busy };
+            })()
+            : null;
 
         return {
             ...summary,
-            branch: scope.branch,
+            branch: scope.branch || null,
             totalFaculty: total,
             classes: [...classes],
+            selected,
             slots: (summary.slots || []).map(entry => {
-                const slot = engine.getSlot(entry.day, entry.period);
-                if (!slot) return entry;
-                const busy = slot.busy.filter(r => pool.has(r.faculty)).length;
+                const busy = countBusy(entry.day, entry.period);
                 return { ...entry, busy, available: total - busy };
             })
         };

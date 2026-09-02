@@ -154,6 +154,37 @@
           </div>
         </div>
 
+        <div class="card" id="ownUploadCard" hidden>
+          <div class="card-head">
+            <div>
+              <h2>Upload my timetable</h2>
+              <p>Send your own week as structured rows. It is saved against
+                 <strong id="ownUploadWho">your account</strong> — the identity comes
+                 from your sign-in, so this can only ever change your own periods.</p>
+            </div>
+            <span class="pill" id="ownUploadBackend">Checking storage…</span>
+          </div>
+          <div class="card-body">
+            <div id="ownUploadNote"></div>
+            <div class="controls" style="margin-bottom:10px;">
+              <label class="field"><span>Mode</span>
+                <select id="ownUploadMode">
+                  <option value="merge">Merge — add these periods</option>
+                  <option value="replace">Replace — these are my whole week</option>
+                </select></label>
+              <button type="button" class="btn btn-secondary" id="ownUploadSample">Fill with my current week</button>
+              <button type="button" class="btn" id="ownUploadSave">Upload</button>
+            </div>
+            <label class="field" style="display:block;">
+              <span>Entries (JSON)</span>
+              <textarea id="ownUploadJson" rows="10" spellcheck="false"
+                        style="width:100%;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;"
+                        placeholder='{"entries":[{"day":"Monday","period":1,"class":"CME-A","subject":"Python Programming","room":"C-401"}]}'></textarea>
+            </label>
+            <div id="ownUploadResult" style="margin-top:12px;"></div>
+          </div>
+        </div>
+
         <div class="card">
           <div class="card-head">
             <div>
@@ -716,6 +747,12 @@ Ms. G. Sandhya Rani, FREE, FREE, Big Data &amp; Cloud Computing"></textarea>
                   <tr><td class="mono">GET</td><td class="mono">/api/faculty/departments</td><td>Department list</td></tr>
                   <tr><td class="mono">POST</td><td class="mono">/api/availability</td><td>Free faculty for a slot</td></tr>
                   <tr><td class="mono">GET</td><td class="mono">/api/availability/summary</td><td>Dashboard totals</td></tr>
+                  <tr><td class="mono">GET</td><td class="mono">/api/timetable/entries</td><td>Master timetable entries</td></tr>
+                  <tr><td class="mono">POST</td><td class="mono">/api/timetable/entries</td><td>Add one entry</td></tr>
+                  <tr><td class="mono">PUT</td><td class="mono">/api/timetable/entries/:id</td><td>Edit one entry</td></tr>
+                  <tr><td class="mono">DELETE</td><td class="mono">/api/timetable/entries/:id</td><td>Delete one entry</td></tr>
+                  <tr><td class="mono">GET</td><td class="mono">/api/timetable/entries/mine</td><td>My own timetable</td></tr>
+                  <tr><td class="mono">POST</td><td class="mono">/api/timetable/entries/mine</td><td>Upload my own timetable</td></tr>
                   <tr><td class="mono">GET</td><td class="mono">/api/timetable/import/formats</td><td>Accepted upload formats</td></tr>
                   <tr><td class="mono">POST</td><td class="mono">/api/timetable/import/preview</td><td>Validate an upload</td></tr>
                   <tr><td class="mono">POST</td><td class="mono">/api/timetable/import</td><td>Load an upload</td></tr>

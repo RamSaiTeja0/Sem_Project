@@ -144,6 +144,26 @@ tested directly and reused unchanged if the storage or transport changes.
 
 ---
 
+## Branches
+
+The active branches — the ones that are applications people sign in to — are
+**CME**, **EEE** and **MEC**.
+
+- **EE** is an older spelling of EEE, not a separate branch. `schema.sql`
+  merges any surviving EE records into EEE: where both exist, the faculty,
+  subjects and classes are re-pointed at EEE and the empty EE row is removed.
+  Faculty names, subject codes and class codes are all UNIQUE, so the merge
+  cannot produce a second identity for one person.
+- **ECE** is **archived**, not deleted. Every ECE faculty member, class, subject
+  and timetable row stays in the database; the branch simply stops being an
+  application — it has no accounts, appears in no list, and cannot be reached
+  through any API an ordinary caller can make. A coordinator still sees it, and
+  a single `UPDATE departments SET active = TRUE WHERE code = 'ECE'` brings it
+  back.
+
+Archiving is a data decision, held in `departments.active` (and in the bundled
+`src/data/departments.js` when no database is configured) rather than in code.
+
 ## Branch isolation
 
 Every branch behaves like its own application. A signed-in CME user sees CME
@@ -169,7 +189,11 @@ write route goes through. Three things make it hold:
 ### Cross-branch teaching
 
 A faculty member has a **home branch** (`faculty.department`) and may teach in
-another branch. These are deliberately different things:
+another branch. **The timetable entry IS the teaching assignment** — putting an
+EEE lecturer on a CME period is what makes them part of CME's pool, and it is
+the only way that link is created. A head of section or coordinator may make
+such an assignment; a faculty account cannot, since it may only write its own
+periods. These are deliberately different things:
 
 - The faculty a branch may see is *its own faculty* ∪ *anyone teaching one of
   its classes*.
@@ -181,6 +205,78 @@ another branch. These are deliberately different things:
 
 A coordinator (`admin`) is the one role that may look across branches, and must
 name the branch explicitly to do so.
+
+---
+
+## Managing a timetable
+
+Two workflows, on the same validated write path.
+
+### A head of section manages their branch's master timetable
+
+```
+GET    /api/timetable/entries?class=CME-A   list
+POST   /api/timetable/entries               add
+PUT    /api/timetable/entries/:id           edit
+DELETE /api/timetable/entries/:id           delete
+```
+
+The branch comes from the session, so a CME head of section can create, edit and
+delete CME entries and nothing else. An entry belonging to another branch reads
+back as **404 — absent**, rather than as forbidden-but-present.
+
+### A faculty member manages their own timetable
+
+```
+GET    /api/timetable/entries/mine    read it
+POST   /api/timetable/entries/mine    upload or replace it
+DELETE /api/timetable/entries/mine    clear it
+```
+
+```json
+{
+  "mode": "replace",
+  "entries": [
+    { "day": "Monday", "period": 1, "class": "CME-A",
+      "subject": "Python Programming", "room": "C-401" }
+  ]
+}
+```
+
+**The identity comes from the signed session and nowhere else.** A `faculty`,
+`facultyName` or `facultyId` field in the body is ignored outright for a faculty
+account: an upload that names a colleague is written to the sender instead, and
+`mode: "replace"` only ever clears the sender's own periods. A head of section
+or coordinator may name a faculty member — one their branch may schedule — which
+is what makes this the endpoint an automated extractor can post to later.
+
+This is the structured-input path. It does no extraction of its own: it takes
+already-normalized rows.
+
+### What is checked before anything is written
+
+Day and period are valid; the class exists and belongs to the caller's branch;
+the subject exists and belongs to that branch (an unattributed subject such as
+Library is allowed anywhere); the room exists; the faculty is someone that
+branch may schedule; the slot is free of class, faculty and room conflicts; and
+no coordinate appears twice in one upload.
+
+An upload is **all-or-nothing**. One bad row rejects the whole thing, with the
+problems listed against the row numbers you sent:
+
+```json
+{
+  "error": "2 of 12 entries were rejected; nothing was saved.",
+  "code": "INVALID_ENTRIES",
+  "rejected": [
+    { "index": 3, "problems": ["Class \"EEE-A\" does not belong to CME"] },
+    { "index": 7, "problems": ["Tuesday P2 appears more than once in this upload (already given as row 5)"] }
+  ]
+}
+```
+
+FREE is not stored. A faculty member with no entry at a slot is free; one with
+an entry is busy. There are no FREE records to keep in step.
 
 ---
 

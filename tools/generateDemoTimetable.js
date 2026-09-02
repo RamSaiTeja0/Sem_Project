@@ -38,10 +38,10 @@ const FACULTY = [
     { id: 'FAC005', name: 'Ms. B. Kusuma', department: 'CME', designation: 'Assistant Professor', phone: '+91 90000 10005' },
     { id: 'FAC006', name: 'Mrs. K. Anitha', department: 'CME', designation: 'Assistant Professor', phone: '+91 90000 10006' },
     { id: 'FAC007', name: 'Mr. Ch. Sai Kishore', department: 'CME', designation: 'Assistant Professor', phone: '+91 90000 10007' },
-    // EE
-    { id: 'FAC008', name: 'Dr. Suresh Babu', department: 'EE', designation: 'Professor', phone: '+91 90000 10008' },
-    { id: 'FAC009', name: 'Prof. Lakshmi Devi', department: 'EE', designation: 'Associate Professor', phone: '+91 90000 10009' },
-    { id: 'FAC010', name: 'Dr. Mahesh Gupta', department: 'EE', designation: 'Assistant Professor', phone: '+91 90000 10010' },
+    // EEE
+    { id: 'FAC008', name: 'Dr. Suresh Babu', department: 'EEE', designation: 'Professor', phone: '+91 90000 10008' },
+    { id: 'FAC009', name: 'Prof. Lakshmi Devi', department: 'EEE', designation: 'Associate Professor', phone: '+91 90000 10009' },
+    { id: 'FAC010', name: 'Dr. Mahesh Gupta', department: 'EEE', designation: 'Assistant Professor', phone: '+91 90000 10010' },
     // ECE
     { id: 'FAC011', name: 'Prof. Naveen Reddy', department: 'ECE', designation: 'Professor', phone: '+91 90000 10011' },
     { id: 'FAC012', name: 'Dr. Kavya Rao', department: 'ECE', designation: 'Associate Professor', phone: '+91 90000 10012' },
@@ -68,7 +68,7 @@ const ROOMS = [
     { code: 'E-202', name: 'Block E — Room 202', type: 'classroom', capacity: 60 },
     { code: 'M-501', name: 'Block M — Room 501', type: 'classroom', capacity: 60 },
     { code: 'CM-LAB-1', name: 'Computer Engineering Lab', type: 'lab', capacity: 35 },
-    { code: 'EE-LAB-1', name: 'Electrical Machines Lab', type: 'lab', capacity: 30 },
+    { code: 'EEE-LAB-1', name: 'Electrical Machines Lab', type: 'lab', capacity: 30 },
     { code: 'EC-LAB-1', name: 'Electronics Lab 1', type: 'lab', capacity: 30 },
     { code: 'EC-LAB-2', name: 'Electronics Lab 2', type: 'lab', capacity: 30 },
     { code: 'ME-WORKSHOP', name: 'Mechanical Workshop', type: 'lab', capacity: 40 }
@@ -85,15 +85,15 @@ const SUBJECTS = [
     { code: 'CM-507', name: 'Python Programming Lab', department: 'CME', type: 'lab' },
     { code: 'CM-508', name: 'Life Skills', department: 'CME', type: 'theory' },
     { code: 'CM-509', name: 'Project work', department: 'CME', type: 'theory' },
-    // EE
-    { code: 'EE501', name: 'Power Systems', department: 'EE', type: 'theory' },
-    { code: 'EE502', name: 'Electrical Machines', department: 'EE', type: 'theory' },
-    { code: 'EE503', name: 'Control Systems', department: 'EE', type: 'theory' },
-    { code: 'EE504', name: 'Power Electronics', department: 'EE', type: 'theory' },
-    { code: 'EE505', name: 'Electromagnetic Fields', department: 'EE', type: 'theory' },
-    { code: 'EE506', name: 'Transmission and Distribution', department: 'EE', type: 'theory' },
-    { code: 'EE551', name: 'Electrical Machines Lab', department: 'EE', type: 'lab' },
-    { code: 'EE552', name: 'Power Systems Lab', department: 'EE', type: 'lab' },
+    // EEE
+    { code: 'EE501', name: 'Power Systems', department: 'EEE', type: 'theory' },
+    { code: 'EE502', name: 'Electrical Machines', department: 'EEE', type: 'theory' },
+    { code: 'EE503', name: 'Control Systems', department: 'EEE', type: 'theory' },
+    { code: 'EE504', name: 'Power Electronics', department: 'EEE', type: 'theory' },
+    { code: 'EE505', name: 'Electromagnetic Fields', department: 'EEE', type: 'theory' },
+    { code: 'EE506', name: 'Transmission and Distribution', department: 'EEE', type: 'theory' },
+    { code: 'EE551', name: 'Electrical Machines Lab', department: 'EEE', type: 'lab' },
+    { code: 'EE552', name: 'Power Systems Lab', department: 'EEE', type: 'lab' },
     // ECE
     { code: 'EC501', name: 'Digital Electronics', department: 'ECE', type: 'theory' },
     { code: 'EC502', name: 'Signals and Systems', department: 'ECE', type: 'theory' },
@@ -119,7 +119,7 @@ const ACADEMIC_YEAR = '2026-27';
 
 const CLASSES = [
     { class: 'CME-A', department: 'CME', semester: 5, room: 'C-401', labRooms: ['CM-LAB-1'] },
-    { class: 'EE-A', department: 'EE', semester: 5, room: 'P-301', labRooms: ['EE-LAB-1'] },
+    { class: 'EEE-A', department: 'EEE', semester: 5, room: 'P-301', labRooms: ['EEE-LAB-1'] },
     { class: 'ECE-A', department: 'ECE', semester: 5, room: 'E-201', labRooms: ['EC-LAB-1', 'EC-LAB-2'] },
     { class: 'ECE-B', department: 'ECE', semester: 5, room: 'E-202', labRooms: ['EC-LAB-2', 'EC-LAB-1'] },
     { class: 'MEC-A', department: 'MEC', semester: 5, room: 'M-501', labRooms: ['ME-WORKSHOP'] }
@@ -175,7 +175,7 @@ const CME_A_ROWS = {
 };
 
 const PLAN = {
-    'EE-A': [
+    'EEE-A': [
         ['Power Systems', 'Dr. Suresh Babu', 5],
         ['Electrical Machines', 'Prof. Lakshmi Devi', 5],
         ['Control Systems', 'Dr. Mahesh Gupta', 5],

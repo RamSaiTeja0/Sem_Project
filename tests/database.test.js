@@ -44,16 +44,27 @@ const { app } = require('../server');
 
 let server;
 let base;
+/** The entry the suite deliberately deletes, so teardown can put it back. */
+let vacatedEntry = null;
+
+/**
+ * The write tests below act as the COORDINATOR, the one role that administers
+ * every branch. Anyone else is confined to their own, so a cross-branch
+ * double-booking — which is exactly what the conflict rules exist to catch —
+ * could not even be attempted by them.
+ */
+let cookie = null;
 
 function call(method, path, body) {
     return new Promise((resolve, reject) => {
         const payload = body ? JSON.stringify(body) : null;
-        const req = http.request(`${base}${path}`, {
-            method,
-            headers: payload
-                ? { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload) }
-                : {}
-        }, res => {
+        const headers = payload
+            ? { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload) }
+            : {};
+        if (cookie) headers.Cookie = cookie;
+        const req = http.request(`${base}${path}`, { method, headers }, res => {
+            const setCookie = res.headers['set-cookie'];
+            if (setCookie && setCookie.length) cookie = setCookie[0].split(';')[0];
             let data = '';
             res.on('data', c => data += c);
             res.on('end', () => {
@@ -146,7 +157,7 @@ async function run() {
             assert.ok(c.academicYear, `${c.code} has no academic year`);
         });
         const branches = [...new Set(classes.map(c => c.department))].sort();
-        assert.deepStrictEqual(branches, ['CME', 'ECE', 'EE', 'MEC']);
+        assert.deepStrictEqual(branches, ['CME', 'ECE', 'EEE', 'MEC']);
     });
 
     console.log('\n[2] Round-trip through PostgreSQL');
@@ -189,6 +200,13 @@ async function run() {
     await new Promise(resolve => server.once('listening', resolve));
     base = `http://localhost:${server.address().port}`;
 
+    // Sign in as the coordinator before any write: the conflict tests below
+    // deliberately double-book across branches, which only that role may
+    // attempt at all.
+    const signedIn = await call('POST', '/api/auth/login',
+        { username: 'admin', password: process.env.DEMO_PASSWORD || 'tecsub123' });
+    assert.strictEqual(signedIn.status, 200, 'coordinator sign-in failed: ' + signedIn.raw);
+
     // The demo timetable fills every class completely, so free a slot first by
     // removing one entry through the API. That exercises the delete path and
     // gives the add/edit tests below a genuinely empty coordinate to write to.
@@ -196,6 +214,7 @@ async function run() {
     const seeded = await call('GET', '/api/timetable/entries?class=' + primaryClass);
     assert.ok(seeded.body.entries.length, primaryClass + ' must have seeded entries');
     const vacated = seeded.body.entries[0];
+    vacatedEntry = vacated;
     const removed = await call('DELETE', '/api/timetable/entries/' + vacated.id);
     assert.strictEqual(removed.status, 200, 'freeing a slot must succeed');
 
@@ -214,10 +233,23 @@ async function run() {
     const otherClasses = reference.classes.map(c => c.code).filter(code => code !== freeClass);
     assert.ok(otherClasses.length >= 2, 'the demo data needs at least three classes');
 
-    // Two theory subjects, again taken from the data rather than named here.
-    const theory = reference.subjects.filter(s => s.type === 'theory').map(s => s.name);
+    // Two theory subjects of the PRIMARY class's own branch — a subject
+    // belongs to one branch, and putting another branch's subject on a class is
+    // refused on its own merits, which would mask the conflict rules below.
+    const primaryBranch = (reference.classes.find(c => c.code === freeClass) || {}).department;
+    const theory = reference.subjects
+        .filter(s => s.type === 'theory' && s.department === primaryBranch)
+        .map(s => s.name);
     const [SUBJECT_A, SUBJECT_B] = [theory[0], theory[1]];
     assert.ok(SUBJECT_A && SUBJECT_B, 'the demo data needs at least two theory subjects');
+
+    /** A theory subject belonging to whichever branch owns `className`. */
+    function subjectFor(className) {
+        const branch = (reference.classes.find(c => c.code === className) || {}).department;
+        const match = reference.subjects.find(s => s.type === 'theory' && s.department === branch);
+        assert.ok(match, `no theory subject for ${className}`);
+        return match.name;
+    }
 
     let createdId = null;
 
@@ -225,6 +257,10 @@ async function run() {
         const res = await call('GET', '/api/timetable/entries/reference');
         assert.strictEqual(res.status, 200);
         assert.strictEqual(res.body.editable, true);
+        // As the coordinator — the one role that administers every branch,
+        // archived ones included — so the whole catalog is offered here. A
+        // branch account sees only its own; that is proved in the isolation
+        // suite, which makes the request as one.
         assert.strictEqual(res.body.classes.length, demo.classes.length);
         assert.strictEqual(res.body.faculty.length, demo.faculty.length);
         assert.ok(res.body.subjects.length > 0 && res.body.rooms.length > 0);
@@ -268,12 +304,14 @@ async function run() {
     });
 
     await checkAsync('a faculty conflict across classes is rejected', async () => {
+        // The same lecturer, at the same moment, in a second class: valid data
+        // in every other respect, so only the conflict rule can refuse it.
         const res = await call('POST', '/api/timetable/entries', {
             class: otherClasses[0], day: freeCell.day, period: freeCell.period,
-            subject: SUBJECT_A, faculty: substitute, room: 'P-301'
+            subject: subjectFor(otherClasses[0]), faculty: substitute, room: 'P-301'
         });
-        assert.strictEqual(res.status, 400);
-        assert.strictEqual(res.body.code, 'SLOT_CONFLICT');
+        assert.strictEqual(res.status, 400, JSON.stringify(res.body));
+        assert.strictEqual(res.body.code, 'SLOT_CONFLICT', JSON.stringify(res.body));
         assert.ok(res.body.conflicts.some(c => c.code === 'FACULTY_BUSY' || c.code === 'CLASS_BUSY'));
     });
 
@@ -282,7 +320,7 @@ async function run() {
             { day: freeCell.day, period: freeCell.period })).body.availableFaculty[0];
         const res = await call('POST', '/api/timetable/entries', {
             class: otherClasses[1], day: freeCell.day, period: freeCell.period,
-            subject: SUBJECT_A, faculty: other, room: 'C-401'
+            subject: subjectFor(otherClasses[1]), faculty: other, room: 'C-401'
         });
         assert.strictEqual(res.status, 400);
         assert.ok(res.body.conflicts.some(c => c.code === 'ROOM_BUSY'),
@@ -303,7 +341,19 @@ async function run() {
             subject: 'Astral Projection', faculty: substitute
         });
         assert.strictEqual(res.status, 400);
-        assert.strictEqual(res.body.code, 'UNKNOWN_REFERENCE');
+        // Caught by the ownership validation, which names every problem at
+        // once, before the write reaches the database's own reference check.
+        assert.ok(['INVALID_ENTRY', 'UNKNOWN_REFERENCE'].includes(res.body.code),
+            'unexpected code: ' + JSON.stringify(res.body));
+        assert.match(JSON.stringify(res.body), /Astral Projection/,
+            'the refusal must name the thing it could not find');
+
+        const unknownClass = await call('POST', '/api/timetable/entries', {
+            class: 'NOT-A-CLASS', day: freeCell.day, period: freeCell.period === 1 ? 2 : 1,
+            subject: SUBJECT_A, faculty: substitute
+        });
+        assert.strictEqual(unknownClass.status, 400);
+        assert.match(JSON.stringify(unknownClass.body), /NOT-A-CLASS/);
     });
 
     await checkAsync('PUT /entries/:id edits an entry', async () => {
@@ -460,8 +510,28 @@ async function run() {
     });
 }
 
+/**
+ * The suite frees a slot on purpose so the add/edit paths have somewhere to
+ * write. Put it back: a scratch database is often reused, and a missing period
+ * would make the round-trip check above fail on the next run for a reason that
+ * has nothing to do with the code.
+ */
+async function restoreVacatedSlot() {
+    if (!vacatedEntry || !base) return;
+    const exists = await call('GET',
+        `/api/timetable/entries?class=${encodeURIComponent(vacatedEntry.className)}` +
+        `&day=${vacatedEntry.day}&period=${vacatedEntry.period}`);
+    if (exists.body && exists.body.count) return;
+    await call('POST', '/api/timetable/entries', {
+        class: vacatedEntry.className, day: vacatedEntry.day, period: vacatedEntry.period,
+        subject: vacatedEntry.subject, faculty: vacatedEntry.faculty,
+        room: vacatedEntry.room, type: vacatedEntry.type
+    });
+}
+
 run()
     .then(async () => {
+        await restoreVacatedSlot();
         if (server) server.close();
         await db.close();
         const { passed } = counts();
@@ -470,6 +540,7 @@ run()
     })
     .catch(async err => {
         console.error('\n✗ FAILED:', err.message);
+        try { await restoreVacatedSlot(); } catch (e) { /* best effort */ }
         if (server) server.close();
         try { await db.close(); } catch (e) { /* already closing */ }
         process.exit(1);

@@ -17,17 +17,16 @@ router.get('/meta', branchScope.guard(), (req, res) => {
     const scope = req.branchScope;
     const meta = engine.getMeta();
 
-    // The metadata a branch application needs, showing only its own classes.
-    const classes = scope.branch ? branchScope.classesOf(scope.branch) : meta.classes;
+    // The metadata a branch application needs, showing only its own classes —
+    // and, unscoped, only the ACTIVE branches' classes.
+    const classes = branchScope.visibleClasses(scope);
 
     res.json({
         ...meta,
         classes,
         primaryClass: classes.includes(meta.primaryClass) ? meta.primaryClass : (classes[0] || null),
         branch: scope.branch || null,
-        facultyCount: scope.branch
-            ? branchScope.facultyPoolOf(scope.branch).size
-            : meta.facultyCount,
+        facultyCount: branchScope.visibleFacultyNames(scope).size,
         origin: store.origin,
         loadedAt: store.loadedAt,
         // A warning that names another branch's class or faculty is that
@@ -42,15 +41,16 @@ router.get('/records', branchScope.guard(), (req, res) => {
     const { day, period, faculty, status } = req.query;
     let records = engine.getRecords();
 
+    // Only periods this caller may see. For a branch account that is its own
+    // classes — a visiting lecturer's periods in their home branch are not this
+    // branch's business — and unscoped it excludes every archived branch.
+    const pool = branchScope.visibleFacultyNames(scope);
+    const classes = new Set(branchScope.visibleClasses(scope));
+    records = records
+        .filter(r => !r.faculty || pool.has(r.faculty))
+        .filter(r => r.status !== 'busy' || classes.has(r.className));
     if (scope.branch) {
-        // Only this branch's own periods. A visiting lecturer's periods in
-        // their home branch are not this branch's business.
-        const pool = branchScope.facultyPoolOf(scope.branch);
-        const classes = new Set(branchScope.classesOf(scope.branch));
-        records = records
-            .filter(r => pool.has(r.faculty))
-            .filter(r => r.status !== 'busy' || classes.has(r.className))
-            .map(r => branchScope.projectFaculty(r, scope.branch));
+        records = records.map(r => branchScope.projectFaculty(r, scope.branch));
     }
 
     if (day) {
@@ -80,31 +80,30 @@ router.get('/', branchScope.guard(req => branchScope.branchOfClass(req.query.cla
     const scope = req.branchScope;
 
     // Classes this caller may see at all. Everything below is chosen from here,
-    // so no branch can read another branch's grid by naming its class.
-    const visibleClasses = scope.branch
-        ? branchScope.classesOf(scope.branch)
-        : engine.getMeta().classes;
+    // so no branch can read another branch's grid by naming its class, and an
+    // archived branch's grid is unreachable to everyone but a coordinator.
+    const visibleClasses = branchScope.visibleClasses(scope);
 
     if (req.query.faculty) {
         // A faculty grid is readable only for someone this branch may see, and
         // it is trimmed to this branch's classes: a visiting lecturer's periods
         // in their home branch stay invisible here.
-        if (scope.branch && !branchScope.facultyInBranch(req.query.faculty, scope.branch)) {
+        if (!branchScope.visibleFacultyNames(scope).has(req.query.faculty)) {
             return res.status(404).json({
-                error: `No faculty named "${req.query.faculty}" in ${scope.branch}`, code: 'NOT_FOUND'
+                error: `No faculty named "${req.query.faculty}"` +
+                    (scope.branch ? ` in ${scope.branch}` : ''),
+                code: 'NOT_FOUND'
             });
         }
         const grid = engine.getFacultyGrid(req.query.faculty);
         if (!grid) {
             return res.status(404).json({ error: `No faculty named "${req.query.faculty}"`, code: 'NOT_FOUND' });
         }
-        const cells = scope.branch
-            ? grid.cells.map(cell => (cell.className && !visibleClasses.includes(cell.className)
+        const cells = grid.cells.map(cell => (cell.className && !visibleClasses.includes(cell.className)
                 // Occupied, but by another branch's class: report it busy
                 // without disclosing whose class it is.
                 ? { ...cell, className: null, subject: null, room: null, otherBranch: true }
-                : cell))
-            : grid.cells;
+                : cell));
         return res.json({ ...grid, cells, periodTimings: engine.getMeta().periodTimings,
                           branch: scope.branch || null });
     }

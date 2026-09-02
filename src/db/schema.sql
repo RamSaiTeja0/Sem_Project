@@ -105,6 +105,23 @@ CREATE TABLE IF NOT EXISTS users (
     created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- An account can be deactivated without being deleted, so who-did-what stays
+-- readable after a branch is archived.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS active BOOLEAN NOT NULL DEFAULT TRUE;
+
+-- Heads of section manage one branch each. Replacing the check by name keeps
+-- this idempotent; the original two-role constraint predates the role.
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'users_role_check') THEN
+        ALTER TABLE users DROP CONSTRAINT users_role_check;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'users_role_allowed') THEN
+        ALTER TABLE users ADD CONSTRAINT users_role_allowed
+            CHECK (role IN ('coordinator', 'hos', 'faculty'));
+    END IF;
+END $$;
+
 CREATE TABLE IF NOT EXISTS timetable (
     id            SERIAL PRIMARY KEY,
     class_id      INTEGER NOT NULL REFERENCES classes(id) ON DELETE CASCADE,
@@ -175,3 +192,67 @@ CREATE TABLE IF NOT EXISTS attendance (
     marked_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
     CONSTRAINT attendance_slot_unique UNIQUE (timetable_id, on_date)
 );
+
+-- ======================================================================
+-- Branch normalization: the final active set is CME, EEE and MEC.
+--
+-- Everything below is idempotent and NON-DESTRUCTIVE. No table is dropped, no
+-- timetable row is deleted and no faculty record is duplicated: "EE" and "EEE"
+-- are two spellings of one real branch, so its records are re-pointed at the
+-- single EEE department and the leftover empty EE row is removed. ECE is
+-- ARCHIVED, not deleted — its faculty, classes, subjects and timetable rows
+-- stay exactly where they are and simply stop being an application.
+-- ======================================================================
+
+-- An ACTIVE branch is an application someone can sign in to. Archiving is how a
+-- branch leaves the application without its history leaving the database.
+ALTER TABLE departments ADD COLUMN IF NOT EXISTS active BOOLEAN NOT NULL DEFAULT TRUE;
+
+DO $$
+DECLARE
+    ee_id  INTEGER;
+    eee_id INTEGER;
+BEGIN
+    SELECT id INTO ee_id  FROM departments WHERE UPPER(code) = 'EE';
+    SELECT id INTO eee_id FROM departments WHERE UPPER(code) = 'EEE';
+
+    IF ee_id IS NOT NULL AND eee_id IS NULL THEN
+        -- Only the old spelling exists: rename it in place. Every faculty,
+        -- subject, class and timetable row keeps its foreign key, so nothing
+        -- moves and nothing can be lost.
+        UPDATE departments
+           SET code = 'EEE', name = 'Electrical and Electronics Engineering'
+         WHERE id = ee_id;
+
+    ELSIF ee_id IS NOT NULL AND eee_id IS NOT NULL THEN
+        -- Both spellings exist and are the same real branch. Re-point the
+        -- children at EEE, then drop the department row that is now empty.
+        -- Faculty names, subject codes and class codes are all UNIQUE, so
+        -- re-pointing can never create a second identity for one person.
+        UPDATE faculty  SET department_id = eee_id WHERE department_id = ee_id;
+        UPDATE subjects SET department_id = eee_id WHERE department_id = ee_id;
+        UPDATE classes  SET department_id = eee_id WHERE department_id = ee_id;
+        DELETE FROM departments WHERE id = ee_id;
+    END IF;
+END $$;
+
+-- The class and lab room named after the old spelling. Renamed only when the
+-- new name is free, so a database that already carries EEE-A is left alone.
+UPDATE classes SET code = 'EEE-A'
+ WHERE code = 'EE-A' AND NOT EXISTS (SELECT 1 FROM classes WHERE code = 'EEE-A');
+
+UPDATE rooms SET code = 'EEE-LAB-1'
+ WHERE code = 'EE-LAB-1' AND NOT EXISTS (SELECT 1 FROM rooms WHERE code = 'EEE-LAB-1');
+
+-- ECE is archived: kept in full, but no longer an application. Re-running this
+-- is a no-op, and a coordinator can reverse it with a single UPDATE.
+UPDATE departments SET active = FALSE WHERE UPPER(code) = 'ECE' AND active;
+
+-- Accounts belonging to an archived branch cannot sign in. The rows are kept
+-- so the history of who did what stays readable.
+UPDATE users SET active = FALSE
+  FROM faculty f, departments d
+ WHERE users.faculty_id = f.id
+   AND f.department_id = d.id
+   AND d.active = FALSE
+   AND users.active;

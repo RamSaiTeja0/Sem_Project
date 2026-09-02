@@ -65,7 +65,7 @@ async function loadSource(meta) {
         db.query(`SELECT s.code, s.name, s.subject_type, COALESCE(d.code, 'General') AS department
                     FROM subjects s LEFT JOIN departments d ON d.id = s.department_id
                    ORDER BY s.code`),
-        db.query('SELECT code, name FROM departments ORDER BY code')
+        db.query('SELECT code, name, active FROM departments ORDER BY code')
     ]);
 
     const days = [...new Set(entryRows.rows.map(r => r.day_of_week))]
@@ -131,7 +131,7 @@ async function loadSource(meta) {
             periods: periods.length ? periods : (base.periods || [1, 2, 3, 4, 5, 6, 7]),
             periodTimings: Object.keys(periodTimings).length ? periodTimings : (base.periodTimings || {})
         },
-        departments: deptRows.rows.map(d => ({ code: d.code, name: d.name })),
+        departments: deptRows.rows.map(d => ({ code: d.code, name: d.name, active: d.active !== false })),
         rooms: roomRows.rows.map(r => ({ code: r.code, name: r.name, type: r.room_type, capacity: r.capacity })),
         subjects: subjectRows.rows.map(s => ({
             code: s.code, name: s.name, department: s.department, type: s.subject_type
@@ -275,6 +275,70 @@ async function addEntry(entry) {
     });
 }
 
+/**
+ * Write a whole set of entries for ONE faculty member, in a single transaction.
+ *
+ * This is the structured-upload path: a faculty member submitting their own
+ * week, and later the same shape arriving from an automated extractor. It is
+ * all-or-nothing — one bad row rejects the upload rather than leaving a
+ * half-written timetable behind.
+ *
+ * `mode: 'replace'` clears that faculty member's existing periods first, so an
+ * upload is a statement of their whole week rather than an append. It only ever
+ * touches rows whose faculty_id is this person: a colleague's periods, and the
+ * class's other periods taught by someone else, are never removed.
+ *
+ * @param {string} facultyName  resolved from the session by the caller, never
+ *                              from the request body
+ */
+async function replaceFacultyEntries(facultyName, entries, options = {}) {
+    const mode = options.mode === 'replace' ? 'replace' : 'merge';
+
+    return db.withTransaction(async client => {
+        const facultyId = await lookupId(client, 'faculty', 'name', facultyName);
+        if (!facultyId) {
+            throw badRequest(`Unknown faculty "${facultyName}"`, 'UNKNOWN_REFERENCE',
+                [`faculty "${facultyName}"`]);
+        }
+
+        let removed = 0;
+        if (mode === 'replace') {
+            const cleared = await client.query(
+                'DELETE FROM timetable WHERE faculty_id = $1 RETURNING id', [facultyId]);
+            removed = cleared.rowCount;
+        }
+
+        const written = [];
+        for (const entry of entries) {
+            const refs = await resolveRefs(client, { ...entry, faculty: facultyName });
+            if (refs.missing.length) {
+                throw badRequest(
+                    `${entry.day} P${entry.period}: unknown ${refs.missing.join(', ')}`,
+                    'UNKNOWN_REFERENCE', refs.missing);
+            }
+            const conflicts = await findSlotConflicts(client, {
+                classId: refs.classId, facultyId: refs.facultyId, roomId: refs.roomId,
+                day: entry.day, period: entry.period
+            });
+            if (conflicts.length) {
+                throw badRequest(
+                    `${entry.day} P${entry.period}: ${conflicts.map(c => c.message).join('; ')}`,
+                    'SLOT_CONFLICT', conflicts);
+            }
+            const { rows } = await client.query(`
+                INSERT INTO timetable (class_id, day_of_week, period, subject_id, faculty_id, room_id, session_type)
+                VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
+                [refs.classId, entry.day, entry.period, refs.subjectId, facultyId,
+                 refs.roomId, entry.type]);
+            written.push(rows[0].id);
+        }
+
+        const saved = [];
+        for (const id of written) saved.push(await getEntry(id, client));
+        return { mode, removed, created: saved.length, entries: saved };
+    });
+}
+
 async function updateEntry(id, entry) {
     return db.withTransaction(async client => {
         const existing = await client.query('SELECT id FROM timetable WHERE id = $1', [id]);
@@ -341,10 +405,10 @@ async function listClasses() {
 
 async function listDepartments() {
     const { rows } = await db.query(`
-        SELECT d.code, d.name, COUNT(f.id)::int AS "facultyCount"
+        SELECT d.code, d.name, d.active, COUNT(f.id)::int AS "facultyCount"
           FROM departments d
           LEFT JOIN faculty f ON f.department_id = d.id
-         GROUP BY d.code, d.name
+         GROUP BY d.code, d.name, d.active
          ORDER BY d.code`);
     return rows;
 }
@@ -671,7 +735,7 @@ async function getFaculty(id, client) {
 
 module.exports = {
     isEmpty, counts, loadSource,
-    listEntries, getEntry, addEntry, updateEntry, deleteEntry,
+    listEntries, getEntry, addEntry, updateEntry, deleteEntry, replaceFacultyEntries,
     listRooms, listSubjects, listClasses, listDepartments,
     addDepartment, updateDepartment, deleteDepartment,
     addSubject, updateSubject, deleteSubject,
