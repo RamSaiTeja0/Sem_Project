@@ -30,9 +30,18 @@ const ADMIN = {
     facultyName: null
 };
 
-/** Every account that can sign in: the coordinator plus one per faculty. */
+/**
+ * Every account that can sign in: the coordinator, one Head of Section per
+ * branch, and one per faculty member.
+ *
+ * A user's `department` IS their branch: it is copied into the signed session
+ * and is what every branch-scoped API derives access from. Nothing here lets an
+ * account belong to two branches.
+ */
 function list() {
-    const faculty = store.engine.getFaculty().map(member => ({
+    const roster = store.engine.getFaculty();
+
+    const faculty = roster.map(member => ({
         id: member.id,
         username: slug(member.name),
         name: member.name,
@@ -40,7 +49,22 @@ function list() {
         department: member.department,
         facultyName: member.name
     }));
-    return [ADMIN].concat(faculty);
+
+    // One HOS per branch that actually exists in the loaded data, so a new
+    // branch gets its head automatically and no branch is hardcoded here.
+    const branches = [...new Set(roster.map(m => String(m.department || '').trim().toUpperCase())
+        .filter(Boolean))].sort();
+
+    const heads = branches.map(branch => ({
+        id: `HOS-${branch}`,
+        username: `hos.${branch.toLowerCase()}`,
+        name: `Head of Section — ${branch}`,
+        role: 'hos',
+        department: branch,
+        facultyName: null
+    }));
+
+    return [ADMIN].concat(heads, faculty);
 }
 
 function findByUsername(username) {

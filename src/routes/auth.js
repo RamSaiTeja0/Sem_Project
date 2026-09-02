@@ -15,6 +15,7 @@ const router = express.Router();
 
 const config = require('../config');
 const users = require('../data/users');
+const branchScope = require('../core/branchScope');
 
 function publicUser(session) {
     if (!session) return null;
@@ -37,14 +38,24 @@ router.get('/session', (req, res) => {
 });
 
 router.get('/accounts', (req, res) => {
+    let accounts = users.list().map(u => ({
+        username: u.username, name: u.name, role: u.role, department: u.department
+    }));
+
+    // Signed out this is the sign-in page's demo directory. Signed in to a
+    // branch account it is scoped like everything else, so a CME user browsing
+    // the API cannot read off the names of the other branches.
+    const scope = branchScope.resolve(req, null);
+    if (!scope.error && scope.branch) {
+        accounts = accounts.filter(a => branchScope.code(a.department) === scope.branch);
+    }
+
     res.json({
         note: 'Demo directory. Every account signs in with the same demo password.',
         // Shown on the sign-in page only while the password is the documented
         // default. Override DEMO_PASSWORD and the hint disappears.
         demoPassword: config.demoPassword === 'tecsub123' ? config.demoPassword : null,
-        accounts: users.list().map(u => ({
-            username: u.username, name: u.name, role: u.role, department: u.department
-        }))
+        accounts
     });
 });
 

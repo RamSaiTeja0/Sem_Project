@@ -164,6 +164,12 @@ async function writeTests() {
     await pool.query("DELETE FROM faculty WHERE code = 'TSTF1'");
     await pool.query("DELETE FROM departments WHERE code IN ('TSTB', 'TSTC')");
 
+    // Whatever branches this database holds must be exactly what it holds at
+    // the end. Read them rather than naming them, so the suite follows the
+    // real data instead of a list that goes stale when the seed changes.
+    const beforeList = await get('/api/branches');
+    const originalBranches = beforeList.body.branches.map(b => b.code).sort();
+
     const created = await post('/api/branches', { code: CODE, name: 'Test Branch for Suite' });
     check('POST /api/branches creates a branch', () => {
         assert.strictEqual(created.status, 201);
@@ -299,10 +305,11 @@ async function writeTests() {
     });
 
     const finalList = await get('/api/branches');
-    check('teardown leaves only the original branches', () => {
-        assert.ok(!finalList.body.branches.some(b => b.code === CODE));
-        ['CSE', 'ECE', 'EEE', 'CME', 'MEC', 'CIVIL'].forEach(code =>
-            assert.ok(finalList.body.branches.some(b => b.code === code), code + ' must survive'));
+    check('teardown leaves the database exactly as it was found', () => {
+        assert.ok(!finalList.body.branches.some(b => b.code === CODE),
+            'the test branch must not be left behind');
+        assert.deepStrictEqual(finalList.body.branches.map(b => b.code).sort(),
+            originalBranches, 'no pre-existing branch may be lost or added');
     });
 }
 

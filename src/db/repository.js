@@ -58,7 +58,7 @@ async function loadSource(meta) {
                     FROM timetable t
                     JOIN classes c ON c.id = t.class_id
                     JOIN subjects s ON s.id = t.subject_id
-                    JOIN faculty f ON f.id = t.faculty_id
+                    LEFT JOIN faculty f ON f.id = t.faculty_id
                     LEFT JOIN rooms r ON r.id = t.room_id`),
         db.query('SELECT period, start_time, end_time FROM periods ORDER BY period'),
         db.query('SELECT code, name, room_type, capacity FROM rooms ORDER BY code'),
@@ -183,7 +183,7 @@ const ENTRY_SELECT = `
       FROM timetable t
       JOIN classes c ON c.id = t.class_id
       JOIN subjects s ON s.id = t.subject_id
-      JOIN faculty f ON f.id = t.faculty_id
+      LEFT JOIN faculty f ON f.id = t.faculty_id
       LEFT JOIN rooms r ON r.id = t.room_id`;
 
 async function listEntries(filters = {}) {
@@ -227,7 +227,7 @@ async function findSlotConflicts(client, { classId, facultyId, roomId, day, peri
                c.code AS "className", f.name AS faculty, r.code AS room, s.name AS subject
           FROM timetable t
           JOIN classes c ON c.id = t.class_id
-          JOIN faculty f ON f.id = t.faculty_id
+          LEFT JOIN faculty f ON f.id = t.faculty_id
           JOIN subjects s ON s.id = t.subject_id
           LEFT JOIN rooms r ON r.id = t.room_id
          WHERE t.day_of_week = $1 AND t.period = $2 AND t.id <> $6

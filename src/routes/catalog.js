@@ -23,8 +23,43 @@ const store = require('../data/store');
 const db = require('../db/pool');
 const repository = require('../db/repository');
 const { DEPARTMENTS, nameFor: departmentName } = require('../data/departments');
+const branchScope = require('../core/branchScope');
 
 const SUBJECT_TYPES = ['theory', 'lab'];
+
+/**
+ * Refuse a write that would touch another branch.
+ *
+ * Writes are guarded the same way reads are: the branch comes from the signed
+ * session, so a CME account cannot create, rename or delete an EEE subject,
+ * class or branch even by naming it directly in the URL or the body.
+ * Returns true when the write may proceed; it has already answered otherwise.
+ */
+function allowBranchWrite(req, res, ...branches) {
+    const scope = branchScope.resolve(req, null);
+    if (scope.error || !scope.branch) return true;   // coordinator, or unscoped demo
+    const foreign = branches
+        .map(b => branchScope.code(b))
+        .find(b => b && b !== scope.branch);
+    if (foreign) {
+        res.status(403).json({
+            error: `This account belongs to ${scope.branch}. It cannot change ${foreign} records.`,
+            code: 'BRANCH_FORBIDDEN'
+        });
+        return false;
+    }
+    return true;
+}
+
+/** The branch an existing subject or class belongs to, or null when unknown. */
+async function branchOfRecord(kind, code) {
+    const wanted = String(code || '').trim().toUpperCase();
+    const rows = db.isConfigured()
+        ? await (kind === 'subject' ? repository.listSubjects() : repository.listClasses())
+        : (kind === 'subject' ? subjectsFromDataset() : classesFromDataset());
+    const match = rows.find(r => String(r.code || '').toUpperCase() === wanted);
+    return match ? branchScope.code(match.department) : null;
+}
 
 function requireDatabase(res, action) {
     if (db.isConfigured()) return true;
@@ -74,17 +109,26 @@ function branchesFromDataset() {
     return [...seen.values()].sort((a, b) => a.code.localeCompare(b.code));
 }
 
-router.get('/branches', async (req, res) => {
+router.get('/branches', branchScope.guard(), async (req, res) => {
     try {
-        const branches = db.isConfigured()
+        let branches = db.isConfigured()
             ? await repository.listDepartments()
             : branchesFromDataset();
-        res.json({ count: branches.length, branches, writable: db.isConfigured() });
+        // A branch-scoped account sees only its own branch listed: the branch
+        // list is what a selector would be built from, and there must not be
+        // one. Coordinators still see every branch.
+        const scope = req.branchScope;
+        if (scope.branch) {
+            branches = branches.filter(b => branchScope.code(b.code) === scope.branch);
+        }
+        res.json({ count: branches.length, branches, writable: db.isConfigured(),
+                   branch: scope.branch || null });
     } catch (err) { fail(res, err); }
 });
 
 router.post('/branches', async (req, res) => {
     if (!requireDatabase(res, 'Creating a branch')) return;
+    if (!allowBranchWrite(req, res, req.body && (req.body.code || req.body.branch))) return;
 
     const code = text(req.body && req.body.code);
     const name = text(req.body && req.body.name);
@@ -108,6 +152,7 @@ router.post('/branches', async (req, res) => {
 
 router.put('/branches/:code', async (req, res) => {
     if (!requireDatabase(res, 'Editing a branch')) return;
+    if (!allowBranchWrite(req, res, req.params.code)) return;
     const name = text(req.body && req.body.name);
     if (!name) return res.status(400).json({ error: 'Branch name is required', code: 'INVALID_BRANCH' });
     try {
@@ -119,6 +164,7 @@ router.put('/branches/:code', async (req, res) => {
 
 router.delete('/branches/:code', async (req, res) => {
     if (!requireDatabase(res, 'Deleting a branch')) return;
+    if (!allowBranchWrite(req, res, req.params.code)) return;
     try {
         const removed = await repository.deleteDepartment(req.params.code);
         await store.initFromDatabase();
@@ -152,16 +198,19 @@ function byBranch(list, branch) {
     return list.filter(item => String(item.department || '').toUpperCase() === wanted);
 }
 
-router.get('/subjects', async (req, res) => {
+router.get('/subjects', branchScope.guard(req => req.query.branch), async (req, res) => {
     try {
+        const scope = req.branchScope;
         const all = db.isConfigured() ? await repository.listSubjects() : subjectsFromDataset();
-        const subjects = byBranch(all, req.query.branch);
-        res.json({ count: subjects.length, subjects, writable: db.isConfigured() });
+        const subjects = byBranch(all, scope.branch || req.query.branch);
+        res.json({ count: subjects.length, subjects, writable: db.isConfigured(),
+                   branch: scope.branch || null });
     } catch (err) { fail(res, err); }
 });
 
 router.post('/subjects', async (req, res) => {
     if (!requireDatabase(res, 'Adding a subject')) return;
+    if (!allowBranchWrite(req, res, req.body && (req.body.department || req.body.branch))) return;
 
     const body = req.body || {};
     const code = text(body.code);
@@ -188,6 +237,9 @@ router.post('/subjects', async (req, res) => {
 router.put('/subjects/:code', async (req, res) => {
     if (!requireDatabase(res, 'Editing a subject')) return;
     const body = req.body || {};
+    // Both sides are checked, so a subject cannot be moved across branches.
+    if (!allowBranchWrite(req, res, await branchOfRecord('subject', req.params.code),
+        body.department || body.branch)) return;
     const type = text(body.type);
     if (type && !SUBJECT_TYPES.includes(type)) {
         return res.status(400).json({ error: `Subject type must be one of: ${SUBJECT_TYPES.join(', ')}`,
@@ -204,6 +256,7 @@ router.put('/subjects/:code', async (req, res) => {
 
 router.delete('/subjects/:code', async (req, res) => {
     if (!requireDatabase(res, 'Deleting a subject')) return;
+    if (!allowBranchWrite(req, res, await branchOfRecord('subject', req.params.code))) return;
     try {
         const removed = await repository.deleteSubject(req.params.code);
         await store.initFromDatabase();
@@ -227,16 +280,19 @@ function classesFromDataset() {
     });
 }
 
-router.get('/classes', async (req, res) => {
+router.get('/classes', branchScope.guard(req => req.query.branch), async (req, res) => {
     try {
+        const scope = req.branchScope;
         const all = db.isConfigured() ? await repository.listClasses() : classesFromDataset();
-        const classes = byBranch(all, req.query.branch);
-        res.json({ count: classes.length, classes, writable: db.isConfigured() });
+        const classes = byBranch(all, scope.branch || req.query.branch);
+        res.json({ count: classes.length, classes, writable: db.isConfigured(),
+                   branch: scope.branch || null });
     } catch (err) { fail(res, err); }
 });
 
 router.post('/classes', async (req, res) => {
     if (!requireDatabase(res, 'Adding a class')) return;
+    if (!allowBranchWrite(req, res, req.body && (req.body.department || req.body.branch))) return;
 
     const body = req.body || {};
     const code = text(body.code);
@@ -266,6 +322,8 @@ router.post('/classes', async (req, res) => {
 router.put('/classes/:code', async (req, res) => {
     if (!requireDatabase(res, 'Editing a class')) return;
     const body = req.body || {};
+    if (!allowBranchWrite(req, res, await branchOfRecord('class', req.params.code),
+        body.department || body.branch)) return;
     const semester = body.semester == null || body.semester === '' ? null : parseInt(body.semester, 10);
     if (semester != null && (isNaN(semester) || semester < 1 || semester > 12)) {
         return res.status(400).json({ error: 'Semester must be a number between 1 and 12', code: 'INVALID_CLASS' });
@@ -282,6 +340,7 @@ router.put('/classes/:code', async (req, res) => {
 
 router.delete('/classes/:code', async (req, res) => {
     if (!requireDatabase(res, 'Deleting a class')) return;
+    if (!allowBranchWrite(req, res, await branchOfRecord('class', req.params.code))) return;
     try {
         const removed = await repository.deleteClass(req.params.code);
         await store.initFromDatabase();

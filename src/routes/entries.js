@@ -21,6 +21,7 @@ const express = require('express');
 const router = express.Router();
 
 const store = require('../data/store');
+const branchScope = require('../core/branchScope');
 const db = require('../db/pool');
 const repository = require('../db/repository');
 const { DEPARTMENTS, nameFor: departmentName } = require('../data/departments');
@@ -147,12 +148,46 @@ function fail(res, err) {
  * Options for the Add Timetable form. Served from the database when it is in
  * use and from the live dataset otherwise, so the form is always populated.
  */
-router.get('/reference', async (req, res, next) => {
+/**
+ * Who may write this timetable entry.
+ *
+ * The branch comes from the signed session. Within a branch, a coordinator or
+ * the branch HOS may edit any entry; a faculty account may only touch its own
+ * periods — never a colleague's.
+ */
+function authorizeWrite(req, entry) {
+    const scope = req.branchScope || { branch: null };
+    const session = req.session || null;
+    const role = session ? String(session.role || '').toLowerCase() : null;
+
+    if (scope.branch && entry && entry.className) {
+        const entryBranch = branchScope.branchOfClass(entry.className);
+        if (entryBranch && entryBranch !== scope.branch) {
+            return { error: `This account belongs to ${scope.branch}. It cannot change ${entryBranch} timetable entries.`,
+                     code: 'BRANCH_FORBIDDEN', status: 403 };
+        }
+    }
+
+    if (role === 'faculty') {
+        const own = session.facultyName;
+        if (!own || !entry || entry.faculty !== own) {
+            return {
+                error: 'A faculty account may only change its own timetable entries.',
+                code: 'NOT_YOUR_ENTRY', status: 403
+            };
+        }
+    }
+
+    return null;
+}
+
+router.get('/reference', branchScope.guard(), async (req, res, next) => {
     const engine = store.engine;
     const meta = engine.getMeta();
+    const scope = req.branchScope;
     try {
         const fromDatabase = db.isConfigured() && store.usingDatabase;
-        const [classes, subjects, rooms] = fromDatabase
+        let [classes, subjects, rooms] = fromDatabase
             ? await Promise.all([repository.listClasses(), repository.listSubjects(), repository.listRooms()])
             : [
                 classesFromDataset(),
@@ -161,16 +196,44 @@ router.get('/reference', async (req, res, next) => {
                     .sort().map(code => ({ code, type: /lab/i.test(code) ? 'lab' : 'classroom' }))
             ];
 
-        const withNames = classes.map(cls => ({
+        let withNames = classes.map(cls => ({
             ...cls,
             departmentName: cls.department ? departmentName(cls.department) : null
         }));
+        let visibleSubjects = subjects;
+        let visibleFaculty = engine.getFaculty();
 
-        const deptCodes = [...new Set([
+        let deptCodes = [...new Set([
             ...DEPARTMENTS.map(d => d.code),
             ...withNames.map(c => c.department).filter(Boolean),
-            ...subjects.map(s => s.department).filter(Boolean)
+            ...visibleSubjects.map(s => s.department).filter(Boolean)
         ])].sort();
+
+        // Everything the Add Timetable form offers is drawn from here, so it
+        // has to be trimmed to the caller's own branch: another branch's
+        // classes, subjects, faculty or even its name must never be offered.
+        if (scope.branch) {
+            const branch = scope.branch;
+            const pool = branchScope.facultyPoolOf(branch);
+            withNames = withNames.filter(c => branchScope.code(c.department) === branch ||
+                branchScope.branchOfClass(c.code || c.class || c.name) === branch);
+            visibleSubjects = visibleSubjects.filter(
+                s => !s.department || branchScope.code(s.department) === branch);
+            visibleFaculty = branchScope.projectFacultyList(
+                visibleFaculty.filter(f => pool.has(f.name)), branch);
+            deptCodes = [branch];
+
+            // Rooms are named after the branch that owns them (EE-LAB-1), so
+            // an unfiltered room list would announce the other branches. Offer
+            // the rooms this branch's own timetable actually uses.
+            const used = new Set();
+            store.engine.getRecords().forEach(record => {
+                if (record.room && branchScope.branchOfClass(record.className) === branch) {
+                    used.add(record.room);
+                }
+            });
+            rooms = rooms.filter(room => used.has(room.code || room));
+        }
 
         res.json({
             days: engine.getDays(),
@@ -178,18 +241,21 @@ router.get('/reference', async (req, res, next) => {
             types: TYPES,
             classes: withNames,
             departments: deptCodes.map(code => ({ code, name: departmentName(code) })),
-            subjects,
+            subjects: visibleSubjects,
             rooms,
-            faculty: engine.getFaculty(),
+            faculty: visibleFaculty,
             editable: fromDatabase,
+            branch: scope.branch || null,
             source: fromDatabase ? 'database' : 'in-memory demo dataset'
         });
     } catch (err) { next(err); }
 });
 
-router.get('/', requireDatabase, async (req, res, next) => {
+router.get('/', requireDatabase, branchScope.guard(req => branchScope.branchOfClass(req.query.class)),
+    async (req, res, next) => {
     try {
         const engine = store.engine;
+        const scope = req.branchScope;
         const filters = {};
         if (req.query.class) filters.className = String(req.query.class);
         if (req.query.faculty) filters.faculty = String(req.query.faculty);
@@ -205,26 +271,41 @@ router.get('/', requireDatabase, async (req, res, next) => {
             }
             filters.period = period;
         }
-        const entries = await repository.listEntries(filters);
-        res.json({ count: entries.length, entries });
+        let entries = await repository.listEntries(filters);
+        if (scope.branch) {
+            const classes = new Set(branchScope.classesOf(scope.branch));
+            entries = entries
+                .filter(entry => classes.has(entry.className))
+                .map(entry => branchScope.projectFaculty(entry, scope.branch));
+        }
+        res.json({ count: entries.length, entries, branch: scope.branch || null });
     } catch (err) { next(err); }
 });
 
-router.get('/:id(\\d+)', requireDatabase, async (req, res, next) => {
+router.get('/:id(\\d+)', requireDatabase, branchScope.guard(), async (req, res, next) => {
     try {
         const entry = await repository.getEntry(parseInt(req.params.id, 10));
         if (!entry) return res.status(404).json({ error: 'No such timetable entry', code: 'NOT_FOUND' });
-        res.json({ entry });
+        const scope = req.branchScope;
+        if (scope.branch && branchScope.branchOfClass(entry.className) !== scope.branch) {
+            // Not this branch's entry: report it as absent rather than
+            // confirming that another branch holds it.
+            return res.status(404).json({ error: 'No such timetable entry', code: 'NOT_FOUND' });
+        }
+        res.json({ entry: branchScope.projectFaculty(entry, scope.branch) });
     } catch (err) { next(err); }
 });
 
-router.post('/', requireDatabase, async (req, res, next) => {
+router.post('/', requireDatabase, branchScope.guard(req => branchScope.branchOfClass(req.body && req.body.class)),
+    async (req, res, next) => {
     const parsed = parseEntry(req.body || {});
     if (parsed.errors) {
         return res.status(400).json({
             error: parsed.errors.join('; '), code: 'INVALID_ENTRY', problems: parsed.errors
         });
     }
+    const denied = authorizeWrite(req, parsed.entry);
+    if (denied) return res.status(denied.status).json({ error: denied.error, code: denied.code });
     try {
         const entry = await repository.addEntry(parsed.entry);
         await store.reloadFromDatabase();
@@ -232,7 +313,8 @@ router.post('/', requireDatabase, async (req, res, next) => {
     } catch (err) { fail(res, err); void next; }
 });
 
-router.put('/:id(\\d+)', requireDatabase, async (req, res, next) => {
+router.put('/:id(\\d+)', requireDatabase, branchScope.guard(req => branchScope.branchOfClass(req.body && req.body.class)),
+    async (req, res, next) => {
     const parsed = parseEntry(req.body || {});
     if (parsed.errors) {
         return res.status(400).json({
@@ -240,14 +322,31 @@ router.put('/:id(\\d+)', requireDatabase, async (req, res, next) => {
         });
     }
     try {
+        // Authorize against the entry as it stands as well as the submitted
+        // one, so an entry cannot be moved out of, or into, another branch.
+        const existing = await repository.getEntry(parseInt(req.params.id, 10));
+        if (!existing) return res.status(404).json({ error: 'No such timetable entry', code: 'NOT_FOUND' });
+        const deniedExisting = authorizeWrite(req, existing);
+        if (deniedExisting) {
+            return res.status(deniedExisting.status).json({ error: deniedExisting.error, code: deniedExisting.code });
+        }
+        const denied = authorizeWrite(req, parsed.entry);
+        if (denied) return res.status(denied.status).json({ error: denied.error, code: denied.code });
+    } catch (err) { return next(err); }
+    try {
         const entry = await repository.updateEntry(parseInt(req.params.id, 10), parsed.entry);
         await store.reloadFromDatabase();
         res.json({ entry, saved: true });
     } catch (err) { fail(res, err); void next; }
 });
 
-router.delete('/:id(\\d+)', requireDatabase, async (req, res, next) => {
+router.delete('/:id(\\d+)', requireDatabase, branchScope.guard(), async (req, res, next) => {
     try {
+        const existing = await repository.getEntry(parseInt(req.params.id, 10));
+        if (!existing) return res.status(404).json({ error: 'No such timetable entry', code: 'NOT_FOUND' });
+        const denied = authorizeWrite(req, existing);
+        if (denied) return res.status(denied.status).json({ error: denied.error, code: denied.code });
+
         const removed = await repository.deleteEntry(parseInt(req.params.id, 10));
         if (!removed) return res.status(404).json({ error: 'No such timetable entry', code: 'NOT_FOUND' });
         await store.reloadFromDatabase();

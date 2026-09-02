@@ -82,11 +82,26 @@ async function run() {
     });
 
     const accounts = await call(OPEN, 'GET', '/api/auth/accounts');
-    check('the demo account directory lists the coordinator and the faculty', () => {
+    check('the demo account directory lists the coordinator, one HOS per branch and the faculty', () => {
         assert.strictEqual(accounts.status, 200);
         const names = accounts.body.accounts.map(a => a.username);
         assert.ok(names.includes('admin'), 'the coordinator account must exist');
-        assert.strictEqual(accounts.body.accounts.length, 18, '1 coordinator + 17 faculty');
+
+        const roles = accounts.body.accounts.reduce((tally, a) => {
+            tally[a.role] = (tally[a.role] || 0) + 1;
+            return tally;
+        }, {});
+        assert.strictEqual(roles.coordinator, 1, 'exactly one coordinator');
+        assert.ok(roles.faculty >= 1, 'the faculty accounts must be listed');
+
+        // One head of section per branch, derived from the roster rather than
+        // a hardcoded list, so the count follows the data.
+        const branches = new Set(accounts.body.accounts
+            .filter(a => a.role === 'faculty').map(a => a.department));
+        assert.strictEqual(roles.hos, branches.size,
+            'one HOS account per branch on the roster');
+        assert.strictEqual(accounts.body.accounts.length,
+            1 + roles.hos + roles.faculty, 'no other kind of account exists');
         // A password must never be attached to an account record.
         accounts.body.accounts.forEach(a =>
             assert.strictEqual(a.password, undefined, 'accounts must not carry passwords'));

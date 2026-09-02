@@ -32,6 +32,7 @@
     var state = {
         meta: null,
         user: null,
+        branch: null,       // the signed-in account's branch; null = cross-branch
         selected: {},       // selected coordinate, keyed by grid body id
         requestToken: 0,
         pendingImport: null,
@@ -93,6 +94,19 @@
             return '<option value="' + esc(value) + '"' +
                 (String(value) === String(selected) ? ' selected' : '') + '>' + esc(label) + '</option>';
         }).join('');
+        // Options arrive view by view, long after sign-in. Re-assert the branch
+        // identity each time so a refilled selector can never reappear.
+        scheduleBranchIdentity();
+    }
+
+    var branchIdentityPending = false;
+    function scheduleBranchIdentity() {
+        if (branchIdentityPending || typeof applyBranchIdentity !== 'function') return;
+        branchIdentityPending = true;
+        setTimeout(function () {
+            branchIdentityPending = false;
+            applyBranchIdentity();
+        }, 0);
     }
 
     function initials(name) {
@@ -149,7 +163,13 @@
         return VIEW_NAMES.indexOf(name) >= 0 ? name : null;
     }
 
+    var COORDINATOR_VIEWS = ['branches'];
+
     function showView(name, updateHash) {
+        // A branch account has no institution-level screens, so a hand-typed
+        // #branches lands on the dashboard rather than on someone else's data.
+        if (state.branch && COORDINATOR_VIEWS.indexOf(name) >= 0) name = 'dashboard';
+
         Array.prototype.forEach.call(document.querySelectorAll('.view'), function (section) {
             section.classList.toggle('is-active', section.id === 'view-' + name);
         });
@@ -178,11 +198,75 @@
     }
 
     // ---------------------------------------------------------- session
+    /**
+     * Make the page belong to one branch.
+     *
+     * A branch account does not choose a branch after signing in — the branch
+     * is fixed by the account, so every branch/department selector is removed
+     * rather than merely filtered. The server already refuses another branch's
+     * data; this is what stops the screen from ever offering it.
+     *
+     * Safe to call repeatedly: selects are filled asynchronously, so it runs
+     * again once each view has loaded its options.
+     */
+    function applyBranchIdentity() {
+        var branch = state.branch;
+
+        var badge = el('brandBranch');
+        if (badge) {
+            badge.textContent = branch ? branch + ' / ' : '';
+            badge.hidden = !branch;
+        }
+        if (branch) document.title = branch + ' — TecSubstitution';
+
+        // Institution-level screens belong to the coordinator, not to a branch.
+        Array.prototype.forEach.call(
+            document.querySelectorAll('.nav-item[data-role="coordinator"]'),
+            function (item) {
+                item.hidden = Boolean(branch);
+                if (branch && item.classList.contains('is-active')) showView('dashboard');
+            });
+
+        Array.prototype.forEach.call(
+            document.querySelectorAll('[data-branch-selector]'),
+            function (field) {
+                field.hidden = Boolean(branch);
+                if (!branch) return;
+                var select = field.querySelector('select');
+                if (!select) return;
+                // Drop the "All departments" choice: for this account there is
+                // exactly one branch, so an "all" option would be a lie.
+                Array.prototype.slice.call(select.options).forEach(function (option) {
+                    if (option.value === '') select.removeChild(option);
+                });
+                for (var i = 0; i < select.options.length; i++) {
+                    if (String(select.options[i].value).toUpperCase() === branch) {
+                        select.value = select.options[i].value;
+                        break;
+                    }
+                }
+            });
+    }
+
+    var ROLE_LABELS = {
+        coordinator: 'Coordinator',
+        hos: 'Head of Section',
+        faculty: 'Faculty'
+    };
+
     function renderUser(session) {
         state.user = session && session.user ? session.user : null;
         var name = state.user ? state.user.name : 'Guest';
+
+        // A coordinator administers every branch. Everyone else belongs to one,
+        // and that branch — not a dropdown — is their whole application.
+        state.branch = state.user && state.user.role !== 'coordinator' && state.user.department
+            ? String(state.user.department).toUpperCase()
+            : null;
+
         var role = state.user
-            ? (state.user.role === 'faculty' ? 'Faculty · ' + state.user.department : 'Coordinator')
+            ? ((ROLE_LABELS[state.user.role] || state.user.role) +
+               (state.branch ? ' · ' + state.branch : ''))
             : (session && session.authRequired ? 'Sign-in required' : 'Not signed in');
 
         el('userName').textContent = name;
@@ -190,6 +274,8 @@
         el('userAvatar').textContent = initials(name);
         el('loginLink').hidden = Boolean(state.user);
         el('logoutBtn').hidden = !state.user;
+
+        applyBranchIdentity();
 
         var about = el('aboutAuth');
         if (about) {
@@ -1355,10 +1441,12 @@
         return getJson(API.meta).then(function (meta) {
             state.meta = meta;
 
-            el('topbarMeta').textContent =
-                (meta.title || 'Timetable') + ' · ' +
-                meta.facultyCount + ' faculty · ' +
-                meta.days.length + ' days × ' + meta.periods.length + ' periods';
+            el('topbarMeta').textContent = [
+                state.branch ? state.branch + ' branch' : null,
+                meta.title || 'Timetable',
+                meta.facultyCount + ' faculty',
+                meta.days.length + ' days × ' + meta.periods.length + ' periods'
+            ].filter(Boolean).join(' · ');
 
             fillSelect(el('dashDay'), meta.days, meta.days[0]);
             fillSelect(el('dashPeriod'), meta.periods.map(function (p) {
@@ -1439,6 +1527,11 @@
                 loadFacultyTable()
             ]);
         }).catch(function (err) {
+            // Never leave the header stuck on "Loading…": say what went wrong.
+            var meta = el('topbarMeta');
+            if (meta && /Loading/i.test(meta.textContent)) {
+                meta.textContent = 'Could not load the timetable — ' + err.message;
+            }
             var box = el('ttState');
             if (box) {
                 box.style.display = 'block';

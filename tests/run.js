@@ -4,7 +4,7 @@ const path = require('path');
 
 // database.test.js skips itself when no connection string is set, so this list
 // is the same whether or not a PostgreSQL database is available.
-const suites = ['engine.test.js', 'api.test.js', 'auth.test.js', 'catalog.test.js', 'dayparsing.test.js', 'database.test.js', 'e2e.test.js'];
+const suites = ['engine.test.js', 'api.test.js', 'auth.test.js', 'catalog.test.js', 'branchisolation.test.js', 'dayparsing.test.js', 'database.test.js', 'e2e.test.js', 'browserisolation.test.js'];
 let failures = 0;
 
 suites.forEach(suite => {

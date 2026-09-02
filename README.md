@@ -144,6 +144,46 @@ tested directly and reused unchanged if the storage or transport changes.
 
 ---
 
+## Branch isolation
+
+Every branch behaves like its own application. A signed-in CME user sees CME
+classes, CME faculty, the CME timetable and CME availability — and is never
+shown the name of another branch, let alone its data.
+
+The rule is enforced in **`src/core/branchScope.js`**, which every read and
+write route goes through. Three things make it hold:
+
+1. **The branch comes from the signed session, never from the request.**
+   `POST /api/availability {"branch":"MEC"}` from a CME account is answered
+   `403 BRANCH_FORBIDDEN`, not quietly narrowed to CME. The same applies to
+   `?department=`, `?branch=`, `?class=` and to every write path.
+2. **There is no branch selector.** The branch list a selector would be built
+   from is itself scoped, so `GET /api/branches` returns one branch to a branch
+   account. The UI hides the selectors it has and redirects `#branches` to the
+   dashboard; the server would refuse the call regardless.
+3. **Diagnostics are scoped too.** Validation warnings, the Add Timetable
+   reference lists and the room list are free text and shared vocabulary — the
+   easiest place for another branch's name to escape. Anything naming a class,
+   faculty member or branch outside the caller's own is withheld.
+
+### Cross-branch teaching
+
+A faculty member has a **home branch** (`faculty.department`) and may teach in
+another branch. These are deliberately different things:
+
+- The faculty a branch may see is *its own faculty* ∪ *anyone teaching one of
+  its classes*.
+- A visitor is presented as belonging to the **viewing** branch, marked
+  `crossBranch: true`. Their home branch is withheld, so a CME screen can never
+  read "Home Branch: EEE".
+- There is exactly **one** faculty record. Cross-branch teaching is never
+  solved by copying a person into two branches.
+
+A coordinator (`admin`) is the one role that may look across branches, and must
+name the branch explicitly to do so.
+
+---
+
 ## Data model
 
 Everything reduces to one record shape:
@@ -246,10 +286,14 @@ Open **http://localhost:3001** for the landing page, or go straight to
 Sign-in is optional by default, so the demo dataset stays browsable. Visit
 **/login** to sign in as:
 
-| Username | Role |
-| --- | --- |
-| `admin` | Timetable coordinator |
-| `arjun.rao`, `priya.sharma`, … | The faculty in the roster |
+| Username | Role | Sees |
+| --- | --- | --- |
+| `admin` | Timetable coordinator | Every branch |
+| `hos.cme`, `hos.ece`, … | Head of section, one per branch | That branch only |
+| `arjun.rao`, `priya.sharma`, … | The faculty in the roster | Their own branch only |
+
+The HOS accounts are derived from the roster, not from a hardcoded list, so a
+new branch gets its head of section automatically.
 
 Every demo account uses `DEMO_PASSWORD` (default `tecsub123`). This is a college
 project: accounts are derived from the faculty roster and there is no password
@@ -480,6 +524,8 @@ npm run test:api      # every endpoint, including Excel and CSV import
 npm run test:auth     # sessions, sign-in, and the AUTH_REQUIRED guard
 npm run test:db       # schema, migration, seeding, round-trip, entry and faculty CRUD
 npm run test:e2e      # click -> API -> engine -> displayed result
+npm run test:isolation # branch isolation over HTTP — real unauthorized calls
+npm run test:browser  # branch isolation on screen, in a real browser
 ```
 
 The database suite needs a scratch PostgreSQL database and **writes to it**:
@@ -500,6 +546,23 @@ which mode it used rather than skipping silently. It finds a browser via
 The auth suite starts two servers, one in each configuration, so the
 `AUTH_REQUIRED` guard is proved to actually turn anonymous callers away rather
 than being taken on trust.
+
+The two isolation suites are the ones that prove branch separation. They do not
+inspect the code — they sign in as real accounts and make the calls an attacker
+would. `test:isolation` walks every ordered pair of branches and asserts a `403`
+for the faculty directory by query string, availability by request **body**
+(`POST /api/availability {"branch":"OTHER"}`), subjects, classes and another
+branch's class grid, then checks that no diagnostic, reference list or faculty
+record names a branch the caller may not see. `test:browser` drives headless
+Chromium through each branch's whole application and asserts that no other
+branch is named on any screen, that no branch selector exists, and that the
+classes, faculty and availability shown are that branch's own. It skips with a
+message when no browser is available:
+
+```bash
+PLAYWRIGHT_MODULE=/path/to/playwright-core \
+CHROMIUM_PATH=/path/to/chrome npm run test:browser
+```
 
 Coverage includes Monday P2 and Tuesday P1 availability, busy-faculty
 exclusion, free-faculty detection, invalid days and periods, empty timetables,

@@ -10,21 +10,48 @@
 const express = require('express');
 const router = express.Router();
 const store = require('../data/store');
+const branchScope = require('../core/branchScope');
 
-router.get('/meta', (req, res) => {
+router.get('/meta', branchScope.guard(), (req, res) => {
     const engine = store.engine;
+    const scope = req.branchScope;
+    const meta = engine.getMeta();
+
+    // The metadata a branch application needs, showing only its own classes.
+    const classes = scope.branch ? branchScope.classesOf(scope.branch) : meta.classes;
+
     res.json({
-        ...engine.getMeta(),
+        ...meta,
+        classes,
+        primaryClass: classes.includes(meta.primaryClass) ? meta.primaryClass : (classes[0] || null),
+        branch: scope.branch || null,
+        facultyCount: scope.branch
+            ? branchScope.facultyPoolOf(scope.branch).size
+            : meta.facultyCount,
         origin: store.origin,
         loadedAt: store.loadedAt,
-        warnings: store.report.warnings
+        // A warning that names another branch's class or faculty is that
+        // branch's business, not this one's.
+        warnings: branchScope.filterWarnings(store.report.warnings, scope.branch)
     });
 });
 
-router.get('/records', (req, res) => {
+router.get('/records', branchScope.guard(), (req, res) => {
     const engine = store.engine;
+    const scope = req.branchScope;
     const { day, period, faculty, status } = req.query;
     let records = engine.getRecords();
+
+    if (scope.branch) {
+        // Only this branch's own periods. A visiting lecturer's periods in
+        // their home branch are not this branch's business.
+        const pool = branchScope.facultyPoolOf(scope.branch);
+        const classes = new Set(branchScope.classesOf(scope.branch));
+        records = records
+            .filter(r => pool.has(r.faculty))
+            .filter(r => r.status !== 'busy' || classes.has(r.className))
+            .map(r => branchScope.projectFaculty(r, scope.branch));
+    }
 
     if (day) {
         const resolved = engine.normalizeDay(day);
@@ -48,31 +75,57 @@ router.get('/records', (req, res) => {
     res.json({ count: records.length, records });
 });
 
-router.get('/', (req, res) => {
+router.get('/', branchScope.guard(req => branchScope.branchOfClass(req.query.class)), (req, res) => {
     const engine = store.engine;
+    const scope = req.branchScope;
+
+    // Classes this caller may see at all. Everything below is chosen from here,
+    // so no branch can read another branch's grid by naming its class.
+    const visibleClasses = scope.branch
+        ? branchScope.classesOf(scope.branch)
+        : engine.getMeta().classes;
 
     if (req.query.faculty) {
+        // A faculty grid is readable only for someone this branch may see, and
+        // it is trimmed to this branch's classes: a visiting lecturer's periods
+        // in their home branch stay invisible here.
+        if (scope.branch && !branchScope.facultyInBranch(req.query.faculty, scope.branch)) {
+            return res.status(404).json({
+                error: `No faculty named "${req.query.faculty}" in ${scope.branch}`, code: 'NOT_FOUND'
+            });
+        }
         const grid = engine.getFacultyGrid(req.query.faculty);
         if (!grid) {
             return res.status(404).json({ error: `No faculty named "${req.query.faculty}"`, code: 'NOT_FOUND' });
         }
-        return res.json({ ...grid, periodTimings: engine.getMeta().periodTimings });
+        const cells = scope.branch
+            ? grid.cells.map(cell => (cell.className && !visibleClasses.includes(cell.className)
+                // Occupied, but by another branch's class: report it busy
+                // without disclosing whose class it is.
+                ? { ...cell, className: null, subject: null, room: null, otherBranch: true }
+                : cell))
+            : grid.cells;
+        return res.json({ ...grid, cells, periodTimings: engine.getMeta().periodTimings,
+                          branch: scope.branch || null });
     }
 
     const meta = engine.getMeta();
     const requested = req.query.class;
-    if (requested && !meta.classes.includes(requested)) {
+    if (requested && !visibleClasses.includes(requested)) {
         return res.status(404).json({
-            error: `No class "${requested}". Available: ${meta.classes.join(', ')}`,
+            error: `No class "${requested}". Available: ${visibleClasses.join(', ')}`,
             code: 'NOT_FOUND'
         });
     }
 
+    const target = requested || visibleClasses[0] || meta.primaryClass;
+
     res.json({
-        ...engine.getClassGrid(requested),
+        ...engine.getClassGrid(target),
         periodTimings: meta.periodTimings,
-        classes: meta.classes,
-        primaryClass: meta.primaryClass
+        classes: visibleClasses,
+        primaryClass: visibleClasses.includes(meta.primaryClass) ? meta.primaryClass : target,
+        branch: scope.branch || null
     });
 });
 

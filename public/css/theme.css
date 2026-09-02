@@ -91,6 +91,10 @@ a { color: var(--brand-600); }
 }
 .brand-text { font-weight: 650; font-size: 1rem; color: var(--ink-900); letter-spacing: -0.01em; }
 
+/* The branch a signed-in account belongs to, shown as "CME / TecSubstitution". */
+.brand-branch { color: var(--brand-600, #2563eb); font-weight: 750; }
+.brand-branch[hidden] { display: none; }
+
 /* -------------------------------------------------------------- buttons */
 .btn {
   display: inline-flex; align-items: center; justify-content: center; gap: 8px;

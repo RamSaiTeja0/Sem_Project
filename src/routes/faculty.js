@@ -19,6 +19,7 @@ const store = require('../data/store');
 const db = require('../db/pool');
 const repository = require('../db/repository');
 const { DEPARTMENTS, find: findDepartment } = require('../data/departments');
+const branchScope = require('../core/branchScope');
 
 const DESIGNATIONS = [
     'Professor', 'Associate Professor', 'Assistant Professor',
@@ -67,8 +68,9 @@ function requireDatabase(req, res, next) {
  * The branch list. Every canonical branch is reported even when no faculty
  * belong to it yet, so a filter never hides a department that exists.
  */
-router.get('/departments', async (req, res, next) => {
+router.get('/departments', branchScope.guard(), async (req, res, next) => {
     try {
+        const scope = req.branchScope;
         const stats = store.engine.getFacultyStats();
         const counted = new Map();
         stats.forEach(f => counted.set(f.department, (counted.get(f.department) || 0) + 1));
@@ -97,7 +99,24 @@ router.get('/departments', async (req, res, next) => {
         });
         details.sort((a, b) => a.code.localeCompare(b.code));
 
-        res.json({ departments: details.map(d => d.code), details });
+        // A branch-scoped account is told about its own branch and nothing
+        // else: the branch list is exactly what a branch selector would be
+        // built from, and no other branch's name may appear on their screen.
+        if (scope.branch) {
+            details = details.filter(d => branchScope.code(d.code) === scope.branch);
+            if (!details.length) {
+                details = [{ code: scope.branch, name: scope.branch, facultyCount: 0 }];
+            }
+            // Count what this branch actually sees, visiting lecturers included.
+            const pool = branchScope.facultyPoolOf(scope.branch);
+            details = details.map(d => ({ ...d, facultyCount: pool.size }));
+        }
+
+        res.json({
+            departments: details.map(d => d.code),
+            details,
+            branch: scope.branch || null
+        });
     } catch (err) { next(err); }
 });
 
@@ -105,9 +124,12 @@ router.get('/designations', (req, res) => {
     res.json({ designations: DESIGNATIONS, statuses: STATUSES });
 });
 
-router.get('/', (req, res) => {
+router.get('/', branchScope.guard(req => req.query.department), (req, res) => {
     const engine = store.engine;
     const { department, search, day, period } = req.query;
+    // The branch comes from the signed session. `department` may narrow within
+    // it, never widen beyond it — the guard has already refused a foreign one.
+    const scope = req.branchScope;
 
     const options = {};
     if (day || period) {
@@ -125,7 +147,14 @@ router.get('/', (req, res) => {
 
     let stats = engine.getFacultyStats(options);
 
-    if (department) {
+    if (scope.branch) {
+        // Everyone this branch may see: its own faculty plus visiting lecturers
+        // who teach one of its classes. Visitors are presented as belonging to
+        // this branch, so a foreign home branch is never disclosed.
+        const pool = branchScope.facultyPoolOf(scope.branch);
+        stats = branchScope.projectFacultyList(
+            stats.filter(f => pool.has(f.name)), scope.branch);
+    } else if (department) {
         const wanted = String(department).trim().toUpperCase();
         stats = stats.filter(f => (f.department || '').toUpperCase() === wanted);
     }
@@ -138,7 +167,12 @@ router.get('/', (req, res) => {
             (f.designation || '').toUpperCase().includes(needle));
     }
 
-    res.json({ count: stats.length, faculty: stats, slot: options.day ? options : null });
+    res.json({
+        count: stats.length,
+        faculty: stats,
+        slot: options.day ? options : null,
+        branch: scope.branch || null
+    });
 });
 
 /**

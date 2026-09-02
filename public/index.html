@@ -15,7 +15,7 @@
     <div class="sidebar-head">
       <a class="brand" href="/" title="Back to the home page">
         <span class="brand-mark">TS</span>
-        <span class="brand-text">TecSubstitution</span>
+        <span class="brand-text"><b id="brandBranch" class="brand-branch" hidden></b>TecSubstitution</span>
       </a>
     </div>
 
@@ -31,7 +31,7 @@
       <div class="nav-label">Manage</div>
       <button type="button" class="nav-item" data-view="timetable">Master Timetable</button>
       <button type="button" class="nav-item" data-view="manage">Add Timetable</button>
-      <button type="button" class="nav-item" data-view="branches">Branch Management</button>
+      <button type="button" class="nav-item" data-view="branches" data-role="coordinator">Branch Management</button>
       <button type="button" class="nav-item" data-view="subjects">Subject Management</button>
       <button type="button" class="nav-item" data-view="classes">Class Management</button>
       <button type="button" class="nav-item" data-view="faculty">Faculty Directory</button>
@@ -218,7 +218,7 @@
             <form id="manageForm" autocomplete="off">
               <input type="hidden" id="manageId" value="" />
               <div class="controls">
-                <label class="field"><span>Department</span><select id="manageDept"></select></label>
+                <label class="field" data-branch-selector><span>Department</span><select id="manageDept"></select></label>
                 <label class="field"><span>Class / Section</span><select id="manageClass" required></select></label>
                 <label class="field"><span>Day</span><select id="manageDay" required></select></label>
                 <label class="field"><span>Period</span><select id="managePeriod" required></select></label>
@@ -307,7 +307,7 @@
             </div>
             <div class="card-body">
               <div class="controls" style="margin-bottom:14px;">
-                <label class="field"><span>Department</span><select id="availDept"></select></label>
+                <label class="field" data-branch-selector><span>Department</span><select id="availDept"></select></label>
                 <label class="field"><span>Search</span><input type="text" id="availSearch" placeholder="Faculty name" /></label>
               </div>
               <div id="availResult" class="result-panel">
@@ -447,7 +447,7 @@ Ms. G. Sandhya Rani, FREE, FREE, Big Data &amp; Cloud Computing"></textarea>
               <p>Every cell is clickable. Clicking sends its day and period to the availability engine.</p>
             </div>
             <div class="head-actions">
-              <label class="field inline"><span>Department</span><select id="ttDept"></select></label>
+              <label class="field inline" data-branch-selector><span>Department</span><select id="ttDept"></select></label>
               <label class="field inline"><span>View</span><select id="ttView"></select></label>
             </div>
           </div>
@@ -487,7 +487,7 @@ Ms. G. Sandhya Rani, FREE, FREE, Big Data &amp; Cloud Computing"></textarea>
                   <input type="text" id="facNewId" placeholder="e.g. FAC022" required /></label>
                 <label class="field"><span>Faculty name <em class="req">*</em></span>
                   <input type="text" id="facNewName" placeholder="e.g. Dr. Anjali Rao" required /></label>
-                <label class="field"><span>Department <em class="req">*</em></span>
+                <label class="field" data-branch-selector><span>Department <em class="req">*</em></span>
                   <select id="facNewDept" required></select></label>
                 <label class="field"><span>Designation</span>
                   <select id="facNewDesignation"></select></label>
@@ -514,7 +514,7 @@ Ms. G. Sandhya Rani, FREE, FREE, Big Data &amp; Cloud Computing"></textarea>
               <p>Every faculty member on record, with teaching load. Free periods are what availability draws on.</p>
             </div>
             <div class="head-actions">
-              <label class="field inline"><span>Department</span><select id="facDept"></select></label>
+              <label class="field inline" data-branch-selector><span>Department</span><select id="facDept"></select></label>
               <label class="field inline"><span>Search</span><input type="text" id="facSearch" placeholder="Name, ID or email" /></label>
               <label class="field inline"><span>Free at</span><select id="facSlotDay"></select></label>
               <label class="field inline"><span>&nbsp;</span><select id="facSlotPeriod"></select></label>
@@ -563,7 +563,7 @@ Ms. G. Sandhya Rani, FREE, FREE, Big Data &amp; Cloud Computing"></textarea>
           <div class="card-head">
             <div>
               <h2>Branch Management</h2>
-              <p>A branch is an academic programme (CME). A class/section such as CME-A
+              <p>A branch is an academic programme. A class/section such as CME-A
                  lives inside a branch and is managed under Class Management.</p>
             </div>
             <span class="pill" id="branchBackend">Checking storage…</span>
@@ -572,9 +572,9 @@ Ms. G. Sandhya Rani, FREE, FREE, Big Data &amp; Cloud Computing"></textarea>
             <div id="branchStorageNote"></div>
             <form id="branchForm" class="form-grid">
               <label class="field"><span>Branch code *</span>
-                <input type="text" id="branchCode" placeholder="e.g. EE" maxlength="16" /></label>
+                <input type="text" id="branchCode" placeholder="Branch code" maxlength="16" /></label>
               <label class="field" style="flex:2 1 280px;"><span>Branch name *</span>
-                <input type="text" id="branchName" placeholder="e.g. Electrical Engineering" /></label>
+                <input type="text" id="branchName" placeholder="Branch name" /></label>
               <button type="submit" class="btn" id="branchSubmit">Add branch</button>
             </form>
             <div id="branchResult" style="margin-top:12px;"></div>
@@ -594,7 +594,7 @@ Ms. G. Sandhya Rani, FREE, FREE, Big Data &amp; Cloud Computing"></textarea>
           <div class="card-head">
             <div>
               <h2>Subject Management</h2>
-              <p>Subjects belong to one branch. A subject added to ECE does not appear under CME.</p>
+              <p>Subjects belong to one branch. A subject added to one branch never appears under another.</p>
             </div>
             <span class="pill" id="subjectBackend">Checking storage…</span>
           </div>
@@ -605,14 +605,14 @@ Ms. G. Sandhya Rani, FREE, FREE, Big Data &amp; Cloud Computing"></textarea>
                 <input type="text" id="subjectCode" placeholder="e.g. AI301" /></label>
               <label class="field" style="flex:2 1 240px;"><span>Subject name *</span>
                 <input type="text" id="subjectName" placeholder="e.g. Machine Learning" /></label>
-              <label class="field"><span>Branch *</span><select id="subjectBranch"></select></label>
+              <label class="field" data-branch-selector><span>Branch *</span><select id="subjectBranch"></select></label>
               <label class="field"><span>Type</span>
                 <select id="subjectType"><option value="theory">Theory</option><option value="lab">Lab</option></select></label>
               <button type="submit" class="btn" id="subjectSubmit">Add subject</button>
             </form>
             <div id="subjectResult" style="margin-top:12px;"></div>
             <div class="controls" style="margin-top:16px;">
-              <label class="field"><span>Filter by branch</span><select id="subjectFilter"></select></label>
+              <label class="field" data-branch-selector><span>Filter by branch</span><select id="subjectFilter"></select></label>
             </div>
             <div class="table-scroll" style="margin-top:10px;">
               <table class="data">
@@ -630,7 +630,7 @@ Ms. G. Sandhya Rani, FREE, FREE, Big Data &amp; Cloud Computing"></textarea>
           <div class="card-head">
             <div>
               <h2>Class Management</h2>
-              <p>Classes/sections inside a branch — AIDS-A and AIDS-B both belong to AIDS.</p>
+              <p>Classes/sections inside a branch — the &ldquo;-A&rdquo; and &ldquo;-B&rdquo; sections both belong to the same branch.</p>
             </div>
             <span class="pill" id="classBackend">Checking storage…</span>
           </div>
@@ -638,8 +638,8 @@ Ms. G. Sandhya Rani, FREE, FREE, Big Data &amp; Cloud Computing"></textarea>
             <div id="classStorageNote"></div>
             <form id="classForm" class="form-grid">
               <label class="field"><span>Class code *</span>
-                <input type="text" id="classCode" placeholder="e.g. AIDS-A" /></label>
-              <label class="field"><span>Branch *</span><select id="classBranch"></select></label>
+                <input type="text" id="classCode" placeholder="e.g. CME-A" /></label>
+              <label class="field" data-branch-selector><span>Branch *</span><select id="classBranch"></select></label>
               <label class="field"><span>Semester</span>
                 <input type="text" id="classSemester" placeholder="e.g. 5" /></label>
               <label class="field"><span>Academic year</span>
@@ -648,7 +648,7 @@ Ms. G. Sandhya Rani, FREE, FREE, Big Data &amp; Cloud Computing"></textarea>
             </form>
             <div id="classResult" style="margin-top:12px;"></div>
             <div class="controls" style="margin-top:16px;">
-              <label class="field"><span>Filter by branch</span><select id="classFilter"></select></label>
+              <label class="field" data-branch-selector><span>Filter by branch</span><select id="classFilter"></select></label>
             </div>
             <div class="table-scroll" style="margin-top:10px;">
               <table class="data">

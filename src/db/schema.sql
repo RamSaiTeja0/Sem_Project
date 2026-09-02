@@ -61,6 +61,21 @@ CREATE TABLE IF NOT EXISTS subjects (
                   CHECK (subject_type IN ('theory', 'lab'))
 );
 
+-- Real timetables carry non-teaching periods too — library, counselling, TPC.
+-- They are neither theory nor lab, so the original two-value constraint made a
+-- genuine timetable impossible to store. Widening it is idempotent: the
+-- constraint is replaced by name, and re-running this file is a no-op.
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'subjects_subject_type_check') THEN
+        ALTER TABLE subjects DROP CONSTRAINT subjects_subject_type_check;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'subjects_type_check') THEN
+        ALTER TABLE subjects ADD CONSTRAINT subjects_type_check
+            CHECK (subject_type IN ('theory', 'lab', 'activity'));
+    END IF;
+END $$;
+
 CREATE TABLE IF NOT EXISTS classes (
     id            SERIAL PRIMARY KEY,
     code          TEXT NOT NULL UNIQUE,
@@ -108,6 +123,23 @@ CREATE TABLE IF NOT EXISTS timetable (
     -- A faculty member cannot teach two classes at once.
     CONSTRAINT timetable_faculty_slot_unique UNIQUE (faculty_id, day_of_week, period)
 );
+
+-- A real timetable has periods with no teacher and no theory/lab character:
+-- library, counselling, TPC. They still occupy the class's slot, so they are
+-- stored rather than dropped. Both migrations are idempotent — DROP NOT NULL
+-- on an already-nullable column is a no-op, and the check is replaced by name.
+ALTER TABLE timetable ALTER COLUMN faculty_id DROP NOT NULL;
+
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'timetable_session_type_check') THEN
+        ALTER TABLE timetable DROP CONSTRAINT timetable_session_type_check;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'timetable_type_check') THEN
+        ALTER TABLE timetable ADD CONSTRAINT timetable_type_check
+            CHECK (session_type IN ('theory', 'lab', 'activity'));
+    END IF;
+END $$;
 
 -- A room cannot host two classes at once. Partial index rather than a UNIQUE
 -- constraint so rows with no room (room_id IS NULL) stay allowed.
