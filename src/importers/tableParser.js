@@ -15,7 +15,10 @@
  * A cell reading FREE / - / blank means "not teaching" and is left free rather
  * than invented into a subject.
  */
-const { parseSlotHeader, normalizeDayName, normalizePeriodNumber, isFreeToken } = require('../core/normalizer');
+const { parseSlotHeader, normalizeDayName, normalizePeriodNumber, isFreeToken,
+        describeDayError, WORKING_DAYS } = require('../core/normalizer');
+
+const PERIOD_RANGE = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
 
 function cellText(value) {
     if (value == null) return '';
@@ -147,14 +150,20 @@ function parseTable(rows, options = {}) {
             }
             facultyNames.add(JSON.stringify({ name: facultyName, department: department || null }));
 
-            if (!normalizeDayName(dayRaw)) {
+            const day = normalizeDayName(dayRaw);
+            if (!day) {
                 issues.push({ severity: 'error', code: 'INVALID_DAY',
-                    message: `Row ${lineNumber}: "${dayRaw}" is not a valid day`, context: { row: lineNumber } });
+                    message: `Row ${lineNumber}: ${describeDayError(dayRaw)}`,
+                    // Structured detail so the preview can show the offending
+                    // value and what was expected, not just a sentence.
+                    context: { row: lineNumber, field: 'day', value: dayRaw, expected: WORKING_DAYS } });
                 return;
             }
-            if (normalizePeriodNumber(periodRaw, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]) == null) {
+            const period = normalizePeriodNumber(periodRaw, PERIOD_RANGE);
+            if (period == null) {
                 issues.push({ severity: 'error', code: 'INVALID_PERIOD',
-                    message: `Row ${lineNumber}: "${periodRaw}" is not a valid period`, context: { row: lineNumber } });
+                    message: `Row ${lineNumber}: "${periodRaw}" is not a valid period. Expected 1–${PERIOD_RANGE.length}`,
+                    context: { row: lineNumber, field: 'period', value: periodRaw, expected: PERIOD_RANGE } });
                 return;
             }
 
@@ -162,8 +171,8 @@ function parseTable(rows, options = {}) {
             if (isFreeToken(subject)) return;
             entries.push({
                 faculty: facultyName,
-                day: normalizeDayName(dayRaw),
-                period: normalizePeriodNumber(periodRaw, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]),
+                day,
+                period,
                 subject,
                 class: className || options.defaultClass,
                 room: room || null

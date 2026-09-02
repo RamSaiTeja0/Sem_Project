@@ -67,7 +67,10 @@ function buildPreview(normalized) {
 
 async function analyse(buffer, filename, options = {}) {
     const importer = importerFor(filename);
-    const parsed = await importer.parse(buffer, options);
+    // The filename decides which pipeline a document provider uses (an image
+    // must be converted to a PDF first), so always pass it through rather than
+    // relying on every caller to include it in options.
+    const parsed = await importer.parse(buffer, { ...options, filename });
 
     const normalized = normalize(parsed.source);
     (parsed.issues || []).forEach(issue => normalized.issues.push(issue));
@@ -82,7 +85,11 @@ async function analyse(buffer, filename, options = {}) {
         meta: normalized.meta,
         faculty: normalized.faculty,
         report,
-        preview: buildPreview(normalized)
+        preview: buildPreview(normalized),
+        // Present only for document imports: which service read the file, and
+        // whether an image had to be converted to a PDF on the way.
+        provider: parsed.provider || null,
+        convertedFromImage: parsed.convertedFromImage || false
     };
 }
 

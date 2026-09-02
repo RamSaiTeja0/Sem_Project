@@ -15,6 +15,8 @@ const router = express.Router();
 const importer = require('../importers');
 const config = require('../config');
 const store = require('../data/store');
+const db = require('../db/pool');
+const repository = require('../db/repository');
 
 const upload = multer({
     storage: multer.memoryStorage(),
@@ -43,6 +45,53 @@ router.get('/document-status', (req, res) => {
     res.json(importer.documentImporter.status());
 });
 
+/**
+ * Resolve the class name the user typed against the real class catalog.
+ *
+ * Typing "ece" must not quietly create a class called "ece" alongside the real
+ * ECE-A and ECE-B — that produces a timetable nothing else can find. A case
+ * difference is corrected silently; anything with no match is refused with the
+ * list of classes that do exist.
+ *
+ * @returns {{ code: string|null }} or {{ error, code, choices }}
+ */
+async function resolveClass(requested) {
+    const wanted = String(requested == null ? '' : requested).trim();
+    if (!wanted) return { code: null };   // optional: the file may name its own classes
+
+    let classes = [];
+    try {
+        classes = db.isConfigured() && store.usingDatabase
+            ? (await repository.listClasses()).map(c => c.code)
+            : store.engine.getMeta().classes;
+    } catch (err) {
+        classes = store.engine.getMeta().classes;
+    }
+
+    const exact = classes.find(code => code === wanted);
+    if (exact) return { code: exact };
+
+    // Same class, different capitalisation — accept it and use the real code.
+    const insensitive = classes.find(code => code.toUpperCase() === wanted.toUpperCase());
+    if (insensitive) return { code: insensitive };
+
+    // A branch code rather than a class: name the sections so the user can pick.
+    const sections = classes.filter(code => code.toUpperCase().startsWith(wanted.toUpperCase() + '-'));
+    if (sections.length) {
+        return {
+            error: `"${wanted}" is a branch, not a class. Choose one of its classes: ${sections.join(', ')}`,
+            code: 'AMBIGUOUS_CLASS',
+            choices: sections
+        };
+    }
+
+    return {
+        error: `Unknown class "${wanted}". Existing classes: ${classes.join(', ') || 'none'}`,
+        code: 'UNKNOWN_CLASS',
+        choices: classes
+    };
+}
+
 function handleUpload(action) {
     return async (req, res) => {
         if (!req.file) {
@@ -51,14 +100,25 @@ function handleUpload(action) {
                 code: 'NO_FILE'
             });
         }
+        const resolved = await resolveClass(req.body && req.body.defaultClass);
+        if (resolved.error) {
+            return res.status(400).json({
+                error: resolved.error, code: resolved.code, choices: resolved.choices
+            });
+        }
+
         try {
             const result = await importer[action](req.file.buffer, req.file.originalname, {
-                defaultClass: (req.body && req.body.defaultClass) || null
+                defaultClass: resolved.code,
+                filename: req.file.originalname,
+                mimeType: req.file.mimetype
             });
             res.json({
                 filename: result.filename,
                 format: result.format,
                 layout: result.layout,
+                provider: result.provider,
+                convertedFromImage: result.convertedFromImage,
                 rowCount: result.rowCount,
                 loaded: Boolean(result.loaded),
                 meta: result.meta,

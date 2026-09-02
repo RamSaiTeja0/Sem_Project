@@ -384,10 +384,20 @@ async function run() {
         assert.deepStrictEqual(afterFaculty.body, beforeFaculty.body);
     });
 
+    const invented = await upload(BASE, '/api/timetable/import/preview', 'tt.csv',
+        Buffer.from(CSV_MATRIX), { defaultClass: 'IMPORTED-A' });
+    check('a class that does not exist is refused, not silently created', () => {
+        assert.strictEqual(invented.status, 400);
+        assert.strictEqual(invented.body.code, 'UNKNOWN_CLASS');
+        assert.ok(invented.body.choices.length > 0, 'the real classes are offered');
+    });
+
     console.log('\n[5] Committing an import (runs last — it replaces the dataset)');
 
+    // The class box is resolved against the real class catalog, so it names an
+    // existing class. A file that carries its own Class column does not need it.
     const commit = await upload(BASE, '/api/timetable/import', 'tt.csv', Buffer.from(CSV_MATRIX),
-        { defaultClass: 'IMPORTED-A' });
+        { defaultClass: 'CSE-A' });
     check('POST /api/timetable/import loads the file', () => {
         assert.strictEqual(commit.status, 200);
         assert.strictEqual(commit.body.loaded, true);

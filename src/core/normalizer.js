@@ -24,7 +24,20 @@ const DAY_ALIASES = {
     SUN: 'Sunday', SUNDAY: 'Sunday'
 };
 
-const DEFAULT_DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
+/**
+ * The working week this project schedules against.
+ *
+ * Saturday is a teaching day here, so it belongs in the default allow-list:
+ * leaving it out made `normalizeDayName` resolve the SAT/SATURDAY alias and
+ * then reject it, which is what produced INVALID_DAY on every Saturday row of
+ * an otherwise valid import.
+ *
+ * Sunday is deliberately not part of the default week, but it stays in
+ * DAY_ALIASES so a timetable that explicitly declares Sunday still resolves.
+ */
+const WORKING_DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+const DEFAULT_DAYS = WORKING_DAYS.slice();
 const DEFAULT_PERIODS = [1, 2, 3, 4, 5, 6, 7];
 
 /** Cell text meaning "nothing scheduled here". */
@@ -61,14 +74,34 @@ function classifySessionType(declared, subject) {
     return /\b(lab|laboratory|practical)\b/i.test(String(subject || '')) ? 'lab' : 'theory';
 }
 
+/**
+ * THE day normalizer. Every importer, validator and API route resolves days
+ * through this one function, so "Saturday", "SATURDAY", " sat " and "Sat" all
+ * become "Saturday" everywhere, and an unknown value fails everywhere alike.
+ *
+ * Returns the canonical day name, or null when the value is not a day of the
+ * allowed week. It never guesses: an unrecognised value is reported, never
+ * quietly mapped onto some other day.
+ */
 function normalizeDayName(input, allowedDays = DEFAULT_DAYS) {
     const raw = text(input);
     if (!raw) return null;
-    const upper = raw.toUpperCase();
-    const lookup = new Map(allowedDays.map(d => [d.toUpperCase(), d]));
+    // Collapse inner whitespace too, so "Sat urday" from a PDF cell still fails
+    // loudly while "  Saturday  " and "SATURDAY" resolve.
+    const upper = raw.replace(/\s+/g, ' ').trim().toUpperCase();
+    const lookup = new Map(allowedDays.map(d => [String(d).toUpperCase(), d]));
     if (lookup.has(upper)) return lookup.get(upper);
     const alias = DAY_ALIASES[upper];
     return alias && lookup.has(alias.toUpperCase()) ? lookup.get(alias.toUpperCase()) : null;
+}
+
+/**
+ * A validation message for a day that could not be resolved, listing what was
+ * actually acceptable so the user can correct the file rather than guess.
+ */
+function describeDayError(input, allowedDays = DEFAULT_DAYS) {
+    const shown = input == null || String(input).trim() === '' ? '(blank)' : String(input).trim();
+    return `"${shown}" is not a valid day. Expected: ${allowedDays.join(', ')}`;
 }
 
 function normalizePeriodNumber(input, allowedPeriods = DEFAULT_PERIODS) {
@@ -209,7 +242,8 @@ function normalize(source) {
         const day = dayLookup.get(String(entry.day || '').trim().toUpperCase())
             || normalizeDayName(entry.day, days);
         if (!day) {
-            add('error', 'INVALID_DAY', `Entry ${index + 1}: unknown day "${entry.day}"`, line);
+            add('error', 'INVALID_DAY', `Entry ${index + 1}: ${describeDayError(entry.day, days)}`,
+                { ...line, field: 'day', value: entry.day, expected: days });
             return;
         }
         const period = normalizePeriodNumber(entry.period, periods);
@@ -242,7 +276,8 @@ function normalize(source) {
         Object.keys(rows).forEach(rawDay => {
             const day = dayLookup.get(String(rawDay).trim().toUpperCase());
             if (!day) {
-                add('error', 'INVALID_DAY', `Class "${className}" has unknown day "${rawDay}"`, { className });
+                add('error', 'INVALID_DAY', `Class "${className}": ${describeDayError(rawDay, days)}`,
+                { className, field: 'day', value: rawDay, expected: days });
                 return;
             }
 
@@ -331,9 +366,11 @@ module.exports = {
     normalize,
     classifySessionType,
     normalizeDayName,
+    describeDayError,
     normalizePeriodNumber,
     parseSlotHeader,
     isFreeToken,
     DEFAULT_DAYS,
+    WORKING_DAYS,
     DEFAULT_PERIODS
 };

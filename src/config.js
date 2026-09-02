@@ -50,7 +50,19 @@ const config = {
     dbPoolMax: intOr(process.env.DB_POOL_MAX, 5),
     dbConnectTimeoutMs: intOr(process.env.DB_CONNECT_TIMEOUT_MS, 10000),
     /** Create tables and insert the demo rows on startup when the DB is empty. */
-    dbAutoSeed: boolOr(process.env.DB_AUTO_SEED, true)
+    dbAutoSeed: boolOr(process.env.DB_AUTO_SEED, true),
+
+    /**
+     * PDF.co — the document (PDF / image) table-extraction provider.
+     *
+     * Optional: with no key, PDF and image upload reports that extraction is
+     * not configured and Excel, CSV, Quick Paste and manual entry all keep
+     * working. The key is a secret: it is read from the environment only, is
+     * never sent to the browser and never appears in an API response.
+     */
+    pdfcoApiKey: (process.env.PDFCO_API_KEY || '').trim() || null,
+    pdfcoBaseUrl: (process.env.PDFCO_BASE_URL || 'https://api.pdf.co/v1').replace(/\/$/, ''),
+    pdfcoTimeoutMs: intOr(process.env.PDFCO_TIMEOUT_MS, 120000)
 };
 
 module.exports = config;

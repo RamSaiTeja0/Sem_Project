@@ -1039,14 +1039,33 @@
         return new File([text], name, { type: 'text/csv' });
     }
 
+    /**
+     * One validation issue, showing the row, the offending value and what was
+     * expected — enough to correct the file without guessing.
+     */
+    function issueHtml(issue, tone) {
+        var context = issue.context || {};
+        var lines = [];
+        if (context.row != null) lines.push('Row ' + esc(context.row));
+        if (context.className) lines.push('Class ' + esc(context.className));
+        if (context.field && context.value != null) {
+            lines.push(esc(String(context.field).replace(/^./, function (c) { return c.toUpperCase(); })) +
+                ': ' + esc(String(context.value).trim() || '(blank)'));
+        }
+        if (Array.isArray(context.expected) && context.expected.length) {
+            lines.push('Expected: ' + esc(context.expected.join(', ')));
+        }
+
+        return '<div class="notice notice-' + tone + '">' +
+            '<strong>[' + esc(issue.code) + ']</strong> ' + esc(issue.message) +
+            (lines.length ? '<div class="issue-detail">' + lines.join(' · ') + '</div>' : '') +
+            '</div>';
+    }
+
     function importReportHtml(report) {
         var html = '';
-        (report.errors || []).forEach(function (e) {
-            html += notice('[' + e.code + '] ' + e.message, 'error');
-        });
-        (report.warnings || []).forEach(function (w) {
-            html += notice('[' + w.code + '] ' + w.message, 'warn');
-        });
+        (report.errors || []).forEach(function (e) { html += issueHtml(e, 'error'); });
+        (report.warnings || []).forEach(function (w) { html += issueHtml(w, 'warn'); });
         return html;
     }
 
@@ -1054,12 +1073,17 @@
         var summary = data.report.summary || {};
         var head = '<div class="notice notice-' + (data.report.ok ? 'ok' : 'error') + '">' +
             esc(data.filename) + ' — read as <strong>' + esc(data.format) + '</strong> (' +
-            esc(data.layout) + ' layout), ' + esc(data.rowCount) + ' row(s): ' +
+            esc(data.layout) + ' layout' +
+            (data.provider ? ', extracted by ' + esc(data.provider) +
+                (data.convertedFromImage ? ' (image converted to PDF)' : '') : '') +
+            '), ' + esc(data.rowCount == null ? 'n/a' : data.rowCount) + ' row(s): ' +
             esc(summary.faculty) + ' faculty, ' + esc(summary.busySlots) + ' scheduled periods, ' +
             esc(summary.freeSlots) + ' free.</div>';
 
         var stats = '<div class="stats compact" style="margin-top:14px;">' + [
-            { label: 'Faculty', value: summary.faculty, note: 'found in the sheet', tone: 'brand' },
+            { label: 'Rows read', value: data.rowCount == null ? '—' : data.rowCount,
+              note: 'from the file', tone: 'brand' },
+            { label: 'Faculty', value: summary.faculty, note: 'found in the sheet' },
             { label: 'Scheduled periods', value: summary.busySlots, note: 'to be loaded' },
             { label: 'Errors', value: (data.report.errors || []).length,
               note: data.report.ok ? 'none — safe to load' : 'must be fixed first',
@@ -1116,18 +1140,56 @@
         var ext = (String(filename).match(/\.[a-z0-9]+$/i) || [''])[0].toLowerCase();
         var supported = supportedExtensions().join(', ');
         if (/^\.(pdf|png|jpg|jpeg|webp)$/.test(ext)) {
-            return 'This build reads structured timetables only (' + supported + '). ' +
-                'Scanned ' + ext.slice(1).toUpperCase() + ' extraction needs an OCR key, which is not ' +
-                'configured on this server — use Quick Paste to type or paste the sheet instead.';
+            // PDFs and images ARE supported now; whether they can be read
+            // depends on the extraction provider, which the server reports.
+            var document = state.formats && state.formats.document;
+            if (document && document.available) {
+                return ext.slice(1).toUpperCase() + ' files are read by ' + document.provider + '.';
+            }
+            return 'PDF/Image extraction is not configured. Add PDFCO_API_KEY to enable document ' +
+                'extraction. Meanwhile use ' +
+                ((document && document.alternatives) || ['Excel', 'CSV', 'Quick Paste']).join(', ') + '.';
         }
         return 'Unsupported file type "' + ext + '". Upload ' + supported + ', or use Quick Paste.';
     }
 
+    /** Progress the user can trust: each line is shown as that stage is entered. */
+    function importProgress(container, name) {
+        var isDocument = /\.(pdf|png|jpe?g|webp)$/i.test(name);
+        var steps = isDocument
+            ? ['Uploading…',
+               'Extracting timetable from PDF/image…',
+               'Reading table…',
+               'Normalizing days…',
+               'Validating timetable…']
+            : ['Uploading…', 'Reading table…', 'Normalizing days…', 'Validating timetable…'];
+
+        var index = 0;
+        function render() {
+            container.innerHTML = notice(steps[index], 'info') +
+                (isDocument && index >= 1
+                    ? '<p class="muted" style="margin-top:6px;">' +
+                      'The document is being read by the extraction service. This can take a ' +
+                      'few seconds; nothing is imported until you confirm the preview.</p>'
+                    : '');
+        }
+        render();
+
+        // Advance only while the request is genuinely still in flight, so the
+        // user is never shown a stage that has not been reached.
+        var timer = setInterval(function () {
+            if (index < steps.length - 1) { index++; render(); }
+        }, isDocument ? 1200 : 400);
+
+        return { stop: function () { clearInterval(timer); } };
+    }
+
     function runPreview(container) {
         workflowStep('process');
-        container.innerHTML = notice('Reading ' + state.importFile.name + '…', 'info');
+        var progress = importProgress(container, state.importFile.name);
 
         return sendImport(API.importPreview).then(function (res) {
+            progress.stop();
             if (!res) return;
             workflowStep('validate');
             if (!res.ok) {
@@ -1151,6 +1213,7 @@
                 workflowStep('upload');
             });
         }).catch(function () {
+            progress.stop();
             workflowStep('process', true);
             container.innerHTML = notice('Could not reach the server while importing.', 'error');
         });

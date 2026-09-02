@@ -453,3 +453,9 @@ button.stat .stat-link {
 .form-grid label.field { margin-bottom: 0; min-width: 150px; flex: 1 1 150px; }
 .form-grid .btn { flex: none; }
 .btn-sm { padding: 4px 10px; font-size: 0.76rem; }
+
+/* Structured detail under a validation message: row, value, expectation. */
+.issue-detail {
+  margin-top: 5px; font-size: 0.78rem; opacity: 0.85;
+  font-family: "Cascadia Mono", Consolas, "Courier New", monospace;
+}
