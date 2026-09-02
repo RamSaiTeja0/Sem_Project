@@ -212,17 +212,32 @@ async function providerPipelineTests() {
         'Dr. Q Sharma,SAT,3,Networks,ECE-A,202\n';
 
     function stubTransport(calls) {
-        return async (url, options) => {
-            calls.push({ url, method: options.method });
+        return async (url, options = {}) => {
+            const method = options.method || 'GET';
+            calls.push({ url, method, headers: options.headers });
             if (url.includes('/file/upload/get-presigned-url')) {
+                if (method !== 'GET') {
+                    return { ok: false, status: 405, body: { error: true, message: 'Method not allowed' } };
+                }
                 return { ok: true, status: 200, body: {
                     presignedUrl: 'https://upload.example/put', url: 'https://files.example/in.pdf' } };
             }
-            if (url === 'https://upload.example/put') return { ok: true, status: 200, body: null };
+            if (url === 'https://upload.example/put') {
+                if (method !== 'PUT') {
+                    return { ok: false, status: 405, body: { error: true, message: 'Method not allowed' } };
+                }
+                return { ok: true, status: 200, body: null };
+            }
             if (url.includes('/pdf/convert/from/image')) {
+                if (method !== 'POST') {
+                    return { ok: false, status: 405, body: { error: true, message: 'Method not allowed' } };
+                }
                 return { ok: true, status: 200, body: { url: 'https://files.example/converted.pdf' } };
             }
             if (url.includes('/pdf/convert/to/csv')) {
+                if (method !== 'POST') {
+                    return { ok: false, status: 405, body: { error: true, message: 'Method not allowed' } };
+                }
                 return { ok: true, status: 200, body: { body: EXTRACTED_CSV } };
             }
             return { ok: false, status: 404, body: null };
@@ -241,7 +256,12 @@ async function providerPipelineTests() {
             assert.ok(result.meta.days.includes('Saturday'), 'Saturday survives extraction');
             // The values come from the extracted table, not from anywhere else.
             assert.ok(result.faculty.some(f => f.name === 'Dr. P Kumar'));
-            assert.ok(calls.some(c => c.url.includes('/pdf/convert/to/csv')));
+            assert.ok(calls.some(c => c.url.includes('/file/upload/get-presigned-url') && c.method === 'GET'),
+                'presigned URL must use GET');
+            assert.ok(calls.some(c => c.url === 'https://upload.example/put' && c.method === 'PUT'),
+                'file upload must use PUT');
+            assert.ok(calls.some(c => c.url.includes('/pdf/convert/to/csv') && c.method === 'POST'),
+                'table extraction must use POST');
             assert.ok(!calls.some(c => c.url.includes('/convert/from/image')), 'a PDF needs no image step');
         } finally {
             documentImporter.setProvider(null);
@@ -257,7 +277,10 @@ async function providerPipelineTests() {
             assert.strictEqual(result.convertedFromImage, true);
             assert.deepStrictEqual(result.report.errors, []);
             assert.strictEqual(result.report.summary.busySlots, 3);
-            assert.ok(calls.some(c => c.url.includes('/pdf/convert/from/image')), 'image step required');
+            assert.ok(calls.some(c => c.url.includes('/file/upload/get-presigned-url') && c.method === 'GET'),
+                'image upload must get presigned URL via GET');
+            assert.ok(calls.some(c => c.url.includes('/pdf/convert/from/image') && c.method === 'POST'),
+                'image step required via POST');
         } finally {
             documentImporter.setProvider(null);
         }

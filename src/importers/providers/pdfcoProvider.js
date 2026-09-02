@@ -62,8 +62,28 @@ function createProvider(options = {}) {
         return Object.assign({ 'x-api-key': apiKey }, extra || {});
     }
 
+    /** GET an endpoint and return parsed JSON response, or throw on error. */
+    async function getJson(endpoint) {
+        const res = await transport(`${baseUrl}${endpoint}`, {
+            method: 'GET',
+            headers: headers()
+        });
+
+        if (!res.ok || !res.body) {
+            throw providerError(
+                `PDF.co ${endpoint} failed (HTTP ${res.status})` +
+                (res.text ? `: ${String(res.text).slice(0, 300)}` : ''),
+                'PDFCO_HTTP_ERROR');
+        }
+        if (res.body.error) {
+            throw providerError(`PDF.co ${endpoint} reported: ${res.body.message || 'unknown error'}`,
+                'PDFCO_API_ERROR');
+        }
+        return res.body;
+    }
+
     /** POST a JSON body and return the parsed response, or throw with PDF.co's own message. */
-    async function callJson(endpoint, payload) {
+    async function postJson(endpoint, payload) {
         const res = await transport(`${baseUrl}${endpoint}`, {
             method: 'POST',
             headers: headers({ 'Content-Type': 'application/json' }),
@@ -85,8 +105,8 @@ function createProvider(options = {}) {
 
     /** Upload the bytes and return the URL PDF.co will read them from. */
     async function upload(buffer, filename) {
-        const presigned = await callJson(
-            `/file/upload/get-presigned-url?name=${encodeURIComponent(filename)}&encrypt=true`, {});
+        const presigned = await getJson(
+            `/file/upload/get-presigned-url?name=${encodeURIComponent(filename)}&encrypt=true`);
         const uploadUrl = presigned.presignedUrl;
         const fileUrl = presigned.url;
         if (!uploadUrl || !fileUrl) {
@@ -123,7 +143,7 @@ function createProvider(options = {}) {
 
         // Images are converted to a PDF first: table extraction runs on PDFs.
         if (isImage) {
-            const asPdf = await callJson('/pdf/convert/from/image', { url: fileUrl, name: 'timetable.pdf' });
+            const asPdf = await postJson('/pdf/convert/from/image', { url: fileUrl, name: 'timetable.pdf' });
             if (!asPdf.url) throw providerError('PDF.co did not return a converted PDF', 'PDFCO_NO_PDF');
             fileUrl = asPdf.url;
             converted = true;
@@ -131,14 +151,20 @@ function createProvider(options = {}) {
 
         // `inline: true` returns the CSV in the response body. OCR is applied
         // automatically for scanned pages when a language is supplied.
-        const table = await callJson('/pdf/convert/to/csv', {
+        const table = await postJson('/pdf/convert/to/csv', {
             url: fileUrl,
             inline: true,
             lang: extractOptions.lang || 'eng',
             pages: extractOptions.pages || ''
         });
 
-        const csv = typeof table.body === 'string' ? table.body : null;
+        let csv = typeof table.body === 'string' ? table.body : null;
+        if (!csv && table.url) {
+            const fetched = await transport(table.url, { method: 'GET' });
+            if (fetched.ok && fetched.text) {
+                csv = fetched.text;
+            }
+        }
         if (!csv || !csv.trim()) {
             throw providerError(
                 'PDF.co returned no table content for this document. It may not contain a ' +
