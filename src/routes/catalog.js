@@ -297,7 +297,8 @@ router.get('/classes', branchScope.guard(req => req.query.branch), async (req, r
     try {
         const scope = req.branchScope;
         const all = (db.isConfigured() ? await repository.listClasses() : classesFromDataset())
-            .filter(item => branchScope.allows(scope, item.department));
+            .filter(item => branchScope.allows(scope, item.department))
+            .map(item => ({ ...item, dataSource: item.dataSource || branchScope.dataSourceOf(item.code) }));
         const classes = byBranch(all, scope.branch || req.query.branch);
         res.json({ count: classes.length, classes, writable: db.isConfigured(),
                    branch: scope.branch || null });

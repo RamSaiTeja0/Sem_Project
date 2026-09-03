@@ -24,6 +24,12 @@ router.get('/meta', branchScope.guard(), (req, res) => {
     res.json({
         ...meta,
         classes,
+        // Which of those classes hold a real timetable and which are still the
+        // bundled placeholder, so no screen presents demo data as genuine.
+        classDataSources: classes.reduce((map, name) => {
+            map[name] = branchScope.dataSourceOf(name);
+            return map;
+        }, {}),
         primaryClass: classes.includes(meta.primaryClass) ? meta.primaryClass : (classes[0] || null),
         branch: scope.branch || null,
         facultyCount: branchScope.visibleFacultyNames(scope).size,
@@ -124,6 +130,9 @@ router.get('/', branchScope.guard(req => branchScope.branchOfClass(req.query.cla
         periodTimings: meta.periodTimings,
         classes: visibleClasses,
         primaryClass: visibleClasses.includes(meta.primaryClass) ? meta.primaryClass : target,
+        // 'placeholder' means this week is bundled demo data, not a real
+        // timetable. The UI says so rather than showing it as genuine.
+        dataSource: branchScope.dataSourceOf(target),
         branch: scope.branch || null
     });
 });

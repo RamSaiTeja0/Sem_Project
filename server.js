@@ -152,6 +152,18 @@ function start(port = config.port, fallbacks = config.fallbackPorts) {
         console.log(config.authRequired
             ? 'Sign-in required: AUTH_REQUIRED=true'
             : 'Sign-in optional: visit /login to sign in, or browse as a guest.');
+
+        // Say plainly what is not production-ready, rather than letting a
+        // deployment quietly run on defaults that were never meant to ship.
+        if (!config.sessionSecretConfigured) {
+            console.warn('WARNING: SESSION_SECRET is not set — a random key was generated for ' +
+                'this process. Sessions will not survive a restart. Set SESSION_SECRET before ' +
+                'deploying.');
+        }
+        if (config.authRequired && !config.demoPasswordConfigured) {
+            console.warn('WARNING: sign-in is required but DEMO_PASSWORD is still the documented ' +
+                'default. Set DEMO_PASSWORD before exposing this to anyone.');
+        }
     });
 
     server.on('error', err => {

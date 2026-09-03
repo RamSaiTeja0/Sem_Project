@@ -47,7 +47,7 @@ async function loadSource(meta) {
                          f.designation, f.email, f.phone, f.max_weekly_periods, f.status
                     FROM faculty f LEFT JOIN departments d ON d.id = f.department_id
                    ORDER BY f.code`),
-        db.query(`SELECT c.code, c.semester, c.academic_year,
+        db.query(`SELECT c.code, c.semester, c.academic_year, c.data_source,
                          COALESCE(d.code, 'General') AS department, r.code AS room
                     FROM classes c
                     LEFT JOIN departments d ON d.id = c.department_id
@@ -115,6 +115,7 @@ async function loadSource(meta) {
             semester: cls.semester,
             academicYear: cls.academic_year,
             room: cls.room,
+            dataSource: cls.data_source || 'real',
             rows
         };
     });
@@ -395,7 +396,8 @@ async function listSubjects() {
 async function listClasses() {
     const { rows } = await db.query(`
         SELECT c.code, c.semester, c.academic_year AS "academicYear",
-               COALESCE(d.code, 'General') AS department, r.code AS room
+               COALESCE(d.code, 'General') AS department, r.code AS room,
+               c.data_source AS "dataSource"
           FROM classes c
           LEFT JOIN departments d ON d.id = c.department_id
           LEFT JOIN rooms r ON r.id = c.home_room_id

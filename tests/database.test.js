@@ -142,10 +142,13 @@ async function run() {
             .forEach(c => assert.ok(columns.includes(c), `faculty.${c} is missing`));
 
         const stored = await db.query(
-            "SELECT designation, email, status FROM faculty WHERE code = 'FAC001'");
+            "SELECT designation, email, phone, status FROM faculty WHERE code = 'FAC001'");
         assert.ok(stored.rows[0].designation, 'the seeded designation survived');
-        assert.match(stored.rows[0].email, /@/);
         assert.strictEqual(stored.rows[0].status, 'active');
+        // No contact details were supplied with the real timetable and none are
+        // invented, so the seeded rows carry null rather than a plausible fake.
+        assert.strictEqual(stored.rows[0].email, null, 'no email may be fabricated');
+        assert.strictEqual(stored.rows[0].phone, null, 'no phone number may be fabricated');
     });
 
     await checkAsync('classes carry their branch, semester and academic year', async () => {
@@ -436,11 +439,25 @@ async function run() {
     });
 
     await checkAsync('a duplicate email is rejected', async () => {
-        const existing = (await call('GET', '/api/faculty?search=FAC002')).body.faculty[0];
+        // The seeded roster carries no email addresses, so one is entered first
+        // and then re-used: the uniqueness rule is what is under test here.
+        const first = await call('POST', '/api/faculty', {
+            id: 'FAC900', name: 'Dr. First Holder', department: 'CME',
+            email: 'shared.address@example.edu'
+        });
+        assert.strictEqual(first.status, 201, first.raw);
+
         const res = await call('POST', '/api/faculty',
-            { id: 'FAC901', name: 'Dr. Another Person', department: 'CME', email: existing.email });
+            { id: 'FAC901', name: 'Dr. Another Person', department: 'CME',
+              email: 'shared.address@example.edu' });
         assert.strictEqual(res.status, 409);
         assert.match(res.body.error, /Email .* already in use/);
+
+        // Remove the scaffolding and put the live roster back in step, so the
+        // count assertions that follow measure only what they add.
+        await db.query("DELETE FROM users WHERE faculty_id = (SELECT id FROM faculty WHERE code = 'FAC900')");
+        await db.query("DELETE FROM faculty WHERE code = 'FAC900'");
+        await store.reloadFromDatabase();
     });
 
     await checkAsync('POST /api/faculty stores a valid record', async () => {

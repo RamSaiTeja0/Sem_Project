@@ -256,3 +256,27 @@ UPDATE users SET active = FALSE
    AND f.department_id = d.id
    AND d.active = FALSE
    AND users.active;
+
+-- ======================================================================
+-- Data provenance.
+--
+-- Records where a class's timetable actually came from, so a placeholder week
+-- can never be mistaken for a real one on screen or in an API response.
+--
+--   'real'        transcribed from a timetable someone supplied, or entered
+--                 through the application by a person
+--   'placeholder' bundled demo data, present so the branch structure works
+--                 before the real timetable arrives
+--
+-- The default is 'real' because anything a person creates through the app is
+-- real; the seeder marks the classes it inserts from the bundled dataset.
+-- ======================================================================
+ALTER TABLE classes ADD COLUMN IF NOT EXISTS data_source TEXT NOT NULL DEFAULT 'real';
+
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'classes_data_source_check') THEN
+        ALTER TABLE classes ADD CONSTRAINT classes_data_source_check
+            CHECK (data_source IN ('real', 'placeholder'));
+    END IF;
+END $$;

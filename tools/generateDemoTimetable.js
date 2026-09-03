@@ -31,32 +31,36 @@ function rng(seed) {
 
 const FACULTY = [
     // CME
-    { id: 'FAC001', name: 'Sri B. Gopala Rao', department: 'CME', designation: 'Professor', phone: '+91 90000 10001' },
-    { id: 'FAC002', name: 'Ms. G. Sandhya Rani', department: 'CME', designation: 'Associate Professor', phone: '+91 90000 10002' },
-    { id: 'FAC003', name: 'Ms. Debadatta Bhattacharya', department: 'CME', designation: 'Assistant Professor', phone: '+91 90000 10003' },
-    { id: 'FAC004', name: 'Mrs. A. Sravanthi', department: 'CME', designation: 'Assistant Professor', phone: '+91 90000 10004' },
-    { id: 'FAC005', name: 'Ms. B. Kusuma', department: 'CME', designation: 'Assistant Professor', phone: '+91 90000 10005' },
-    { id: 'FAC006', name: 'Mrs. K. Anitha', department: 'CME', designation: 'Assistant Professor', phone: '+91 90000 10006' },
-    { id: 'FAC007', name: 'Mr. Ch. Sai Kishore', department: 'CME', designation: 'Assistant Professor', phone: '+91 90000 10007' },
+    { id: 'FAC001', name: 'Sri B. Gopala Rao', department: 'CME', designation: 'Professor' },
+    { id: 'FAC002', name: 'Ms. G. Sandhya Rani', department: 'CME', designation: 'Associate Professor' },
+    { id: 'FAC003', name: 'Ms. Debadatta Bhattacharya', department: 'CME', designation: 'Assistant Professor' },
+    { id: 'FAC004', name: 'Mrs. A. Sravanthi', department: 'CME', designation: 'Assistant Professor' },
+    { id: 'FAC005', name: 'Ms. B. Kusuma', department: 'CME', designation: 'Assistant Professor' },
+    { id: 'FAC006', name: 'Mrs. K. Anitha', department: 'CME', designation: 'Assistant Professor' },
+    { id: 'FAC007', name: 'Mr. Ch. Sai Kishore', department: 'CME', designation: 'Assistant Professor' },
     // EEE
-    { id: 'FAC008', name: 'Dr. Suresh Babu', department: 'EEE', designation: 'Professor', phone: '+91 90000 10008' },
-    { id: 'FAC009', name: 'Prof. Lakshmi Devi', department: 'EEE', designation: 'Associate Professor', phone: '+91 90000 10009' },
-    { id: 'FAC010', name: 'Dr. Mahesh Gupta', department: 'EEE', designation: 'Assistant Professor', phone: '+91 90000 10010' },
+    { id: 'FAC008', name: 'Dr. Suresh Babu', department: 'EEE', designation: 'Professor' },
+    { id: 'FAC009', name: 'Prof. Lakshmi Devi', department: 'EEE', designation: 'Associate Professor' },
+    { id: 'FAC010', name: 'Dr. Mahesh Gupta', department: 'EEE', designation: 'Assistant Professor' },
     // ECE
-    { id: 'FAC011', name: 'Prof. Naveen Reddy', department: 'ECE', designation: 'Professor', phone: '+91 90000 10011' },
-    { id: 'FAC012', name: 'Dr. Kavya Rao', department: 'ECE', designation: 'Associate Professor', phone: '+91 90000 10012' },
-    { id: 'FAC013', name: 'Dr. Anitha Menon', department: 'ECE', designation: 'Assistant Professor', phone: '+91 90000 10013' },
-    { id: 'FAC014', name: 'Prof. Ravi Teja', department: 'ECE', designation: 'Assistant Professor', phone: '+91 90000 10014' },
+    { id: 'FAC011', name: 'Prof. Naveen Reddy', department: 'ECE', designation: 'Professor' },
+    { id: 'FAC012', name: 'Dr. Kavya Rao', department: 'ECE', designation: 'Associate Professor' },
+    { id: 'FAC013', name: 'Dr. Anitha Menon', department: 'ECE', designation: 'Assistant Professor' },
+    { id: 'FAC014', name: 'Prof. Ravi Teja', department: 'ECE', designation: 'Assistant Professor' },
     // MEC
-    { id: 'FAC015', name: 'Dr. Rajesh Pillai', department: 'MEC', designation: 'Professor', phone: '+91 90000 10015' },
-    { id: 'FAC016', name: 'Prof. Harish Chandra', department: 'MEC', designation: 'Associate Professor', phone: '+91 90000 10016' },
-    { id: 'FAC017', name: 'Dr. Sunita Rani', department: 'MEC', designation: 'Assistant Professor', phone: '+91 90000 10017' }
+    { id: 'FAC015', name: 'Dr. Rajesh Pillai', department: 'MEC', designation: 'Professor' },
+    { id: 'FAC016', name: 'Prof. Harish Chandra', department: 'MEC', designation: 'Associate Professor' },
+    { id: 'FAC017', name: 'Dr. Sunita Rani', department: 'MEC', designation: 'Assistant Professor' }
 ].map(member => ({
     ...member,
-    // Fictional addresses on an example domain — no real mailbox exists.
-    email: member.name
-        .replace(/^(Dr|Prof|Mr|Mrs|Ms|Sri)\.?\s+/, '')
-        .toLowerCase().replace(/[^a-z0-9]+/g, '.') + '@college.edu',
+    // CONTACT DETAILS ARE NOT INVENTED.
+    //
+    // No phone number or email address was supplied with the real timetable, so
+    // none is generated. A made-up number in a substitution tool is worse than
+    // no number: someone would actually dial it. They stay null until a real
+    // one is entered through the faculty form.
+    phone: null,
+    email: null,
     status: 'active',
     maxWeeklyPeriods: 20
 }));
@@ -85,6 +89,11 @@ const SUBJECTS = [
     { code: 'CM-507', name: 'Python Programming Lab', department: 'CME', type: 'lab' },
     { code: 'CM-508', name: 'Life Skills', department: 'CME', type: 'theory' },
     { code: 'CM-509', name: 'Project work', department: 'CME', type: 'theory' },
+    // Scheduled in the supplied CME-A timetable (Wednesday P5-P7) but missing
+    // from the subject list, so the form could not offer it and re-uploading
+    // the real week was refused as an unknown subject. Not invented data: the
+    // subject is on the timetable itself.
+    { code: 'CM-510', name: 'Life Skills Lab', department: 'CME', type: 'lab' },
     // EEE
     { code: 'EE501', name: 'Power Systems', department: 'EEE', type: 'theory' },
     { code: 'EE502', name: 'Electrical Machines', department: 'EEE', type: 'theory' },
@@ -117,12 +126,23 @@ const SUBJECTS = [
 
 const ACADEMIC_YEAR = '2026-27';
 
+/**
+ * `dataSource` records where a class's timetable actually came from.
+ *
+ *   'real'        transcribed from a timetable the user supplied
+ *   'placeholder' invented by the solver below so the application has a
+ *                 realistic week to demonstrate — NOT anyone's real schedule
+ *
+ * Only CME-A is real. The rest exist so the branch structure is exercised and
+ * are labelled as placeholders everywhere they surface, so nobody mistakes one
+ * for a genuine timetable. They are replaced wholesale when real data arrives.
+ */
 const CLASSES = [
-    { class: 'CME-A', department: 'CME', semester: 5, room: 'C-401', labRooms: ['CM-LAB-1'] },
-    { class: 'EEE-A', department: 'EEE', semester: 5, room: 'P-301', labRooms: ['EEE-LAB-1'] },
-    { class: 'ECE-A', department: 'ECE', semester: 5, room: 'E-201', labRooms: ['EC-LAB-1', 'EC-LAB-2'] },
-    { class: 'ECE-B', department: 'ECE', semester: 5, room: 'E-202', labRooms: ['EC-LAB-2', 'EC-LAB-1'] },
-    { class: 'MEC-A', department: 'MEC', semester: 5, room: 'M-501', labRooms: ['ME-WORKSHOP'] }
+    { class: 'CME-A', department: 'CME', semester: 5, room: 'C-401', labRooms: ['CM-LAB-1'], dataSource: 'real' },
+    { class: 'EEE-A', department: 'EEE', semester: 5, room: 'P-301', labRooms: ['EEE-LAB-1'], dataSource: 'placeholder' },
+    { class: 'ECE-A', department: 'ECE', semester: 5, room: 'E-201', labRooms: ['EC-LAB-1', 'EC-LAB-2'], dataSource: 'placeholder' },
+    { class: 'ECE-B', department: 'ECE', semester: 5, room: 'E-202', labRooms: ['EC-LAB-2', 'EC-LAB-1'], dataSource: 'placeholder' },
+    { class: 'MEC-A', department: 'MEC', semester: 5, room: 'M-501', labRooms: ['ME-WORKSHOP'], dataSource: 'placeholder' }
 ];
 
 // Exact CME-A schedule from the provided timetable image
@@ -437,6 +457,7 @@ const dataset = {
         semester: c.semester,
         academicYear: ACADEMIC_YEAR,
         room: c.room,
+        dataSource: c.dataSource,
         rows: rowsFor(c.class)
     }))
 };

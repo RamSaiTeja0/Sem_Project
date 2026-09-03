@@ -1069,13 +1069,13 @@
                 'Mrs. A. Sravanthi,FREE,FREE,FREE,FREE,Internet Of Things,FREE'
             ].join('\n')
         },
-        'ECE — Semester III': {
-            className: 'ECE-A',
+        'EEE — Semester V': {
+            className: 'EEE-A',
             text: [
                 'Faculty,Monday P1,Monday P2,Tuesday P1,Tuesday P2',
-                'Dr. Anitha Menon,Signals and Systems,FREE,FREE,Signals and Systems',
-                'Prof. Naveen Reddy,FREE,Digital Electronics,Digital Electronics,FREE',
-                'Dr. Kavya Rao,FREE,FREE,Microprocessors,FREE'
+                'Dr. Suresh Babu,Power Systems,FREE,FREE,Power Systems',
+                'Prof. Lakshmi Devi,FREE,Electrical Machines,Electrical Machines,FREE',
+                'Dr. Mahesh Gupta,FREE,FREE,Control Systems,FREE'
             ].join('\n')
         },
         'Long-form (Day / Period rows)': {
@@ -1408,11 +1408,35 @@
         return loadGrid(ttQuery(), 'ttHead', 'ttBody', jumpToAvailability);
     }
 
+    /**
+     * Say plainly when the week on screen is bundled demo data.
+     *
+     * Only CME-A was transcribed from a real timetable. The other classes exist
+     * so the branch structure works before the real data arrives, and a
+     * substitution decision must never be taken from one by mistake.
+     */
+    function isPlaceholderClass(code) {
+        var sources = (state.meta && state.meta.classDataSources) || {};
+        return sources[code] === 'placeholder';
+    }
+
+    function describeProvenance(code, boxId) {
+        var box = el(boxId || 'ttProvenance');
+        if (!box) return;
+        if (!isPlaceholderClass(code)) { box.innerHTML = ''; return; }
+        box.innerHTML = '<div class="notice notice-warn">' +
+            '<strong>Placeholder timetable.</strong> ' + esc(code) + ' has not been given a real ' +
+            'timetable yet — this week is bundled sample data, shown so the application works ' +
+            'end to end. Do not use it to arrange cover. Upload the real timetable to replace it.' +
+            '</div>';
+    }
+
     /** The one-line academic context under the Master Timetable heading. */
     function describeTimetableClass() {
         var box = el('ttMeta');
         if (!box) return;
         var code = (el('ttView').value || '').replace(/^class:/, '');
+        describeProvenance(code);
         var info = state.classMeta[code];
         if (!info) { box.textContent = ''; return; }
         box.textContent = [
@@ -1422,6 +1446,11 @@
             info.academicYear ? 'Academic year ' + info.academicYear : null,
             info.room ? 'Home room ' + info.room : null
         ].filter(Boolean).join(' · ');
+    }
+
+    /** Keep the availability view's own placeholder notice in step. */
+    function describeAvailabilityClass() {
+        describeProvenance((el('availClass') && el('availClass').value) || '', 'availProvenance');
     }
 
     function onAvailabilitySelect(cell) {
@@ -1442,6 +1471,7 @@
         return getJson(API.meta).then(function (meta) {
             state.meta = meta;
 
+            el('topbarMeta').removeAttribute('data-loading-placeholder');
             el('topbarMeta').textContent = [
                 state.branch ? state.branch + ' branch' : null,
                 meta.title || 'Timetable',
@@ -1524,13 +1554,15 @@
             return Promise.all([
                 loadGrid(query, 'ttHead', 'ttBody', jumpToAvailability)
                     .then(function () { el('ttState').style.display = 'none'; }),
-                loadGrid(availabilityQuery(), 'availHead', 'availBody', onAvailabilitySelect),
+                loadGrid(availabilityQuery(), 'availHead', 'availBody', onAvailabilitySelect)
+                    .then(describeAvailabilityClass),
                 loadFacultyTable()
             ]);
         }).catch(function (err) {
             // Never leave the header stuck on "Loading…": say what went wrong.
             var meta = el('topbarMeta');
-            if (meta && /Loading/i.test(meta.textContent)) {
+            if (meta && meta.hasAttribute('data-loading-placeholder')) {
+                meta.removeAttribute('data-loading-placeholder');
                 meta.textContent = 'Could not load the timetable — ' + err.message;
             }
             var box = el('ttState');
@@ -1555,7 +1587,13 @@
         }
     }
 
-    function loadOwnUpload() {
+    /**
+     * @param {{keepNotice?: boolean}} [options] leave the result panel alone —
+     *   used after a save, so the confirmation is not overwritten by the
+     *   "you currently have N periods" line it triggers.
+     */
+    function loadOwnUpload(options) {
+        var keepNotice = Boolean(options && options.keepNotice);
         var card = el('ownUploadCard');
         if (!card) return Promise.resolve();
 
@@ -1580,8 +1618,10 @@
                     'database is configured. Set <code>DATABASE_URL</code> and restart. Viewing ' +
                     'your week still works.</div>';
             }
-            ownUploadNote('You currently have <strong>' + data.count + '</strong> period' +
-                (data.count === 1 ? '' : 's') + ' on record.', 'info');
+            if (!keepNotice) {
+                ownUploadNote('You currently have <strong>' + data.count + '</strong> period' +
+                    (data.count === 1 ? '' : 's') + ' on record.', 'info');
+            }
         }).catch(function (err) {
             ownUploadNote('Could not read your timetable: ' + esc(err.message), 'error');
         });
@@ -1633,10 +1673,12 @@
                 (res.body.created === 1 ? '' : 's') +
                 (res.body.mode === 'replace'
                     ? ', replacing ' + res.body.replaced + ' previously on record.'
-                    : '.'), 'ok');
+                    : '.') + ' Your timetable is now ' + res.body.created + ' period' +
+                (res.body.created === 1 ? '' : 's') + ' in total.', 'ok');
             logActivity('Uploaded own timetable (' + res.body.created + ' periods)');
-            // The week changed, so every view built on it is stale.
-            loadOwnUpload();
+            // The week changed, so every view built on it is stale. Keep the
+            // confirmation on screen while the rest refreshes behind it.
+            loadOwnUpload({ keepNotice: true });
             loadSchedule();
             bootstrapRefresh();
         }).catch(function (err) {
@@ -2291,6 +2333,7 @@
 
         // --- availability
         el('availClass').addEventListener('change', function () {
+            describeAvailabilityClass();
             loadGrid(availabilityQuery(), 'availHead', 'availBody', onAvailabilitySelect);
             el('availResult').innerHTML = '<p class="muted">Select a period from the timetable.</p>';
         });

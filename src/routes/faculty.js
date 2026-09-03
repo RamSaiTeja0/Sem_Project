@@ -230,13 +230,63 @@ function parseFaculty(body, knownCodes) {
     };
 }
 
-router.post('/', requireDatabase, async (req, res, next) => {
-    const parsed = parseFaculty(req.body || {}, await knownBranchCodes());
+/**
+ * Adding a faculty member is a branch administration act, so it is guarded the
+ * same way every other write is.
+ *
+ * The guard refuses a `department` naming another branch (403 BRANCH_FORBIDDEN)
+ * or an archived one (403 BRANCH_ARCHIVED). On top of that, only a head of
+ * section or the coordinator may add anyone at all: a faculty account
+ * administering the roster is not part of the model.
+ */
+function requireBranchAdmin(req, res, next) {
+    const role = req.session ? String(req.session.role || '').toLowerCase() : null;
+    // No session at all is the sign-in-optional demo mode, which behaves as it
+    // always has — the branch guard below still applies. A SIGNED-IN faculty
+    // account is the case this closes: administering the roster is not theirs.
+    if (role === 'faculty') {
+        return res.status(403).json({
+            error: 'Only a head of section or the coordinator may add a faculty member.',
+            code: 'NOT_BRANCH_ADMIN'
+        });
+    }
+    return next();
+}
+
+router.post('/', requireDatabase, requireBranchAdmin,
+    branchScope.guard(req => (req.body || {}).department || (req.body || {}).branch),
+    async (req, res, next) => {
+    // A branch account that omits the department gets its own, never a blank
+    // that would fall through to some other branch's validation.
+    const body = { ...(req.body || {}) };
+    if (req.branchScope.branch && !body.department && !body.branch) {
+        body.department = req.branchScope.branch;
+    }
+    const parsed = parseFaculty(body, await knownBranchCodes());
     if (parsed.errors) {
         return res.status(400).json({
             error: parsed.errors.join('; '), code: 'INVALID_FACULTY', problems: parsed.errors
         });
     }
+    // Belt and braces: the guard resolved the branch from the body, so this can
+    // only differ if the body were re-read — but a roster write is exactly where
+    // that must never slip through.
+    if (req.branchScope.branch &&
+        branchScope.code(parsed.member.department) !== req.branchScope.branch) {
+        return res.status(403).json({
+            error: `This account belongs to ${req.branchScope.branch}. ` +
+                   `It cannot add faculty to ${parsed.member.department}.`,
+            code: 'BRANCH_FORBIDDEN'
+        });
+    }
+    if (!branchScope.isActiveBranch(parsed.member.department)) {
+        return res.status(403).json({
+            error: `The ${parsed.member.department} branch is archived and is no longer an ` +
+                   'active application. Faculty cannot be added to it.',
+            code: 'BRANCH_ARCHIVED'
+        });
+    }
+
     try {
         const created = await repository.addFaculty(parsed.member);
         // Rebuild the live dataset so the new member is immediately visible to

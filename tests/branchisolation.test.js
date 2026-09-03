@@ -110,9 +110,12 @@ async function main() {
         await isolationMatrix();
         await hosTests();
         await masterTimetableTests();
+        await rosterWriteTests();
         await facultyTests();
         await facultyOwnershipTests();
         await crossBranchTests();
+        await availabilityLeakTests();
+        await provenanceTests();
     } catch (err) {
         console.error('\nServer output:\n' + log);
         throw err;
@@ -415,6 +418,94 @@ async function masterTimetableTests() {
     }
 }
 
+// ------------------------------------------- roster administration writes
+/**
+ * Adding a faculty member is a branch administration act.
+ *
+ * This is a REGRESSION SUITE for a real hole: POST /api/faculty carried no
+ * branch guard at all, so any head of section could create a lecturer in
+ * another branch — or resurrect the archived one — and the victim branch's
+ * roster would then list them.
+ */
+async function rosterWriteTests() {
+    console.log('\n[3c] Roster writes — a branch may only add its own faculty');
+
+    const probe = await signIn(`hos.${BRANCHES[0].toLowerCase()}`);
+    const canWrite = (await probe.call('POST', '/api/faculty', {})).status !== 503;
+    if (!canWrite) {
+        console.log('  [skip] no database configured — roster writes answer 503.');
+        return;
+    }
+
+    let serial = 0;
+    const probeId = () => `ZTEST${String(++serial).padStart(3, '0')}`;
+
+    for (const actor of BRANCHES) {
+        const hos = await signIn(`hos.${actor.toLowerCase()}`);
+
+        for (const target of BRANCHES.filter(b => b !== actor)) {
+            await checkAsync(`${actor} HOS cannot add a faculty member to ${target}`, async () => {
+                const id = probeId();
+                const res = await hos.call('POST', '/api/faculty', {
+                    id, name: `Probe Person ${id}`, department: target
+                });
+                assert.strictEqual(res.status, 403, `expected 403, got ${res.status}: ${res.raw}`);
+                assert.strictEqual(res.body.code, 'BRANCH_FORBIDDEN');
+
+                // ...and nothing appeared in the victim's roster.
+                const victim = await signIn(`hos.${target.toLowerCase()}`);
+                const roster = (await victim.call('GET', '/api/faculty')).body.faculty;
+                assert.ok(!roster.some(f => f.id === id),
+                    `${id} was injected into ${target}'s roster`);
+            });
+        }
+
+        await checkAsync(`${actor} HOS cannot add a faculty member to an archived branch`, async () => {
+            if (!ARCHIVED.length) return;
+            const id = probeId();
+            const res = await hos.call('POST', '/api/faculty', {
+                id, name: `Probe Person ${id}`, department: ARCHIVED[0]
+            });
+            assert.strictEqual(res.status, 403, res.raw);
+            assert.ok(['BRANCH_ARCHIVED', 'BRANCH_FORBIDDEN'].includes(res.body.code), res.raw);
+        });
+    }
+
+    await checkAsync('a faculty account cannot administer the roster at all', async () => {
+        const admin = await signIn('admin');
+        const accounts = (await admin.call('GET', '/api/auth/accounts')).body.accounts;
+        const person = accounts.find(a => a.role === 'faculty');
+        const session = await signIn(person.username);
+
+        const id = probeId();
+        const res = await session.call('POST', '/api/faculty', {
+            id, name: `Probe Person ${id}`, department: person.department
+        });
+        assert.strictEqual(res.status, 403, res.raw);
+        assert.strictEqual(res.body.code, 'NOT_BRANCH_ADMIN');
+    });
+
+    await checkAsync('a head of section CAN add a faculty member to their own branch', async () => {
+        const branch = BRANCHES[0];
+        const hos = await signIn(`hos.${branch.toLowerCase()}`);
+        const id = probeId();
+        const res = await hos.call('POST', '/api/faculty', {
+            id, name: `Probe Person ${id}`, department: branch
+        });
+        assert.strictEqual(res.status, 201, res.raw);
+        assert.strictEqual(res.body.faculty.department, branch);
+        // Contact details are optional and are not invented on the way in.
+        assert.strictEqual(res.body.faculty.phone, null);
+        assert.strictEqual(res.body.faculty.email, null);
+
+        // Leave the roster as it was found.
+        const pool = require('../src/db/pool');
+        await pool.query('DELETE FROM users WHERE faculty_id = (SELECT id FROM faculty WHERE code = $1)', [id]);
+        await pool.query('DELETE FROM faculty WHERE code = $1', [id]);
+        await require('../src/data/store').reloadFromDatabase();
+    });
+}
+
 // --------------------------------------- a faculty member's own timetable
 async function facultyOwnershipTests() {
     console.log('\n[4b] Faculty own timetable — identity comes from the session');
@@ -607,6 +698,125 @@ async function facultyTests() {
         assert.ok([403, 503].includes(attempt.status),
             `expected 403 (forbidden) or 503 (no database), got ${attempt.status}`);
     });
+}
+
+// ------------------------------------------ availability data-leak matrix
+/**
+ * The exact scenario: a branch checks one slot, and the answer must contain
+ * ONLY its own faculty plus anyone explicitly teaching one of its classes. A
+ * lecturer from another branch who does not teach here must not appear at all —
+ * not as free, not as busy, not in the totals.
+ */
+async function availabilityLeakTests() {
+    console.log('\n[6] Availability contains only the branch\'s own pool');
+
+    const rosters = {};
+    for (const branch of BRANCHES) {
+        const hos = await signIn(`hos.${branch.toLowerCase()}`);
+        rosters[branch] = {
+            hos,
+            names: (await hos.call('GET', '/api/faculty')).body.faculty.map(f => f.name),
+            classes: (await hos.call('GET', '/api/timetable/meta')).body.classes
+        };
+    }
+
+    for (const branch of BRANCHES) {
+        const { hos, names, classes } = rosters[branch];
+
+        // Everyone this branch may NOT see: another branch's faculty who teach
+        // none of its classes.
+        const outsiders = BRANCHES
+            .filter(b => b !== branch)
+            .flatMap(b => rosters[b].names)
+            .filter(name => !names.includes(name));
+
+        await checkAsync(`${branch}: Monday P2 returns only ${branch}'s pool`, async () => {
+            const res = await hos.call('POST', '/api/availability', { day: 'Monday', period: 2 });
+            assert.strictEqual(res.status, 200);
+            assert.strictEqual(res.body.branch, branch);
+            assert.strictEqual(res.body.readOnly, true);
+
+            const listed = res.body.available.map(f => f.faculty)
+                .concat(res.body.busy.map(f => f.faculty));
+
+            listed.forEach(name => assert.ok(names.includes(name),
+                `${name} appeared to ${branch} but is not in its pool`));
+            outsiders.forEach(name => assert.ok(!listed.includes(name),
+                `${name} teaches nothing in ${branch} but appeared in its availability`));
+
+            assert.strictEqual(res.body.totalFaculty, names.length,
+                'the totals must count the branch pool, not the whole roster');
+            assert.strictEqual(res.body.totalAvailable + res.body.totalBusy, names.length);
+
+            // No other branch's name, class or subject anywhere in the answer.
+            const text = JSON.stringify(res.body);
+            BRANCHES.filter(b => b !== branch)
+                .forEach(other => assert.ok(!text.includes(other), `named ${other}`));
+            ARCHIVED.forEach(other => assert.ok(!text.includes(other), `named archived ${other}`));
+            Object.entries(rosters)
+                .filter(([b]) => b !== branch)
+                .forEach(([, r]) => r.classes.forEach(cls => assert.ok(!text.includes(cls),
+                    `named another branch's class ${cls}`)));
+            void classes;
+        });
+
+        await checkAsync(`${branch}: FREE is the absence of an entry, and nothing is written`, async () => {
+            const before = await hos.call('GET', '/api/timetable/records?status=busy');
+            const res = await hos.call('POST', '/api/availability', { day: 'Monday', period: 2 });
+
+            // Everyone reported free must genuinely have no entry at that slot.
+            const busyAtSlot = (await hos.call('GET',
+                '/api/timetable/records?day=Monday&period=2&status=busy')).body.records
+                .map(r => r.faculty);
+            res.body.availableFaculty.forEach(name => assert.ok(!busyAtSlot.includes(name),
+                `${name} was reported free while holding an entry`));
+            busyAtSlot.forEach(name => assert.ok(!res.body.availableFaculty.includes(name)));
+
+            // A read must not have changed anything.
+            const after = await hos.call('GET', '/api/timetable/records?status=busy');
+            assert.strictEqual(after.body.count, before.body.count,
+                'an availability lookup mutated the timetable');
+        });
+    }
+}
+
+// ------------------------------------------------ data provenance labelling
+async function provenanceTests() {
+    console.log('\n[7] Placeholder data is labelled, never passed off as real');
+
+    const branchScope = require('../src/core/branchScope');
+    const demo = require('../src/data/demoTimetable');
+
+    check('the bundled dataset invents no contact details', () => {
+        const fabricated = demo.faculty.filter(f => f.phone || f.email);
+        assert.deepStrictEqual(fabricated.map(f => f.name), [],
+            'no phone number or email may be invented for a real person');
+    });
+
+    check('only genuinely supplied timetables are marked real', () => {
+        assert.strictEqual(branchScope.dataSourceOf('CME-A'), 'real',
+            'the supplied CME timetable is real data');
+        demo.classes
+            .filter(c => c.class !== 'CME-A')
+            .forEach(c => assert.strictEqual(branchScope.dataSourceOf(c.class), 'placeholder',
+                `${c.class} is generated demo data and must say so`));
+    });
+
+    for (const branch of BRANCHES) {
+        await checkAsync(`${branch}: the API states where its timetable came from`, async () => {
+            const hos = await signIn(`hos.${branch.toLowerCase()}`);
+            const meta = (await hos.call('GET', '/api/timetable/meta')).body;
+            assert.ok(meta.classDataSources, 'meta must report class provenance');
+            meta.classes.forEach(name => assert.ok(
+                ['real', 'placeholder'].includes(meta.classDataSources[name]),
+                `${name} has no provenance`));
+
+            const grid = (await hos.call('GET', '/api/timetable')).body;
+            assert.ok(['real', 'placeholder'].includes(grid.dataSource),
+                'the grid must state its provenance');
+            assert.strictEqual(grid.dataSource, meta.classDataSources[grid.name]);
+        });
+    }
 }
 
 // ------------------------------------------------- cross-branch teaching

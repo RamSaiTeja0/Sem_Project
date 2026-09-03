@@ -25,6 +25,57 @@ const SCHEMA_PATH = path.join(__dirname, 'schema.sql');
 async function migrate() {
     const sql = fs.readFileSync(SCHEMA_PATH, 'utf8');
     await db.query(sql);
+    await labelBundledPlaceholders();
+}
+
+/**
+ * Label classes that are still the bundled placeholder week.
+ *
+ * `classes.data_source` defaults to 'real', because anything a person creates
+ * through the application is real. A database seeded before that column existed
+ * therefore reports its demo classes as real, which is exactly the confusion the
+ * column exists to prevent.
+ *
+ * The relabel is deliberately conservative: a class is only marked as a
+ * placeholder when its stored week STILL MATCHES the bundled one period for
+ * period. Replace MEC-A with a real timetable and it stays 'real', so this can
+ * never demote genuine data. Idempotent — re-running changes nothing.
+ */
+async function labelBundledPlaceholders() {
+    const bundled = (demoTimetable.classes || [])
+        .filter(cls => cls.dataSource === 'placeholder');
+    if (!bundled.length) return { relabelled: [] };
+
+    const expected = new Map();
+    normalize(demoTimetable).busyRecords.forEach(record => {
+        if (!expected.has(record.className)) expected.set(record.className, new Set());
+        expected.get(record.className).add(`${record.day}|${record.period}|${record.subject}`);
+    });
+
+    const relabelled = [];
+    for (const cls of bundled) {
+        const code = cls.class;
+        const { rows } = await db.query(`
+            SELECT t.day_of_week AS day, t.period, s.name AS subject, c.data_source
+              FROM classes c
+              LEFT JOIN timetable t ON t.class_id = c.id
+              LEFT JOIN subjects s ON s.id = t.subject_id
+             WHERE c.code = $1`, [code]);
+        if (!rows.length || rows[0].data_source === 'placeholder') continue;
+
+        const stored = new Set(rows
+            .filter(r => r.day && r.subject)
+            .map(r => `${r.day}|${r.period}|${r.subject}`));
+        const want = expected.get(code) || new Set();
+        const unchanged = stored.size === want.size &&
+            [...want].every(key => stored.has(key));
+        if (!unchanged) continue;      // someone's real timetable now — leave it
+
+        await db.query('UPDATE classes SET data_source = $2 WHERE code = $1',
+            [code, 'placeholder']);
+        relabelled.push(code);
+    }
+    return { relabelled };
 }
 
 /**
@@ -108,13 +159,13 @@ async function seed(dataset = demoTimetable, options = {}) {
         // ---- classes ----
         for (const cls of dataset.classes || []) {
             await client.query(
-                `INSERT INTO classes (code, department_id, semester, academic_year, home_room_id)
+                `INSERT INTO classes (code, department_id, semester, academic_year, home_room_id, data_source)
                  VALUES ($1, (SELECT id FROM departments WHERE code = $2), $3, $4,
-                         (SELECT id FROM rooms WHERE code = $5))
+                         (SELECT id FROM rooms WHERE code = $5), $6)
                  ON CONFLICT (code) DO NOTHING`,
                 [cls.class, cls.department || null, cls.semester || null,
                  cls.academicYear || (dataset.meta && dataset.meta.academicYear) || null,
-                 cls.room || null]);
+                 cls.room || null, cls.dataSource === 'placeholder' ? 'placeholder' : 'real']);
         }
 
         // ---- periods ----
@@ -175,4 +226,4 @@ async function initialize(options = {}) {
     return seed(demoTimetable, options);
 }
 
-module.exports = { migrate, seed, initialize, SCHEMA_PATH };
+module.exports = { migrate, seed, labelBundledPlaceholders, initialize, SCHEMA_PATH };

@@ -80,6 +80,21 @@ function branchOfClass(className) {
 }
 
 /** Every class belonging to a branch. */
+/**
+ * Where a class's timetable came from: 'real' or 'placeholder'.
+ *
+ * Read from whichever backing is live, so it is right on the demo dataset and
+ * on the database alike. Anything the source does not label is treated as real
+ * — a class someone created through the application.
+ */
+function dataSourceOf(className) {
+    const name = String(className == null ? '' : className).trim();
+    if (!name) return null;
+    const declared = (store.source && store.source.classes) || [];
+    const match = declared.find(entry => (entry.class || entry.name || entry.code) === name);
+    return match && match.dataSource === 'placeholder' ? 'placeholder' : 'real';
+}
+
 function classesOf(branch) {
     const wanted = code(branch);
     return store.engine.getMeta().classes.filter(name => branchOfClass(name) === wanted);
@@ -206,7 +221,7 @@ function projectFacultyList(members, branch) {
  *
  * Validation warnings are free text written about the whole loaded dataset, so
  * one of them can name another branch's class, faculty or code — "Primary class
- * CME-A has no entry for Friday P1" on an ECE screen. Rather than trying to
+ * CME-A has no entry for Friday P1" on an EEE screen. Rather than trying to
  * rewrite them, a warning that names anything outside this branch is withheld.
  */
 function filterWarnings(warnings, branch) {
@@ -322,6 +337,7 @@ module.exports = {
     visibleClasses,
     visibleFacultyNames,
     branchOfClass,
+    dataSourceOf,
     classesOf,
     facultyPoolOf,
     facultyInBranch,

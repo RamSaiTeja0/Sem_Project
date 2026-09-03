@@ -1,7 +1,7 @@
 /**
  * Demo academic dataset — realistic academic data for demonstrating the app.
  *
- * 17 faculty across 4 branches, 5 classes, 34 subjects,
+ * 17 faculty across 4 branches, 5 classes, 35 subjects,
  * 10 rooms, Monday-Saturday, periods 1-7.
  *
  * GENERATED FILE — produced by tools/generateDemoTimetable.js and committed as
@@ -63,6 +63,7 @@ module.exports = {
         { code: "CM-507", name: "Python Programming Lab", department: "CME", type: "lab" },
         { code: "CM-508", name: "Life Skills", department: "CME", type: "theory" },
         { code: "CM-509", name: "Project work", department: "CME", type: "theory" },
+        { code: "CM-510", name: "Life Skills Lab", department: "CME", type: "lab" },
         { code: "EE501", name: "Power Systems", department: "EEE", type: "theory" },
         { code: "EE502", name: "Electrical Machines", department: "EEE", type: "theory" },
         { code: "EE503", name: "Control Systems", department: "EEE", type: "theory" },
@@ -95,8 +96,8 @@ module.exports = {
             name: "Sri B. Gopala Rao",
             department: "CME",
             designation: "Professor",
-            phone: "+91 90000 10001",
-            email: "b.gopala.rao@college.edu",
+            phone: null,
+            email: null,
             status: "active",
             maxWeeklyPeriods: 20
         },
@@ -105,8 +106,8 @@ module.exports = {
             name: "Ms. G. Sandhya Rani",
             department: "CME",
             designation: "Associate Professor",
-            phone: "+91 90000 10002",
-            email: "g.sandhya.rani@college.edu",
+            phone: null,
+            email: null,
             status: "active",
             maxWeeklyPeriods: 20
         },
@@ -115,8 +116,8 @@ module.exports = {
             name: "Ms. Debadatta Bhattacharya",
             department: "CME",
             designation: "Assistant Professor",
-            phone: "+91 90000 10003",
-            email: "debadatta.bhattacharya@college.edu",
+            phone: null,
+            email: null,
             status: "active",
             maxWeeklyPeriods: 20
         },
@@ -125,8 +126,8 @@ module.exports = {
             name: "Mrs. A. Sravanthi",
             department: "CME",
             designation: "Assistant Professor",
-            phone: "+91 90000 10004",
-            email: "a.sravanthi@college.edu",
+            phone: null,
+            email: null,
             status: "active",
             maxWeeklyPeriods: 20
         },
@@ -135,8 +136,8 @@ module.exports = {
             name: "Ms. B. Kusuma",
             department: "CME",
             designation: "Assistant Professor",
-            phone: "+91 90000 10005",
-            email: "b.kusuma@college.edu",
+            phone: null,
+            email: null,
             status: "active",
             maxWeeklyPeriods: 20
         },
@@ -145,8 +146,8 @@ module.exports = {
             name: "Mrs. K. Anitha",
             department: "CME",
             designation: "Assistant Professor",
-            phone: "+91 90000 10006",
-            email: "k.anitha@college.edu",
+            phone: null,
+            email: null,
             status: "active",
             maxWeeklyPeriods: 20
         },
@@ -155,8 +156,8 @@ module.exports = {
             name: "Mr. Ch. Sai Kishore",
             department: "CME",
             designation: "Assistant Professor",
-            phone: "+91 90000 10007",
-            email: "ch.sai.kishore@college.edu",
+            phone: null,
+            email: null,
             status: "active",
             maxWeeklyPeriods: 20
         },
@@ -165,8 +166,8 @@ module.exports = {
             name: "Dr. Suresh Babu",
             department: "EEE",
             designation: "Professor",
-            phone: "+91 90000 10008",
-            email: "suresh.babu@college.edu",
+            phone: null,
+            email: null,
             status: "active",
             maxWeeklyPeriods: 20
         },
@@ -175,8 +176,8 @@ module.exports = {
             name: "Prof. Lakshmi Devi",
             department: "EEE",
             designation: "Associate Professor",
-            phone: "+91 90000 10009",
-            email: "lakshmi.devi@college.edu",
+            phone: null,
+            email: null,
             status: "active",
             maxWeeklyPeriods: 20
         },
@@ -185,8 +186,8 @@ module.exports = {
             name: "Dr. Mahesh Gupta",
             department: "EEE",
             designation: "Assistant Professor",
-            phone: "+91 90000 10010",
-            email: "mahesh.gupta@college.edu",
+            phone: null,
+            email: null,
             status: "active",
             maxWeeklyPeriods: 20
         },
@@ -195,8 +196,8 @@ module.exports = {
             name: "Prof. Naveen Reddy",
             department: "ECE",
             designation: "Professor",
-            phone: "+91 90000 10011",
-            email: "naveen.reddy@college.edu",
+            phone: null,
+            email: null,
             status: "active",
             maxWeeklyPeriods: 20
         },
@@ -205,8 +206,8 @@ module.exports = {
             name: "Dr. Kavya Rao",
             department: "ECE",
             designation: "Associate Professor",
-            phone: "+91 90000 10012",
-            email: "kavya.rao@college.edu",
+            phone: null,
+            email: null,
             status: "active",
             maxWeeklyPeriods: 20
         },
@@ -215,8 +216,8 @@ module.exports = {
             name: "Dr. Anitha Menon",
             department: "ECE",
             designation: "Assistant Professor",
-            phone: "+91 90000 10013",
-            email: "anitha.menon@college.edu",
+            phone: null,
+            email: null,
             status: "active",
             maxWeeklyPeriods: 20
         },
@@ -225,8 +226,8 @@ module.exports = {
             name: "Prof. Ravi Teja",
             department: "ECE",
             designation: "Assistant Professor",
-            phone: "+91 90000 10014",
-            email: "ravi.teja@college.edu",
+            phone: null,
+            email: null,
             status: "active",
             maxWeeklyPeriods: 20
         },
@@ -235,8 +236,8 @@ module.exports = {
             name: "Dr. Rajesh Pillai",
             department: "MEC",
             designation: "Professor",
-            phone: "+91 90000 10015",
-            email: "rajesh.pillai@college.edu",
+            phone: null,
+            email: null,
             status: "active",
             maxWeeklyPeriods: 20
         },
@@ -245,8 +246,8 @@ module.exports = {
             name: "Prof. Harish Chandra",
             department: "MEC",
             designation: "Associate Professor",
-            phone: "+91 90000 10016",
-            email: "harish.chandra@college.edu",
+            phone: null,
+            email: null,
             status: "active",
             maxWeeklyPeriods: 20
         },
@@ -255,8 +256,8 @@ module.exports = {
             name: "Dr. Sunita Rani",
             department: "MEC",
             designation: "Assistant Professor",
-            phone: "+91 90000 10017",
-            email: "sunita.rani@college.edu",
+            phone: null,
+            email: null,
             status: "active",
             maxWeeklyPeriods: 20
         }
@@ -268,6 +269,7 @@ module.exports = {
             semester: 5,
             academicYear: "2026-27",
             room: "C-401",
+            dataSource: "real",
             rows: {
                 Monday: [
                     { period: 1, spanTo: 2, subject: "Python Programming", faculty: "Ms. B. Kusuma", room: "C-401", type: "theory" },
@@ -440,6 +442,7 @@ module.exports = {
             semester: 5,
             academicYear: "2026-27",
             room: "P-301",
+            dataSource: "placeholder",
             rows: {
                 Monday: [
                     { period: 1, subject: "Electrical Machines", faculty: "Prof. Lakshmi Devi", room: "P-301", type: "theory" },
@@ -535,6 +538,7 @@ module.exports = {
             semester: 5,
             academicYear: "2026-27",
             room: "E-201",
+            dataSource: "placeholder",
             rows: {
                 Monday: [
                     { period: 1, subject: "Linear Control Systems", faculty: "Prof. Naveen Reddy", room: "E-201", type: "theory" },
@@ -608,6 +612,7 @@ module.exports = {
             semester: 5,
             academicYear: "2026-27",
             room: "E-202",
+            dataSource: "placeholder",
             rows: {
                 Monday: [
                     { period: 2, subject: "Digital Electronics", faculty: "Dr. Kavya Rao", room: "E-202", type: "theory" },
@@ -675,6 +680,7 @@ module.exports = {
             semester: 5,
             academicYear: "2026-27",
             room: "M-501",
+            dataSource: "placeholder",
             rows: {
                 Monday: [
                     { period: 1, subject: "Kinematics of Machinery", faculty: "Prof. Harish Chandra", room: "M-501", type: "theory" },

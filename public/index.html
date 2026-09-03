@@ -53,7 +53,7 @@
 
       <div class="topbar-title">
         <h1 id="viewTitle">Dashboard</h1>
-        <p id="topbarMeta">Loading…</p>
+        <p id="topbarMeta" data-loading-placeholder>Loading…</p>
       </div>
 
       <div class="topbar-user">
@@ -150,7 +150,7 @@
                 <tbody id="schedBody"></tbody>
               </table>
             </div>
-            <div id="schedState" class="notice notice-info" style="margin-top:12px;">Loading schedule…</div>
+            <div id="schedState" class="notice notice-info" data-loading-placeholder style="margin-top:12px;">Loading schedule…</div>
           </div>
         </div>
 
@@ -277,7 +277,7 @@
             <label class="field inline"><span>Class</span><select id="manageFilterClass"></select></label>
           </div>
           <div class="card-body">
-            <div id="manageList"><p class="muted">Loading entries…</p></div>
+            <div id="manageList"><p class="muted" data-loading-placeholder>Loading entries…</p></div>
           </div>
         </div>
       </section>
@@ -315,6 +315,7 @@
               <label class="field inline"><span>Class</span><select id="availClass"></select></label>
             </div>
             <div class="card-body">
+              <div id="availProvenance"></div>
               <div class="table-scroll">
                 <table class="timetable">
                   <thead id="availHead"></thead>
@@ -484,6 +485,7 @@ Ms. G. Sandhya Rani, FREE, FREE, Big Data &amp; Cloud Computing"></textarea>
           </div>
           <div class="card-body">
             <p class="muted" id="ttMeta" style="margin-bottom:12px;"></p>
+            <div id="ttProvenance"></div>
             <div class="table-scroll">
               <table class="timetable">
                 <thead id="ttHead"></thead>
@@ -495,7 +497,7 @@ Ms. G. Sandhya Rani, FREE, FREE, Big Data &amp; Cloud Computing"></textarea>
               <span><i class="swatch swatch-free"></i> Free period</span>
               <span><i class="swatch swatch-sel"></i> Selected</span>
             </div>
-            <div id="ttState" class="notice notice-info" style="margin-top:12px;">Loading timetable…</div>
+            <div id="ttState" class="notice notice-info" data-loading-placeholder style="margin-top:12px;">Loading timetable…</div>
           </div>
         </div>
       </section>
@@ -705,7 +707,7 @@ Ms. G. Sandhya Rani, FREE, FREE, Big Data &amp; Cloud Computing"></textarea>
           <div class="card-body">
             <div class="stats compact" id="validationStats"></div>
             <div id="validationBody" style="margin-top:18px;">
-              <p class="muted">Loading the validation report…</p>
+              <p class="muted" data-loading-placeholder>Loading the validation report…</p>
             </div>
           </div>
         </div>

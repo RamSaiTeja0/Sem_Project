@@ -47,9 +47,25 @@ function findChromium() {
     }
 }
 
-/** Every view a branch account can reach from the sidebar. */
-const VIEWS = ['dashboard', 'schedule', 'availability', 'timetable',
-               'manage', 'subjects', 'classes', 'faculty', 'reports'];
+/**
+ * EVERY view a branch account can reach from the sidebar — not a sample. A
+ * screen nobody tests is where the next leak or stuck spinner will be.
+ */
+const VIEWS = ['dashboard', 'schedule', 'substitute', 'availability', 'import',
+               'timetable', 'manage', 'subjects', 'classes', 'faculty',
+               'reports', 'validation', 'about'];
+
+/**
+ * A stuck screen is detected STRUCTURALLY, not by scanning for the word
+ * "loading": that word appears in ordinary prose ("Errors block a timetable
+ * from loading"), and a check that cries wolf is worse than no check. Every
+ * element that exists only until real content replaces it carries
+ * `data-loading-placeholder`, so one still on screen is genuinely stuck.
+ */
+function stillLoading(page) {
+    return page.$$eval('[data-loading-placeholder]',
+        list => list.filter(el => el.offsetParent !== null).map(el => el.id || el.textContent.trim()));
+}
 
 async function signIn(page, username) {
     await page.goto(`${BASE}/login`);
@@ -153,7 +169,10 @@ async function run(playwright) {
 
             await checkAsync(`${branch}: no other branch is named on any screen`, async () => {
                 for (const view of VIEWS) {
-                    await page.click(`.nav-item[data-view="${view}"]`);
+                    const nav = await page.$(`.nav-item[data-view="${view}"]`);
+                    // A screen hidden for this role is not a leak; skip it.
+                    if (!nav || !(await nav.evaluate(el => el.offsetParent !== null))) continue;
+                    await nav.click();
                     await page.waitForTimeout(700);
                     const text = await visibleText(page);
                     for (const other of others) {
@@ -203,12 +222,32 @@ async function run(playwright) {
                     'the branch application asked for something it is not allowed to have');
             });
 
-            await checkAsync(`${branch}: nothing on screen is still saying "Loading"`, async () => {
-                await page.click('.nav-item[data-view="dashboard"]');
-                await page.waitForTimeout(500);
-                const text = await visibleText(page);
-                assert.ok(!/Loading/i.test(text),
-                    'a dropdown or panel is stuck on "Loading"');
+            await checkAsync(`${branch}: no screen is stuck loading, and no dropdown is empty`, async () => {
+                for (const view of VIEWS) {
+                    const nav = await page.$(`.nav-item[data-view="${view}"]`);
+                    if (!nav || !(await nav.evaluate(el => el.offsetParent !== null))) continue;
+                    await nav.click();
+                    await page.waitForTimeout(700);
+
+                    // "Still loading" and "stuck loading" look identical in a
+                    // single sample. Give the view a fair chance to settle and
+                    // only fail when it never does.
+                    let pending = await stillLoading(page);
+                    for (let waited = 0; waited < 8000 && pending.length; waited += 400) {
+                        await page.waitForTimeout(400);
+                        pending = await stillLoading(page);
+                    }
+                    assert.deepStrictEqual(pending, [],
+                        `the ${view} view never finished loading`);
+
+                    // An empty visible dropdown is the other half of the
+                    // original dashboard complaint.
+                    const empty = await page.$$eval(`#view-${view} select`,
+                        list => list.filter(s => s.offsetParent !== null && s.options.length === 0)
+                            .map(s => '#' + s.id));
+                    assert.deepStrictEqual(empty, [],
+                        `the ${view} view has an empty dropdown`);
+                }
             });
 
             await context.close();

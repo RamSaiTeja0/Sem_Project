@@ -107,6 +107,18 @@ async function run() {
             assert.strictEqual(a.password, undefined, 'accounts must not carry passwords'));
     });
 
+    check('the session key is never a value published with the source', () => {
+        const config = require('../src/config');
+        // A hardcoded fallback would let anyone who can read this repository
+        // mint a valid cookie for any account in any branch on a deployment
+        // that forgot to set SESSION_SECRET. Unset means random-per-boot.
+        assert.notStrictEqual(config.sessionSecret, 'tecsubstitution-dev-secret',
+            'the old published fallback must not be in use');
+        assert.ok(config.sessionSecret.length >= 32, 'the signing key must not be trivially short');
+        assert.strictEqual(typeof config.sessionSecretConfigured, 'boolean',
+            'the app must know whether a real secret was supplied');
+    });
+
     const badPassword = await call(OPEN, 'POST', '/api/auth/login', { username: 'admin', password: 'nope' });
     check('a wrong password is rejected with 401 and no cookie', () => {
         assert.strictEqual(badPassword.status, 401);
@@ -172,6 +184,30 @@ async function run() {
     check('an anonymous API call is 401 JSON, never dashboard HTML', () => {
         assert.strictEqual(anonApi.status, 401);
         assert.strictEqual(anonApi.body.code, 'UNAUTHENTICATED');
+    });
+
+    // A cookie signed with the secret this project used to ship is the exact
+    // attack the random-per-boot key closes: it must authenticate nobody.
+    const forgedCookie = (() => {
+        const crypto = require('crypto');
+        const b64 = value => Buffer.from(value).toString('base64')
+            .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+        const payload = b64(JSON.stringify({
+            id: 'HOS-CME', username: 'hos.cme', name: 'Forged',
+            role: 'hos', department: 'CME', exp: Date.now() + 3600000
+        }));
+        const signature = b64(crypto.createHmac('sha256', 'tecsubstitution-dev-secret')
+            .update(payload).digest());
+        return `ts_session=${payload}.${signature}`;
+    })();
+
+    const forgedSession = await call(LOCKED, 'GET', '/api/auth/session', null, forgedCookie);
+    const forgedApi = await call(LOCKED, 'GET', '/api/faculty', null, forgedCookie);
+    check('a cookie signed with the old published secret authenticates nobody', () => {
+        assert.strictEqual(forgedSession.body.authenticated, false);
+        assert.strictEqual(forgedSession.body.user, null);
+        assert.strictEqual(forgedApi.status, 401,
+            'a forged branch session must not reach branch data');
     });
 
     const anonPage = await call(LOCKED, 'GET', '/dashboard');

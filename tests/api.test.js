@@ -179,8 +179,10 @@ async function run() {
         assert.strictEqual(member.id, 'FAC001');
         assert.strictEqual(member.department, 'CME');
         assert.ok(member.designation, 'designation is reported');
-        assert.ok(member.phone, 'phone is reported');
-        assert.match(member.email, /@/);
+        // Contact fields are always present in the shape and are never
+        // invented: they stay null until a real one is entered.
+        assert.ok('phone' in member && 'email' in member, 'contact fields are reported');
+        if (member.email) assert.match(member.email, /@/);
         assert.strictEqual(member.status, 'active');
         assert.ok(member.busyPeriods > 0 && member.freePeriods > 0);
     });

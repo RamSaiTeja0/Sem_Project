@@ -61,10 +61,25 @@ check('the roster covers all four branches, each with a profile', () => {
     assert.ok(stats.length >= 15 && stats.length <= 25, `roster of ${stats.length} is outside 15-25`);
     stats.forEach(f => {
         assert.ok(f.designation, `${f.name} has no designation`);
-        assert.ok(f.phone, `${f.name} has no phone`);
-        assert.match(f.email || '', /^[^\s@]+@[^\s@]+\.[^\s@]+$/, `${f.name} has no valid email`);
         assert.strictEqual(f.status, 'active');
+        // Contact details are OPTIONAL and are never invented: none was
+        // supplied with the real timetable, so the fields exist but are null
+        // until someone enters a genuine one. What must hold is that whatever
+        // IS present is well formed.
+        assert.ok('phone' in f && 'email' in f, `${f.name} is missing the contact fields`);
+        if (f.phone) assert.match(f.phone, /^[+0-9\s\-()]{7,25}$/, `${f.name} has a malformed phone`);
+        if (f.email) {
+            assert.match(f.email, /^[^\s@]+@[^\s@]+\.[^\s@]+$/, `${f.name} has a malformed email`);
+        }
     });
+
+    // Guard against fabricated contact data creeping back in: a roster where
+    // every number is one more than the last is generated, not real.
+    const phones = stats.map(f => f.phone).filter(Boolean);
+    const digits = phones.map(p => parseInt(String(p).replace(/\D/g, ''), 10)).filter(Number.isFinite);
+    const sequential = digits.length > 2 &&
+        digits.slice(1).every((n, i) => n === digits[i] + 1);
+    assert.ok(!sequential, 'the phone numbers are a generated sequence, not real contact details');
 });
 
 check('faculty stats can report availability at one slot', () => {
