@@ -1,25 +1,15 @@
 /**
  * Demo academic dataset — realistic academic data for demonstrating the app.
  *
- * 17 faculty across 4 branches, 5 classes, 34 subjects,
- * 10 rooms, Monday-Saturday, periods 1-7.
- *
- * GENERATED FILE — produced by tools/generateDemoTimetable.js and committed as
- * plain data. Edit the plan in that script and re-run it rather than editing
- * the schedule here by hand; the generator is what guarantees that:
- *   - no faculty is scheduled in two classes at the same day + period
- *   - no room hosts two classes at the same day + period
- *   - every faculty member has both busy and free periods, so the
- *     substitution lookup always has something to show
- *
- * This module is the fallback dataset. When DATABASE_URL is configured the
- * store loads the timetable from PostgreSQL instead and seeds it from here.
+ * 21 faculty across 3 branches (CME, EEE, MEC),
+ * CME-A (2026-27), EEE-B / DEEE-B (2025-2026), and MEC-A / DME (2026-27) timetables,
+ * Monday-Saturday, periods 1-7.
  */
 
 module.exports = {
     meta: {
         institution: "ADITYA INSTITUTE OF TECHNOLOGY AND MANAGEMENT",
-        title: "II SHIFT POLYTECHNIC C23 - V SEM TIME TABLE",
+        title: "POLYTECHNIC C23 - V SEM TIME TABLE",
         academicYear: "2026-27",
         wef: "08-06-2026",
         primaryClass: "CME-A",
@@ -36,24 +26,20 @@ module.exports = {
         }
     },
     departments: [
-        { code: "EE", name: "Electrical Engineering" },
-        { code: "ECE", name: "Electronics and Communication Engineering" },
-        { code: "MEC", name: "Mechanical Engineering" },
-        { code: "CME", name: "Computer Engineering" }
+        { code: "CME", name: "Computer Engineering" },
+        { code: "EEE", name: "Electrical and Electronics Engineering" },
+        { code: "MEC", name: "Mechanical Engineering" }
     ],
     rooms: [
         { code: "C-401", name: "Block C — Room 401", type: "classroom", capacity: 60 },
-        { code: "P-301", name: "Block P — Room 301", type: "classroom", capacity: 60 },
         { code: "E-201", name: "Block E — Room 201", type: "classroom", capacity: 60 },
-        { code: "E-202", name: "Block E — Room 202", type: "classroom", capacity: 60 },
         { code: "M-501", name: "Block M — Room 501", type: "classroom", capacity: 60 },
         { code: "CM-LAB-1", name: "Computer Engineering Lab", type: "lab", capacity: 35 },
         { code: "EE-LAB-1", name: "Electrical Machines Lab", type: "lab", capacity: 30 },
-        { code: "EC-LAB-1", name: "Electronics Lab 1", type: "lab", capacity: 30 },
-        { code: "EC-LAB-2", name: "Electronics Lab 2", type: "lab", capacity: 30 },
         { code: "ME-WORKSHOP", name: "Mechanical Workshop", type: "lab", capacity: 40 }
     ],
     subjects: [
+        // CME — 9 Subjects
         { code: "CM-501", name: "Industrial Management and Entrepreneurship", department: "CME", type: "theory" },
         { code: "CM-502", name: "Big Data & Cloud Computing", department: "CME", type: "theory" },
         { code: "CM-503", name: "Android Programming", department: "CME", type: "theory" },
@@ -63,39 +49,38 @@ module.exports = {
         { code: "CM-507", name: "Python Programming Lab", department: "CME", type: "lab" },
         { code: "CM-508", name: "Life Skills", department: "CME", type: "theory" },
         { code: "CM-509", name: "Project work", department: "CME", type: "theory" },
-        { code: "EE501", name: "Power Systems", department: "EE", type: "theory" },
-        { code: "EE502", name: "Electrical Machines", department: "EE", type: "theory" },
-        { code: "EE503", name: "Control Systems", department: "EE", type: "theory" },
-        { code: "EE504", name: "Power Electronics", department: "EE", type: "theory" },
-        { code: "EE505", name: "Electromagnetic Fields", department: "EE", type: "theory" },
-        { code: "EE506", name: "Transmission and Distribution", department: "EE", type: "theory" },
-        { code: "EE551", name: "Electrical Machines Lab", department: "EE", type: "lab" },
-        { code: "EE552", name: "Power Systems Lab", department: "EE", type: "lab" },
-        { code: "EC501", name: "Digital Electronics", department: "ECE", type: "theory" },
-        { code: "EC502", name: "Signals and Systems", department: "ECE", type: "theory" },
-        { code: "EC503", name: "Microprocessors", department: "ECE", type: "theory" },
-        { code: "EC504", name: "Communication Systems", department: "ECE", type: "theory" },
-        { code: "EC505", name: "VLSI Design", department: "ECE", type: "theory" },
-        { code: "EC506", name: "Linear Control Systems", department: "ECE", type: "theory" },
-        { code: "EC551", name: "Digital Electronics Lab", department: "ECE", type: "lab" },
-        { code: "EC552", name: "Microprocessors Lab", department: "ECE", type: "lab" },
-        { code: "EC553", name: "Communication Systems Lab", department: "ECE", type: "lab" },
-        { code: "ME501", name: "Engineering Mechanics", department: "MEC", type: "theory" },
-        { code: "ME502", name: "Thermodynamics", department: "MEC", type: "theory" },
-        { code: "ME503", name: "Manufacturing Technology", department: "MEC", type: "theory" },
-        { code: "ME504", name: "Fluid Mechanics", department: "MEC", type: "theory" },
-        { code: "ME505", name: "Kinematics of Machinery", department: "MEC", type: "theory" },
-        { code: "ME506", name: "Material Science", department: "MEC", type: "theory" },
-        { code: "ME551", name: "Manufacturing Technology Lab", department: "MEC", type: "lab" },
-        { code: "ME552", name: "Thermodynamics Lab", department: "MEC", type: "lab" }
+        // EEE — 10 Subjects
+        { code: "EE-401", name: "Electrical Installation & Estimation", department: "EEE", type: "theory" },
+        { code: "EE-402", name: "Electrical Machines-II", department: "EEE", type: "theory" },
+        { code: "EE-403", name: "Power System – I", department: "EEE", type: "theory" },
+        { code: "EE-404", name: "Power Electronics & PLC", department: "EEE", type: "theory" },
+        { code: "EE-405", name: "General Mechanical Engineering", department: "EEE", type: "theory" },
+        { code: "EE-406", name: "Electrical Engineering Drawing", department: "EEE", type: "theory" },
+        { code: "EE-407", name: "Electrical Machines-II Laboratory", department: "EEE", type: "lab" },
+        { code: "EE-408", name: "Communications Skills Laboratory", department: "EEE", type: "lab" },
+        { code: "EE-409", name: "Power Electronics Laboratory", department: "EEE", type: "lab" },
+        { code: "EE-410", name: "Hybrid Power Systems Laboratory", department: "EEE", type: "lab" },
+        // MEC — 11 Subjects
+        { code: "M-501", name: "Industrial Management and Entrepreneurship", department: "MEC", type: "theory" },
+        { code: "M-502", name: "Industrial Engineering and Quality Control", department: "MEC", type: "theory" },
+        { code: "M-503", name: "Green Energy & Thermal Systems", department: "MEC", type: "theory" },
+        { code: "M-504", name: "Industrial Automation & 3D Printing", department: "MEC", type: "theory" },
+        { code: "M-505", name: "Refrigeration and Air Conditioning", department: "MEC", type: "theory" },
+        { code: "M-506", name: "CAD Lab Practice", department: "MEC", type: "lab" },
+        { code: "M-507", name: "CAM Lab Practice", department: "MEC", type: "lab" },
+        { code: "M-508", name: "Life Skills Lab", department: "MEC", type: "lab" },
+        { code: "M-509", name: "Refrigeration and Air Conditioning Lab", department: "MEC", type: "lab" },
+        { code: "M-510", name: "Training Cum Production Work Shop", department: "MEC", type: "lab" },
+        { code: "M-511", name: "Project Work", department: "MEC", type: "lab" }
     ],
     faculty: [
+        // CME Faculty
         {
             id: "FAC001",
             name: "Sri B. Gopala Rao",
             department: "CME",
             designation: "Professor",
-            phone: "+91 90000 10001",
+            phone: "9493438305",
             email: "b.gopala.rao@college.edu",
             status: "active",
             maxWeeklyPeriods: 20
@@ -105,7 +90,7 @@ module.exports = {
             name: "Ms. G. Sandhya Rani",
             department: "CME",
             designation: "Associate Professor",
-            phone: "+91 90000 10002",
+            phone: "8142237495",
             email: "g.sandhya.rani@college.edu",
             status: "active",
             maxWeeklyPeriods: 20
@@ -115,7 +100,7 @@ module.exports = {
             name: "Ms. Debadatta Bhattacharya",
             department: "CME",
             designation: "Assistant Professor",
-            phone: "+91 90000 10003",
+            phone: "7396726904",
             email: "debadatta.bhattacharya@college.edu",
             status: "active",
             maxWeeklyPeriods: 20
@@ -125,7 +110,7 @@ module.exports = {
             name: "Mrs. A. Sravanthi",
             department: "CME",
             designation: "Assistant Professor",
-            phone: "+91 90000 10004",
+            phone: "7842459355",
             email: "a.sravanthi@college.edu",
             status: "active",
             maxWeeklyPeriods: 20
@@ -135,7 +120,7 @@ module.exports = {
             name: "Ms. B. Kusuma",
             department: "CME",
             designation: "Assistant Professor",
-            phone: "+91 90000 10005",
+            phone: "9392980517",
             email: "b.kusuma@college.edu",
             status: "active",
             maxWeeklyPeriods: 20
@@ -145,7 +130,7 @@ module.exports = {
             name: "Mrs. K. Anitha",
             department: "CME",
             designation: "Assistant Professor",
-            phone: "+91 90000 10006",
+            phone: "9963206541",
             email: "k.anitha@college.edu",
             status: "active",
             maxWeeklyPeriods: 20
@@ -155,108 +140,150 @@ module.exports = {
             name: "Mr. Ch. Sai Kishore",
             department: "CME",
             designation: "Assistant Professor",
-            phone: "+91 90000 10007",
+            phone: "7801056541",
             email: "ch.sai.kishore@college.edu",
             status: "active",
             maxWeeklyPeriods: 20
         },
+        // EEE Faculty
         {
             id: "FAC008",
-            name: "Dr. Suresh Babu",
-            department: "EE",
-            designation: "Professor",
-            phone: "+91 90000 10008",
-            email: "suresh.babu@college.edu",
+            name: "A.MANINDRA",
+            department: "EEE",
+            designation: "Assistant Professor",
+            phone: null,
+            email: "a.manindra@college.edu",
             status: "active",
             maxWeeklyPeriods: 20
         },
         {
             id: "FAC009",
-            name: "Prof. Lakshmi Devi",
-            department: "EE",
-            designation: "Associate Professor",
-            phone: "+91 90000 10009",
-            email: "lakshmi.devi@college.edu",
+            name: "M.DALAYYA",
+            department: "EEE",
+            designation: "Assistant Professor",
+            phone: null,
+            email: "m.dalayya@college.edu",
             status: "active",
             maxWeeklyPeriods: 20
         },
         {
             id: "FAC010",
-            name: "Dr. Mahesh Gupta",
-            department: "EE",
+            name: "T.RAJENDRA PRASAD",
+            department: "EEE",
             designation: "Assistant Professor",
-            phone: "+91 90000 10010",
-            email: "mahesh.gupta@college.edu",
+            phone: null,
+            email: "t.rajendra.prasad@college.edu",
             status: "active",
             maxWeeklyPeriods: 20
         },
         {
             id: "FAC011",
-            name: "Prof. Naveen Reddy",
-            department: "ECE",
-            designation: "Professor",
-            phone: "+91 90000 10011",
-            email: "naveen.reddy@college.edu",
+            name: "D.SAGAR KUMAR",
+            department: "EEE",
+            designation: "Assistant Professor",
+            phone: null,
+            email: "d.sagar.kumar@college.edu",
             status: "active",
             maxWeeklyPeriods: 20
         },
         {
             id: "FAC012",
-            name: "Dr. Kavya Rao",
-            department: "ECE",
-            designation: "Associate Professor",
-            phone: "+91 90000 10012",
-            email: "kavya.rao@college.edu",
+            name: "P.DAMODHARARAO",
+            department: "EEE",
+            designation: "Assistant Professor",
+            phone: null,
+            email: "p.damodhararao@college.edu",
             status: "active",
             maxWeeklyPeriods: 20
         },
         {
             id: "FAC013",
-            name: "Dr. Anitha Menon",
-            department: "ECE",
+            name: "G.BHARATH REDDY",
+            department: "EEE",
             designation: "Assistant Professor",
-            phone: "+91 90000 10013",
-            email: "anitha.menon@college.edu",
+            phone: null,
+            email: "g.bharath.reddy@college.edu",
             status: "active",
             maxWeeklyPeriods: 20
         },
         {
             id: "FAC014",
-            name: "Prof. Ravi Teja",
-            department: "ECE",
+            name: "T.PAVAN VARMA",
+            department: "EEE",
             designation: "Assistant Professor",
-            phone: "+91 90000 10014",
-            email: "ravi.teja@college.edu",
+            phone: null,
+            email: "t.pavan.varma@college.edu",
             status: "active",
             maxWeeklyPeriods: 20
         },
+        // MEC Faculty
         {
             id: "FAC015",
-            name: "Dr. Rajesh Pillai",
+            name: "Sri B.Gopala Rao",
             department: "MEC",
             designation: "Professor",
-            phone: "+91 90000 10015",
-            email: "rajesh.pillai@college.edu",
+            phone: "9493438305",
+            email: "b.gopala.rao.mec@college.edu",
             status: "active",
             maxWeeklyPeriods: 20
         },
         {
             id: "FAC016",
-            name: "Prof. Harish Chandra",
+            name: "Sri P.Suresh",
             department: "MEC",
             designation: "Associate Professor",
-            phone: "+91 90000 10016",
-            email: "harish.chandra@college.edu",
+            phone: "9642408351",
+            email: "p.suresh@college.edu",
             status: "active",
             maxWeeklyPeriods: 20
         },
         {
             id: "FAC017",
-            name: "Dr. Sunita Rani",
+            name: "Sri B.Siva Srinivas",
             department: "MEC",
             designation: "Assistant Professor",
-            phone: "+91 90000 10017",
-            email: "sunita.rani@college.edu",
+            phone: "9491816614",
+            email: "b.siva.srinivas@college.edu",
+            status: "active",
+            maxWeeklyPeriods: 20
+        },
+        {
+            id: "FAC018",
+            name: "Sri K.Ramachandra Rao",
+            department: "MEC",
+            designation: "Assistant Professor",
+            phone: "8688007893",
+            email: "k.ramachandra.rao@college.edu",
+            status: "active",
+            maxWeeklyPeriods: 20
+        },
+        {
+            id: "FAC019",
+            name: "Sri P.Damodhara Rao",
+            department: "MEC",
+            designation: "Assistant Professor",
+            phone: "8317526759",
+            email: "p.damodhara.rao@college.edu",
+            status: "active",
+            maxWeeklyPeriods: 20
+        },
+        {
+            id: "FAC020",
+            name: "Smt.K.Anitha",
+            department: "MEC",
+            designation: "Assistant Professor",
+            phone: "9963206541",
+            email: "k.anitha.mec@college.edu",
+            status: "active",
+            maxWeeklyPeriods: 20
+        },
+        {
+            id: "FAC021",
+            name: "Sri K.Prasad",
+            department: "MEC",
+            designation: "Assistant Professor",
+            phone: "9581177640",
+            email: "k.prasad@college.edu",
             status: "active",
             maxWeeklyPeriods: 20
         }
@@ -344,7 +371,7 @@ module.exports = {
                         room: "C-401",
                         type: "theory"
                     },
-                    { period: 5, spanTo: 7, subject: "Life Skills Lab", faculty: "Mrs. K. Anitha", room: "CM-LAB-1", type: "lab" }
+                    { period: 5, spanTo: 7, subject: "Life Skills", faculty: "Mrs. K. Anitha", room: "CM-LAB-1", type: "lab" }
                 ],
                 Thursday: [
                     {
@@ -435,230 +462,94 @@ module.exports = {
             }
         },
         {
-            class: "EE-A",
-            department: "EE",
+            class: "EEE-B",
+            department: "EEE",
             semester: 5,
-            academicYear: "2026-27",
-            room: "P-301",
+            academicYear: "2025-2026",
+            room: "E-201",
             rows: {
                 Monday: [
-                    { period: 1, subject: "Electrical Machines", faculty: "Prof. Lakshmi Devi", room: "P-301", type: "theory" },
-                    {
-                        period: 2,
-                        subject: "Transmission and Distribution",
-                        faculty: "Dr. Mahesh Gupta",
-                        room: "P-301",
-                        type: "theory"
-                    },
-                    { period: 3, subject: "Electrical Machines", faculty: "Prof. Lakshmi Devi", room: "P-301", type: "theory" },
-                    { period: 4, subject: "Electromagnetic Fields", faculty: "Prof. Lakshmi Devi", room: "P-301", type: "theory" },
-                    { period: 5, spanTo: 7, subject: "Power Systems Lab", faculty: "Dr. Suresh Babu", room: "EE-LAB-1", type: "lab" }
-                ],
-                Tuesday: [
-                    { period: 1, subject: "Power Systems", faculty: "Dr. Suresh Babu", room: "P-301", type: "theory" },
-                    { period: 2, subject: "Control Systems", faculty: "Dr. Mahesh Gupta", room: "P-301", type: "theory" },
-                    {
-                        period: 3,
-                        subject: "Transmission and Distribution",
-                        faculty: "Dr. Mahesh Gupta",
-                        room: "P-301",
-                        type: "theory"
-                    },
-                    { period: 4, spanTo: 5, subject: "Power Electronics", faculty: "Dr. Suresh Babu", room: "P-301", type: "theory" },
-                    { period: 7, subject: "Electrical Machines", faculty: "Prof. Lakshmi Devi", room: "P-301", type: "theory" }
-                ],
-                Wednesday: [
-                    { period: 1, subject: "Power Systems", faculty: "Dr. Suresh Babu", room: "P-301", type: "theory" },
-                    {
-                        period: 3,
-                        subject: "Transmission and Distribution",
-                        faculty: "Dr. Mahesh Gupta",
-                        room: "P-301",
-                        type: "theory"
-                    },
-                    { period: 4, subject: "Power Electronics", faculty: "Dr. Suresh Babu", room: "P-301", type: "theory" },
-                    { period: 5, subject: "Electrical Machines", faculty: "Prof. Lakshmi Devi", room: "P-301", type: "theory" },
-                    { period: 6, subject: "Electromagnetic Fields", faculty: "Prof. Lakshmi Devi", room: "P-301", type: "theory" }
-                ],
-                Thursday: [
-                    {
-                        period: 1,
-                        subject: "Transmission and Distribution",
-                        faculty: "Dr. Mahesh Gupta",
-                        room: "P-301",
-                        type: "theory"
-                    },
-                    { period: 2, subject: "Control Systems", faculty: "Dr. Mahesh Gupta", room: "P-301", type: "theory" },
-                    { period: 3, subject: "Power Electronics", faculty: "Dr. Suresh Babu", room: "P-301", type: "theory" },
+                    { period: 1, subject: "Electrical Installation & Estimation", faculty: "A.MANINDRA", room: "E-201", type: "theory" },
+                    { period: 2, subject: "Electrical Machines-II", faculty: "M.DALAYYA", room: "E-201", type: "theory" },
+                    { period: 3, subject: "Power System – I", faculty: "T.RAJENDRA PRASAD", room: "E-201", type: "theory" },
+                    { period: 4, subject: "Power Electronics & PLC", faculty: "D.SAGAR KUMAR", room: "E-201", type: "theory" },
                     {
                         period: 5,
                         spanTo: 7,
-                        subject: "Electrical Machines Lab",
-                        faculty: "Prof. Lakshmi Devi",
+                        subject: "Electrical Machines-II Laboratory",
+                        faculty: "M.DALAYYA",
                         room: "EE-LAB-1",
                         type: "lab"
                     }
                 ],
-                Friday: [
-                    {
-                        period: 1,
-                        subject: "Transmission and Distribution",
-                        faculty: "Dr. Mahesh Gupta",
-                        room: "P-301",
-                        type: "theory"
-                    },
-                    { period: 2, subject: "Power Electronics", faculty: "Dr. Suresh Babu", room: "P-301", type: "theory" },
-                    { period: 3, subject: "Power Systems", faculty: "Dr. Suresh Babu", room: "P-301", type: "theory" },
-                    { period: 5, subject: "Electrical Machines", faculty: "Prof. Lakshmi Devi", room: "P-301", type: "theory" },
-                    { period: 6, subject: "Control Systems", faculty: "Dr. Mahesh Gupta", room: "P-301", type: "theory" },
-                    { period: 7, subject: "Electromagnetic Fields", faculty: "Prof. Lakshmi Devi", room: "P-301", type: "theory" }
-                ],
-                Saturday: [
-                    { period: 1, subject: "Electromagnetic Fields", faculty: "Prof. Lakshmi Devi", room: "P-301", type: "theory" },
-                    { period: 2, spanTo: 3, subject: "Power Systems", faculty: "Dr. Suresh Babu", room: "P-301", type: "theory" },
-                    { period: 4, subject: "Electromagnetic Fields", faculty: "Prof. Lakshmi Devi", room: "P-301", type: "theory" },
-                    { period: 5, subject: "Control Systems", faculty: "Dr. Mahesh Gupta", room: "P-301", type: "theory" },
-                    { period: 7, subject: "Control Systems", faculty: "Dr. Mahesh Gupta", room: "P-301", type: "theory" }
-                ]
-            }
-        },
-        {
-            class: "ECE-A",
-            department: "ECE",
-            semester: 5,
-            academicYear: "2026-27",
-            room: "E-201",
-            rows: {
-                Monday: [
-                    { period: 1, subject: "Linear Control Systems", faculty: "Prof. Naveen Reddy", room: "E-201", type: "theory" },
-                    { period: 3, subject: "VLSI Design", faculty: "Dr. Kavya Rao", room: "E-201", type: "theory" },
-                    { period: 4, subject: "Communication Systems", faculty: "Prof. Ravi Teja", room: "E-201", type: "theory" },
+                Tuesday: [
+                    { period: 1, subject: "Electrical Machines-II", faculty: "M.DALAYYA", room: "E-201", type: "theory" },
+                    { period: 2, subject: "Electrical Installation & Estimation", faculty: "A.MANINDRA", room: "E-201", type: "theory" },
+                    { period: 3, subject: "Power System – I", faculty: "T.RAJENDRA PRASAD", room: "E-201", type: "theory" },
+                    { period: 4, subject: "General Mechanical Engineering", faculty: "P.DAMODHARARAO", room: "E-201", type: "theory" },
                     {
                         period: 5,
                         spanTo: 7,
-                        subject: "Digital Electronics Lab",
-                        faculty: "Prof. Naveen Reddy",
-                        room: "EC-LAB-1",
+                        subject: "Hybrid Power Systems Laboratory",
+                        faculty: "A.MANINDRA",
+                        room: "EE-LAB-1",
                         type: "lab"
                     }
                 ],
-                Tuesday: [
-                    { period: 1, subject: "Communication Systems", faculty: "Prof. Ravi Teja", room: "E-201", type: "theory" },
-                    { period: 2, subject: "Digital Electronics", faculty: "Prof. Naveen Reddy", room: "E-201", type: "theory" },
-                    { period: 5, subject: "VLSI Design", faculty: "Dr. Kavya Rao", room: "E-201", type: "theory" },
-                    { period: 6, subject: "Signals and Systems", faculty: "Dr. Kavya Rao", room: "E-201", type: "theory" },
-                    { period: 7, subject: "Communication Systems", faculty: "Prof. Ravi Teja", room: "E-201", type: "theory" }
-                ],
                 Wednesday: [
-                    { period: 1, subject: "Linear Control Systems", faculty: "Prof. Naveen Reddy", room: "E-201", type: "theory" },
-                    { period: 2, subject: "Microprocessors", faculty: "Dr. Anitha Menon", room: "E-201", type: "theory" },
-                    { period: 3, subject: "VLSI Design", faculty: "Dr. Kavya Rao", room: "E-201", type: "theory" },
+                    { period: 1, subject: "Electrical Machines-II", faculty: "M.DALAYYA", room: "E-201", type: "theory" },
+                    { period: 2, subject: "Power System – I", faculty: "T.RAJENDRA PRASAD", room: "E-201", type: "theory" },
+                    { period: 3, subject: "Power Electronics & PLC", faculty: "D.SAGAR KUMAR", room: "E-201", type: "theory" },
+                    { period: 4, subject: "General Mechanical Engineering", faculty: "P.DAMODHARARAO", room: "E-201", type: "theory" },
                     {
                         period: 5,
                         spanTo: 7,
-                        subject: "Microprocessors Lab",
-                        faculty: "Dr. Anitha Menon",
-                        room: "EC-LAB-1",
+                        subject: "Communications Skills Laboratory",
+                        faculty: "T.PAVAN VARMA",
+                        room: "EE-LAB-1",
                         type: "lab"
                     }
                 ],
                 Thursday: [
+                    { period: 1, subject: "Electrical Machines-II", faculty: "M.DALAYYA", room: "E-201", type: "theory" },
+                    { period: 2, subject: "Power System – I", faculty: "T.RAJENDRA PRASAD", room: "E-201", type: "theory" },
+                    { period: 3, subject: "Electrical Installation & Estimation", faculty: "A.MANINDRA", room: "E-201", type: "theory" },
+                    { period: 4, subject: "General Mechanical Engineering", faculty: "P.DAMODHARARAO", room: "E-201", type: "theory" },
                     {
-                        period: 1,
-                        spanTo: 2,
-                        subject: "Digital Electronics",
-                        faculty: "Prof. Naveen Reddy",
+                        period: 5,
+                        spanTo: 7,
+                        subject: "Electrical Engineering Drawing",
+                        faculty: "G.BHARATH REDDY",
+                        room: "E-201",
+                        type: "theory"
+                    }
+                ],
+                Friday: [
+                    { period: 1, subject: "Electrical Machines-II", faculty: "M.DALAYYA", room: "E-201", type: "theory" },
+                    { period: 2, subject: "Power Electronics & PLC", faculty: "D.SAGAR KUMAR", room: "E-201", type: "theory" },
+                    { period: 3, subject: "General Mechanical Engineering", faculty: "P.DAMODHARARAO", room: "E-201", type: "theory" },
+                    { period: 4, subject: "Electrical Installation & Estimation", faculty: "A.MANINDRA", room: "E-201", type: "theory" },
+                    {
+                        period: 5,
+                        spanTo: 7,
+                        subject: "Power Electronics Laboratory",
+                        faculty: "T.RAJENDRA PRASAD",
+                        room: "EE-LAB-1",
+                        type: "lab"
+                    }
+                ],
+                Saturday: [
+                    { period: 1, subject: "Power Electronics & PLC", faculty: "D.SAGAR KUMAR", room: "E-201", type: "theory" },
+                    {
+                        period: 2,
+                        spanTo: 4,
+                        subject: "Electrical Engineering Drawing",
+                        faculty: "G.BHARATH REDDY",
                         room: "E-201",
                         type: "theory"
                     },
-                    { period: 3, subject: "Linear Control Systems", faculty: "Prof. Naveen Reddy", room: "E-201", type: "theory" },
-                    { period: 4, subject: "Signals and Systems", faculty: "Dr. Kavya Rao", room: "E-201", type: "theory" },
-                    { period: 5, subject: "Microprocessors", faculty: "Dr. Anitha Menon", room: "E-201", type: "theory" },
-                    { period: 6, subject: "Linear Control Systems", faculty: "Prof. Naveen Reddy", room: "E-201", type: "theory" },
-                    { period: 7, subject: "Communication Systems", faculty: "Prof. Ravi Teja", room: "E-201", type: "theory" }
-                ],
-                Friday: [
-                    { period: 1, subject: "VLSI Design", faculty: "Dr. Kavya Rao", room: "E-201", type: "theory" },
-                    { period: 2, subject: "Digital Electronics", faculty: "Prof. Naveen Reddy", room: "E-201", type: "theory" },
-                    { period: 3, subject: "Signals and Systems", faculty: "Dr. Kavya Rao", room: "E-201", type: "theory" },
-                    { period: 4, subject: "Microprocessors", faculty: "Dr. Anitha Menon", room: "E-201", type: "theory" },
-                    { period: 5, subject: "Signals and Systems", faculty: "Dr. Kavya Rao", room: "E-201", type: "theory" },
-                    { period: 6, subject: "Linear Control Systems", faculty: "Prof. Naveen Reddy", room: "E-201", type: "theory" },
-                    { period: 7, subject: "VLSI Design", faculty: "Dr. Kavya Rao", room: "E-201", type: "theory" }
-                ],
-                Saturday: [
-                    { period: 1, subject: "Digital Electronics", faculty: "Prof. Naveen Reddy", room: "E-201", type: "theory" },
-                    { period: 3, subject: "Signals and Systems", faculty: "Dr. Kavya Rao", room: "E-201", type: "theory" },
-                    { period: 4, subject: "Microprocessors", faculty: "Dr. Anitha Menon", room: "E-201", type: "theory" },
-                    { period: 6, subject: "Microprocessors", faculty: "Dr. Anitha Menon", room: "E-201", type: "theory" },
-                    { period: 7, subject: "Communication Systems", faculty: "Prof. Ravi Teja", room: "E-201", type: "theory" }
-                ]
-            }
-        },
-        {
-            class: "ECE-B",
-            department: "ECE",
-            semester: 5,
-            academicYear: "2026-27",
-            room: "E-202",
-            rows: {
-                Monday: [
-                    { period: 2, subject: "Digital Electronics", faculty: "Dr. Kavya Rao", room: "E-202", type: "theory" },
-                    { period: 3, subject: "Microprocessors", faculty: "Prof. Ravi Teja", room: "E-202", type: "theory" },
-                    { period: 4, subject: "Linear Control Systems", faculty: "Dr. Anitha Menon", room: "E-202", type: "theory" },
-                    { period: 5, subject: "VLSI Design", faculty: "Prof. Ravi Teja", room: "E-202", type: "theory" },
-                    { period: 7, subject: "Microprocessors", faculty: "Prof. Ravi Teja", room: "E-202", type: "theory" }
-                ],
-                Tuesday: [
-                    { period: 2, subject: "Digital Electronics", faculty: "Dr. Kavya Rao", room: "E-202", type: "theory" },
-                    { period: 3, subject: "Microprocessors", faculty: "Prof. Ravi Teja", room: "E-202", type: "theory" },
-                    { period: 4, subject: "Communication Systems", faculty: "Dr. Anitha Menon", room: "E-202", type: "theory" },
-                    { period: 5, subject: "Linear Control Systems", faculty: "Dr. Anitha Menon", room: "E-202", type: "theory" },
-                    { period: 6, subject: "Signals and Systems", faculty: "Prof. Naveen Reddy", room: "E-202", type: "theory" }
-                ],
-                Wednesday: [
-                    { period: 1, subject: "Communication Systems", faculty: "Dr. Anitha Menon", room: "E-202", type: "theory" },
-                    { period: 2, subject: "Signals and Systems", faculty: "Prof. Naveen Reddy", room: "E-202", type: "theory" },
-                    { period: 4, subject: "Linear Control Systems", faculty: "Dr. Anitha Menon", room: "E-202", type: "theory" },
-                    {
-                        period: 5,
-                        spanTo: 7,
-                        subject: "Communication Systems Lab",
-                        faculty: "Dr. Kavya Rao",
-                        room: "EC-LAB-2",
-                        type: "lab"
-                    }
-                ],
-                Thursday: [
-                    { period: 1, subject: "Digital Electronics", faculty: "Dr. Kavya Rao", room: "E-202", type: "theory" },
-                    { period: 2, subject: "Communication Systems", faculty: "Dr. Anitha Menon", room: "E-202", type: "theory" },
-                    { period: 3, subject: "Linear Control Systems", faculty: "Dr. Anitha Menon", room: "E-202", type: "theory" },
-                    { period: 4, subject: "VLSI Design", faculty: "Prof. Ravi Teja", room: "E-202", type: "theory" },
-                    { period: 5, subject: "Microprocessors", faculty: "Prof. Ravi Teja", room: "E-202", type: "theory" },
-                    { period: 6, subject: "VLSI Design", faculty: "Prof. Ravi Teja", room: "E-202", type: "theory" },
-                    { period: 7, subject: "Signals and Systems", faculty: "Prof. Naveen Reddy", room: "E-202", type: "theory" }
-                ],
-                Friday: [
-                    { period: 1, subject: "VLSI Design", faculty: "Prof. Ravi Teja", room: "E-202", type: "theory" },
-                    { period: 2, subject: "Digital Electronics", faculty: "Dr. Kavya Rao", room: "E-202", type: "theory" },
-                    { period: 3, subject: "Linear Control Systems", faculty: "Dr. Anitha Menon", room: "E-202", type: "theory" },
-                    { period: 4, subject: "Signals and Systems", faculty: "Prof. Naveen Reddy", room: "E-202", type: "theory" },
-                    {
-                        period: 5,
-                        spanTo: 7,
-                        subject: "Microprocessors Lab",
-                        faculty: "Prof. Ravi Teja",
-                        room: "EC-LAB-2",
-                        type: "lab"
-                    }
-                ],
-                Saturday: [
-                    { period: 2, subject: "VLSI Design", faculty: "Prof. Ravi Teja", room: "E-202", type: "theory" },
-                    { period: 3, subject: "Communication Systems", faculty: "Dr. Anitha Menon", room: "E-202", type: "theory" },
-                    { period: 4, subject: "Digital Electronics", faculty: "Dr. Kavya Rao", room: "E-202", type: "theory" },
-                    { period: 5, subject: "Communication Systems", faculty: "Dr. Anitha Menon", room: "E-202", type: "theory" },
-                    { period: 6, subject: "Microprocessors", faculty: "Prof. Ravi Teja", room: "E-202", type: "theory" },
-                    { period: 7, subject: "Signals and Systems", faculty: "Prof. Naveen Reddy", room: "E-202", type: "theory" }
+                    { period: 5, subject: "Library / Counselling", faculty: null, room: "E-201", type: "activity" },
+                    { period: 6, spanTo: 7, subject: "Games / Sports", faculty: null, room: "E-201", type: "activity" }
                 ]
             }
         },
@@ -670,68 +561,88 @@ module.exports = {
             room: "M-501",
             rows: {
                 Monday: [
-                    { period: 1, subject: "Kinematics of Machinery", faculty: "Prof. Harish Chandra", room: "M-501", type: "theory" },
-                    { period: 2, subject: "Engineering Mechanics", faculty: "Dr. Rajesh Pillai", room: "M-501", type: "theory" },
-                    { period: 3, subject: "Manufacturing Technology", faculty: "Dr. Sunita Rani", room: "M-501", type: "theory" },
-                    { period: 4, subject: "Fluid Mechanics", faculty: "Dr. Rajesh Pillai", room: "M-501", type: "theory" },
                     {
-                        period: 5,
-                        spanTo: 7,
-                        subject: "Manufacturing Technology Lab",
-                        faculty: "Dr. Sunita Rani",
+                        period: 1,
+                        spanTo: 3,
+                        subject: "CAD/CAM LAB",
+                        faculty: "Sri B.Siva Srinivas",
                         room: "ME-WORKSHOP",
                         type: "lab"
-                    }
+                    },
+                    { period: 4, subject: "Refrigeration and Air Conditioning", faculty: "Sri P.Damodhara Rao", room: "M-501", type: "theory" },
+                    { period: 5, subject: "Industrial Management and Entrepreneurship", faculty: "Sri B.Gopala Rao", room: "M-501", type: "theory" },
+                    { period: 6, subject: "Industrial Automation & 3D Printing", faculty: "Sri K.Ramachandra Rao", room: "M-501", type: "theory" },
+                    { period: 7, subject: "Industrial Engineering and Quality Control", faculty: "Sri P.Suresh", room: "M-501", type: "theory" }
                 ],
                 Tuesday: [
-                    { period: 1, subject: "Material Science", faculty: "Dr. Sunita Rani", room: "M-501", type: "theory" },
-                    { period: 2, subject: "Engineering Mechanics", faculty: "Dr. Rajesh Pillai", room: "M-501", type: "theory" },
-                    { period: 3, subject: "Kinematics of Machinery", faculty: "Prof. Harish Chandra", room: "M-501", type: "theory" },
-                    { period: 5, subject: "Thermodynamics", faculty: "Prof. Harish Chandra", room: "M-501", type: "theory" },
-                    { period: 6, subject: "Manufacturing Technology", faculty: "Dr. Sunita Rani", room: "M-501", type: "theory" },
-                    { period: 7, subject: "Fluid Mechanics", faculty: "Dr. Rajesh Pillai", room: "M-501", type: "theory" }
+                    {
+                        period: 1,
+                        spanTo: 3,
+                        subject: "CAD/CAM LAB",
+                        faculty: "Sri P.Damodhara Rao",
+                        room: "ME-WORKSHOP",
+                        type: "lab"
+                    },
+                    { period: 4, subject: "Green Energy & Thermal Systems", faculty: "Sri B.Siva Srinivas", room: "M-501", type: "theory" },
+                    { period: 5, subject: "Industrial Management and Entrepreneurship", faculty: "Sri B.Gopala Rao", room: "M-501", type: "theory" },
+                    { period: 6, subject: "Industrial Engineering and Quality Control", faculty: "Sri P.Suresh", room: "M-501", type: "theory" },
+                    { period: 7, subject: "TPC", faculty: null, room: "M-501", type: "activity" }
                 ],
                 Wednesday: [
-                    { period: 1, subject: "Manufacturing Technology", faculty: "Dr. Sunita Rani", room: "M-501", type: "theory" },
-                    { period: 3, subject: "Material Science", faculty: "Dr. Sunita Rani", room: "M-501", type: "theory" },
-                    { period: 4, subject: "Manufacturing Technology", faculty: "Dr. Sunita Rani", room: "M-501", type: "theory" },
-                    { period: 6, subject: "Material Science", faculty: "Dr. Sunita Rani", room: "M-501", type: "theory" }
+                    {
+                        period: 1,
+                        spanTo: 3,
+                        subject: "TCPW / R & AC Lab",
+                        faculty: "Sri P.Damodhara Rao",
+                        room: "ME-WORKSHOP",
+                        type: "lab"
+                    },
+                    { period: 4, subject: "Industrial Automation & 3D Printing", faculty: "Sri K.Ramachandra Rao", room: "M-501", type: "theory" },
+                    { period: 5, subject: "Green Energy & Thermal Systems", faculty: "Sri B.Siva Srinivas", room: "M-501", type: "theory" },
+                    { period: 6, subject: "Green Energy & Thermal Systems", faculty: "Sri B.Siva Srinivas", room: "M-501", type: "theory" },
+                    { period: 7, subject: "Refrigeration and Air Conditioning", faculty: "Sri P.Damodhara Rao", room: "M-501", type: "theory" }
                 ],
                 Thursday: [
-                    { period: 2, subject: "Thermodynamics", faculty: "Prof. Harish Chandra", room: "M-501", type: "theory" },
-                    { period: 3, subject: "Fluid Mechanics", faculty: "Dr. Rajesh Pillai", room: "M-501", type: "theory" },
-                    { period: 4, subject: "Engineering Mechanics", faculty: "Dr. Rajesh Pillai", room: "M-501", type: "theory" },
-                    { period: 5, subject: "Manufacturing Technology", faculty: "Dr. Sunita Rani", room: "M-501", type: "theory" },
-                    { period: 6, subject: "Thermodynamics", faculty: "Prof. Harish Chandra", room: "M-501", type: "theory" },
-                    { period: 7, subject: "Fluid Mechanics", faculty: "Dr. Rajesh Pillai", room: "M-501", type: "theory" }
+                    { period: 1, subject: "Refrigeration and Air Conditioning", faculty: "Sri P.Damodhara Rao", room: "M-501", type: "theory" },
+                    { period: 2, subject: "Refrigeration and Air Conditioning", faculty: "Sri P.Damodhara Rao", room: "M-501", type: "theory" },
+                    { period: 3, subject: "Industrial Management and Entrepreneurship", faculty: "Sri B.Gopala Rao", room: "M-501", type: "theory" },
+                    {
+                        period: 4,
+                        spanTo: 6,
+                        subject: "TCPW / R & AC Lab",
+                        faculty: "Sri K.Prasad",
+                        room: "ME-WORKSHOP",
+                        type: "lab"
+                    },
+                    { period: 7, subject: "Library / Counselling", faculty: null, room: "M-501", type: "activity" }
                 ],
                 Friday: [
-                    { period: 1, subject: "Thermodynamics", faculty: "Prof. Harish Chandra", room: "M-501", type: "theory" },
-                    { period: 2, subject: "Engineering Mechanics", faculty: "Dr. Rajesh Pillai", room: "M-501", type: "theory" },
-                    { period: 3, subject: "Kinematics of Machinery", faculty: "Prof. Harish Chandra", room: "M-501", type: "theory" },
-                    { period: 4, subject: "Material Science", faculty: "Dr. Sunita Rani", room: "M-501", type: "theory" },
-                    { period: 5, subject: "Engineering Mechanics", faculty: "Dr. Rajesh Pillai", room: "M-501", type: "theory" },
-                    { period: 6, subject: "Material Science", faculty: "Dr. Sunita Rani", room: "M-501", type: "theory" }
-                ],
-                Saturday: [
-                    { period: 1, subject: "Fluid Mechanics", faculty: "Dr. Rajesh Pillai", room: "M-501", type: "theory" },
-                    {
-                        period: 2,
-                        spanTo: 3,
-                        subject: "Kinematics of Machinery",
-                        faculty: "Prof. Harish Chandra",
-                        room: "M-501",
-                        type: "theory"
-                    },
-                    { period: 4, subject: "Thermodynamics", faculty: "Prof. Harish Chandra", room: "M-501", type: "theory" },
+                    { period: 1, subject: "Industrial Engineering and Quality Control", faculty: "Sri P.Suresh", room: "M-501", type: "theory" },
+                    { period: 2, subject: "Industrial Management and Entrepreneurship", faculty: "Sri B.Gopala Rao", room: "M-501", type: "theory" },
+                    { period: 3, subject: "Refrigeration and Air Conditioning", faculty: "Sri P.Damodhara Rao", room: "M-501", type: "theory" },
+                    { period: 4, subject: "Green Energy & Thermal Systems", faculty: "Sri B.Siva Srinivas", room: "M-501", type: "theory" },
                     {
                         period: 5,
                         spanTo: 7,
-                        subject: "Thermodynamics Lab",
-                        faculty: "Prof. Harish Chandra",
+                        subject: "Project Work",
+                        faculty: "Sri B.Siva Srinivas",
                         room: "ME-WORKSHOP",
                         type: "lab"
                     }
+                ],
+                Saturday: [
+                    {
+                        period: 1,
+                        spanTo: 3,
+                        subject: "Life Skills Lab",
+                        faculty: "Smt.K.Anitha",
+                        room: "ME-WORKSHOP",
+                        type: "lab"
+                    },
+                    { period: 4, subject: "Green Energy & Thermal Systems", faculty: "Sri B.Siva Srinivas", room: "M-501", type: "theory" },
+                    { period: 5, subject: "Industrial Automation & 3D Printing", faculty: "Sri K.Ramachandra Rao", room: "M-501", type: "theory" },
+                    { period: 6, subject: "Industrial Engineering and Quality Control", faculty: "Sri P.Suresh", room: "M-501", type: "theory" },
+                    { period: 7, subject: "Industrial Management and Entrepreneurship", faculty: "Sri B.Gopala Rao", room: "M-501", type: "theory" }
                 ]
             }
         }

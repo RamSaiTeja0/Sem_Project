@@ -1,0 +1,331 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Create Account — TecSubstitution</title>
+  <link rel="stylesheet" href="/css/theme.css" />
+  <link rel="stylesheet" href="/css/login.css" />
+  <style>
+    .role-selector {
+      display: flex; gap: 16px; margin: 12px 0 16px 0;
+    }
+    .role-option {
+      flex: 1; display: flex; align-items: center; gap: 8px;
+      padding: 10px 14px; border: 1px solid var(--line); border-radius: var(--radius-sm);
+      cursor: pointer; background: var(--canvas); transition: border-color 0.15s, background-color 0.15s;
+    }
+    .role-option input[type="radio"] { margin: 0; cursor: pointer; }
+    .role-option.is-selected {
+      border-color: var(--brand-500); background: var(--brand-050);
+    }
+    .role-option.is-disabled {
+      opacity: 0.55; cursor: not-allowed; background: var(--canvas-subtle);
+    }
+    .role-title { font-weight: 600; font-size: 0.9rem; color: var(--ink-900); }
+    .role-desc { font-size: 0.76rem; color: var(--ink-500); }
+
+    .tag-container {
+      display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; min-height: 32px;
+    }
+    .subject-tag {
+      display: inline-flex; align-items: center; gap: 6px;
+      background: var(--brand-100); color: var(--brand-900);
+      font-size: 0.82rem; font-weight: 500; padding: 4px 10px; border-radius: 999px;
+    }
+    .subject-tag button {
+      background: none; border: none; padding: 0; margin: 0;
+      color: var(--brand-700); font-weight: 700; cursor: pointer; line-height: 1;
+    }
+    .subject-tag button:hover { color: var(--danger-600); }
+
+    .field-row {
+      display: grid; grid-template-columns: 1fr 1fr; gap: 12px;
+    }
+    @media (max-width: 600px) {
+      .field-row { grid-template-columns: 1fr; }
+    }
+
+    /* Password visibility wrapper & buttons */
+    .password-input-wrapper {
+      position: relative;
+      display: flex;
+      align-items: center;
+      width: 100%;
+    }
+    .password-input-wrapper input {
+      width: 100%;
+      padding-right: 44px !important;
+    }
+    .btn-toggle-pw {
+      position: absolute;
+      right: 6px;
+      top: 50%;
+      transform: translateY(-50%);
+      background: transparent;
+      border: none;
+      padding: 6px;
+      cursor: pointer;
+      color: var(--ink-500);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: var(--radius-sm);
+      transition: color 0.15s ease, background-color 0.15s ease;
+    }
+    .btn-toggle-pw:hover {
+      color: var(--ink-900);
+      background-color: var(--canvas-alt);
+    }
+    .btn-toggle-pw:focus-visible {
+      outline: 2px solid var(--brand-500);
+    }
+    .btn-toggle-pw svg {
+      display: block;
+      pointer-events: none;
+    }
+
+    /* Password live requirements feedback */
+    .password-requirements {
+      margin-top: 6px;
+      margin-bottom: 6px;
+      padding: 10px 12px;
+      background: var(--canvas-subtle);
+      border: 1px solid var(--line);
+      border-radius: var(--radius-sm);
+      font-size: 0.78rem;
+    }
+    .pw-req-title {
+      font-weight: 600;
+      color: var(--ink-700);
+      margin-bottom: 4px;
+    }
+    .pw-req-item {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      color: var(--ink-500);
+      margin-top: 2px;
+      transition: color 0.15s ease;
+    }
+    .pw-req-item.is-valid {
+      color: var(--ok-700);
+      font-weight: 500;
+    }
+    .pw-req-item.is-invalid {
+      color: var(--danger-600);
+      font-weight: 500;
+    }
+    .pw-req-item .pw-icon {
+      font-weight: 700;
+      width: 14px;
+      text-align: center;
+    }
+  </style>
+</head>
+<body class="login-page">
+
+<div class="login-shell">
+
+  <!-- Left: brand panel -->
+  <aside class="login-aside">
+    <a class="brand" href="/">
+      <span class="brand-mark">TS</span>
+      <span class="brand-text">TecSubstitution</span>
+    </a>
+    <h1>Academic Branch<br />Registration</h1>
+    <p>
+      Create a new Head of Section (HOS) account to manage an independent academic branch, or add faculty members to your active branch.
+    </p>
+
+    <ul class="login-points">
+      <li><span class="tick">✓</span> Independent branch contexts for CME, EEE, MEC, etc.</li>
+      <li><span class="tick">✓</span> Role-based security &amp; branch data isolation</li>
+      <li><span class="tick">✓</span> Conflict-free substitution and availability search</li>
+    </ul>
+  </aside>
+
+  <!-- Right: registration form -->
+  <main class="login-main">
+    <div class="login-card" style="width: min(540px, 100%);">
+      <h2 id="registerTitle">Create Account</h2>
+      <p class="muted" id="setupNotice" style="display:none; color: var(--brand-700); font-weight: 500;">
+        Create an independent Head of Section (HOS) account and configure your academic branch below.
+      </p>
+
+      <form id="registerForm" novalidate style="margin-top: 18px;">
+        <!-- Flow B: HOS logged in creating faculty - prominent banner -->
+        <div id="hosFacultyHeader" style="display:none; margin-bottom: 14px;">
+          <div style="font-size: 0.76rem; font-weight: 700; text-transform: uppercase; color: var(--ink-700); margin-bottom: 4px;">Account Type</div>
+          <span class="badge badge-primary" style="font-size: 0.85rem; padding: 4px 10px;">Faculty Member</span>
+          <div style="font-size: 0.78rem; color: var(--ink-500); margin-top: 6px;">You are currently signed in as HOS. Create faculty accounts for your branch below.</div>
+          <div style="margin-top: 10px; display: flex; gap: 10px; align-items: center; font-size: 0.82rem; flex-wrap: wrap;">
+            <a href="/dashboard#faculty" class="btn btn-secondary btn-sm" style="text-decoration:none; padding: 5px 12px; font-size: 0.82rem;">← Go to Faculty Management in Dashboard</a>
+            <button type="button" id="btnHosLogoutToRegister" class="btn btn-ghost btn-sm" style="font-size: 0.82rem; color: var(--brand-700); text-decoration: underline;">Logout to Register New Branch HOS</button>
+          </div>
+        </div>
+
+        <!-- Flow B: Current Branch (Read-Only) for logged-in HOS creating faculty -->
+        <div id="currentBranchBox" style="display:none; margin-bottom: 16px; padding: 12px 14px; background: var(--brand-050); border: 1px solid var(--brand-200); border-radius: var(--radius-md);">
+          <div style="font-size: 0.72rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--brand-700); margin-bottom: 4px;">Current Branch</div>
+          <div style="font-size: 1.05rem; font-weight: 700; color: var(--ink-900);" id="currentBranchDisplay">—</div>
+          <div style="font-size: 0.78rem; color: var(--ink-600); margin-top: 4px;">
+            Read-only · Automatically inherited from your authenticated HOS session.
+          </div>
+        </div>
+
+        <!-- Role Selection for unauthenticated visitors -->
+        <div id="roleSelectorWrap">
+          <label class="field-label" style="font-size: 0.78rem; font-weight: 700; text-transform: uppercase; color: var(--ink-700); display: block; margin-bottom: 2px;">
+            Account Type <em class="req" style="color: var(--danger-500);">*</em>
+          </label>
+          <div class="role-selector">
+            <label class="role-option is-selected" id="roleHOSLabel">
+              <input type="radio" name="role" value="hos" id="roleHOS" checked />
+              <div>
+                <div class="role-title">Head of Section (HOS)</div>
+                <div class="role-desc">Administrator for branch</div>
+              </div>
+            </label>
+          </div>
+        </div>
+
+        <!-- Common Fields: Full Name & Phone -->
+        <div class="field-row">
+          <label class="field">
+            <span>Full Name <em class="req" style="color: var(--danger-500);">*</em></span>
+            <input type="text" id="regName" name="name" placeholder="e.g. B. Gopala Rao" required />
+          </label>
+          <label class="field">
+            <span>Phone Number <em class="req" style="color: var(--danger-500);">*</em></span>
+            <input type="tel" id="regPhone" name="phone" placeholder="e.g. 9493438305" required />
+          </label>
+        </div>
+
+        <!-- Flow A: Editable Branch inputs for New HOS registration -->
+        <div class="field-row" id="branchRow">
+          <label class="field">
+            <span>Branch Name <em class="req" style="color: var(--danger-500);">*</em></span>
+            <input type="text" id="regBranchName" name="branchName" placeholder="e.g. Mechanical Engineering" required />
+          </label>
+          <label class="field">
+            <span>Branch Code <em class="req" style="color: var(--danger-500);">*</em></span>
+            <input type="text" id="regBranchCode" name="branchCode" placeholder="e.g. MEC" required style="text-transform: uppercase;" />
+          </label>
+        </div>
+
+        <label class="field">
+          <span>Username <em class="req" style="color: var(--danger-500);">*</em></span>
+          <input type="text" id="regUsername" name="username" autocomplete="username"
+                 placeholder="e.g. b.gopala.rao" required />
+        </label>
+
+        <div class="field-row">
+          <label class="field">
+            <span>Password <em class="req" style="color: var(--danger-500);">*</em></span>
+            <div class="password-input-wrapper">
+              <input type="password" id="regPassword" name="password" autocomplete="new-password"
+                     placeholder="e.g. TecSub_123" required />
+              <button type="button" class="btn-toggle-pw" id="toggleRegPassword" aria-label="Show password" title="Show password">
+                <svg class="eye-icon" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                  <circle cx="12" cy="12" r="3"></circle>
+                </svg>
+                <svg class="eye-off-icon" style="display:none;" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path>
+                  <line x1="1" y1="1" x2="23" y2="23"></line>
+                </svg>
+              </button>
+            </div>
+          </label>
+          <label class="field">
+            <span>Confirm Password <em class="req" style="color: var(--danger-500);">*</em></span>
+            <div class="password-input-wrapper">
+              <input type="password" id="regConfirmPassword" name="confirmPassword" autocomplete="new-password"
+                     placeholder="Re-enter password" required />
+              <button type="button" class="btn-toggle-pw" id="toggleRegConfirmPassword" aria-label="Show password" title="Show password">
+                <svg class="eye-icon" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                  <circle cx="12" cy="12" r="3"></circle>
+                </svg>
+                <svg class="eye-off-icon" style="display:none;" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path>
+                  <line x1="1" y1="1" x2="23" y2="23"></line>
+                </svg>
+              </button>
+            </div>
+          </label>
+        </div>
+
+        <!-- Password Requirements Live Feedback -->
+        <div class="password-requirements" id="passwordRequirements" aria-live="polite">
+          <div class="pw-req-title">Password must contain:</div>
+          <div class="pw-req-item" id="reqLetter"><span class="pw-icon">○</span> At least one letter (A–Z / a–z)</div>
+          <div class="pw-req-item" id="reqNumber"><span class="pw-icon">○</span> At least one number (0–9)</div>
+          <div class="pw-req-item" id="reqUnderscore"><span class="pw-icon">○</span> At least one underscore (_)</div>
+          <div class="pw-req-item" id="reqChars"><span class="pw-icon">○</span> Only letters, numbers, and underscores allowed</div>
+        </div>
+
+        <!-- Faculty-Only Field: Subjects / Expertise -->
+        <div id="facultySubjectsSection" style="margin-top: 12px; margin-bottom: 16px; padding: 14px; background: var(--canvas-subtle); border: 1px solid var(--line); border-radius: var(--radius-sm);">
+          <label class="field-label" style="font-size: 0.78rem; font-weight: 700; text-transform: uppercase; color: var(--ink-700); display: block; margin-bottom: 4px;">
+            Subjects / Expertise <em class="req" style="color: var(--danger-500);">*</em>
+          </label>
+          <p class="muted" style="font-size: 0.78rem; margin-bottom: 8px;">
+            Specify the academic subjects taught by this faculty member. Multiple subjects can be added.
+          </p>
+          <div style="display: flex; gap: 8px;">
+            <input type="text" id="subjectInput" placeholder="e.g. Industrial Management and Entrepreneurship" style="flex: 1;" />
+            <button type="button" class="btn btn-secondary btn-sm" id="addSubjectBtn" style="white-space: nowrap;">+ Add Subject</button>
+          </div>
+          <div class="tag-container" id="subjectTagContainer"></div>
+          <div id="subjectError" style="display:none; color: var(--danger-600); font-size: 0.78rem; margin-top: 4px;"></div>
+        </div>
+
+        <div id="registerMessage" class="login-message" role="status" aria-live="polite"></div>
+
+        <button type="submit" class="btn login-submit" id="registerSubmit">Create Account</button>
+      </form>
+
+      <!-- One-time Faculty Credentials Panel -->
+      <div id="facultySuccessPanel" style="display:none; margin-top: 18px; padding: 18px; background: var(--canvas, #fff); border: 2px solid var(--ok-600, #16a34a); border-radius: var(--radius-md, 8px); box-shadow: var(--shadow-md, 0 4px 12px rgba(0,0,0,0.08));">
+        <div style="display:flex; align-items:center; gap:8px; color: var(--ok-700, #15803d); font-weight:700; font-size:1.05rem; margin-bottom:12px;">
+          <span>✓ Faculty Account Created Successfully</span>
+        </div>
+        <p style="font-size:0.85rem; color:var(--ink-700, #374151); margin-bottom:12px;">
+          Please copy and provide these credentials to the faculty member. The password will not be shown again.
+        </p>
+        <div style="background:var(--canvas-subtle, #f9fafb); border:1px solid var(--line, #e5e7eb); border-radius:var(--radius-sm, 6px); padding:12px 14px; font-size:0.88rem; margin-bottom:14px; display:grid; grid-template-columns: 90px 1fr; gap:6px 12px; align-items:center;">
+          <strong style="color:var(--ink-600, #4b5563);">Name:</strong>
+          <span id="succFacName" style="font-weight:600; color:var(--ink-900, #111827);"></span>
+          <strong style="color:var(--ink-600, #4b5563);">Username:</strong>
+          <span id="succFacUsername" style="font-family:var(--font-mono, monospace); font-weight:600; color:var(--brand-700, #005bb5);"></span>
+          <strong style="color:var(--ink-600, #4b5563);">Password:</strong>
+          <span id="succFacPassword" style="font-family:var(--font-mono, monospace); font-weight:700; color:var(--danger-700, #b91c1c); background:var(--canvas, #fff); padding:2px 8px; border:1px dashed var(--line, #cbd5e1); border-radius:4px; display:inline-block;"></span>
+          <strong style="color:var(--ink-600, #4b5563);">Branch:</strong>
+          <span id="succFacBranch" style="font-weight:600; color:var(--ink-800, #1f2937);"></span>
+        </div>
+        <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
+          <button type="button" class="btn btn-secondary btn-sm" id="btnCopyUsername">Copy Username</button>
+          <button type="button" class="btn btn-primary btn-sm" id="btnCopyPassword">Copy Password</button>
+          <button type="button" class="btn btn-secondary btn-sm" id="btnDismissSuccess" style="margin-left:auto;">Dismiss</button>
+        </div>
+        <div id="copyFeedback" style="font-size:0.8rem; color:var(--ok-700, #15803d); font-weight:500; margin-top:8px;"></div>
+      </div>
+
+      <div style="margin-top: 22px; padding-top: 18px; border-top: 1px solid var(--line-soft); display: flex; justify-content: space-between; align-items: center; font-size: 0.88rem;">
+        <span class="muted">Already have an account?</span>
+        <a href="/login" style="font-weight: 600; color: var(--brand-600); text-decoration: none;">Sign in &rarr;</a>
+      </div>
+
+      <p class="login-foot">
+        <a href="/">← Back to home</a>
+      </p>
+    </div>
+  </main>
+
+</div>
+
+<script src="/js/register.js"></script>
+</body>
+</html>

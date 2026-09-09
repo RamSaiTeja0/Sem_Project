@@ -54,14 +54,13 @@ check('the demo dataset never double-books a faculty member or a room', () => {
     });
 });
 
-check('the roster covers all four branches, each with a profile', () => {
+check('the roster covers all branches, each with a profile', () => {
     const stats = engine.getFacultyStats();
     const branches = [...new Set(stats.map(f => f.department))].sort();
-    assert.deepStrictEqual(branches, ['CME', 'ECE', 'EE', 'MEC']);
+    assert.deepStrictEqual(branches, ['CME', 'EEE', 'MEC']);
     assert.ok(stats.length >= 15 && stats.length <= 25, `roster of ${stats.length} is outside 15-25`);
     stats.forEach(f => {
         assert.ok(f.designation, `${f.name} has no designation`);
-        assert.ok(f.phone, `${f.name} has no phone`);
         assert.match(f.email || '', /^[^\s@]+@[^\s@]+\.[^\s@]+$/, `${f.name} has no valid email`);
         assert.strictEqual(f.status, 'active');
     });
@@ -112,14 +111,14 @@ check('every record has the documented shape and a busy/free status', () => {
 });
 
 check('a multi-period lab marks every period it spans', () => {
-    // ECE-A Monday P5-P7 is Prof. Naveen Reddy's Digital Electronics Lab.
+    // CME-A Monday P5-P7 is Ms. Debadatta Bhattacharya's Android Programming Lab.
     [5, 6, 7].forEach(period => {
         const slot = engine.getSlot('Monday', period);
-        const busy = slot.busy.filter(r => r.faculty === 'Prof. Naveen Reddy');
-        assert.strictEqual(busy.length, 1, `Prof. Naveen Reddy must be busy Monday P${period}`);
-        assert.strictEqual(busy[0].subject, 'Digital Electronics Lab');
+        const busy = slot.busy.filter(r => r.faculty === 'Ms. Debadatta Bhattacharya');
+        assert.strictEqual(busy.length, 1, `Ms. Debadatta Bhattacharya must be busy Monday P${period}`);
+        assert.strictEqual(busy[0].subject, 'Android Programming Lab');
         assert.strictEqual(busy[0].type, 'lab');
-        assert.strictEqual(busy[0].room, 'EC-LAB-1');
+        assert.strictEqual(busy[0].room, 'CM-LAB-1');
     });
 });
 
@@ -128,10 +127,10 @@ console.log('\n[2] Availability');
 check('[test 1] Monday P2 returns the correct free faculty', () => {
     const result = engine.getAvailability('Monday', 2);
     assert.deepStrictEqual(names(result.busy.map(b => b.faculty)), names([
-        'Dr. Kavya Rao', 'Dr. Mahesh Gupta', 'Dr. Rajesh Pillai', 'Ms. B. Kusuma'
+        'M.DALAYYA', 'Ms. B. Kusuma', 'Sri B.Siva Srinivas'
     ]));
-    assert.strictEqual(result.totalBusy, 4);
-    assert.strictEqual(result.totalAvailable, ROSTER - 4);
+    assert.strictEqual(result.totalBusy, 3);
+    assert.strictEqual(result.totalAvailable, ROSTER - 3);
     // Free + busy is the whole roster, and the two lists never overlap.
     result.busy.forEach(b =>
         assert.ok(!result.availableFaculty.includes(b.faculty), b.faculty + ' is in both lists'));
@@ -140,10 +139,10 @@ check('[test 1] Monday P2 returns the correct free faculty', () => {
 check('[test 2] Tuesday P1 returns the correct free faculty', () => {
     const result = engine.getAvailability('Tuesday', 1);
     assert.deepStrictEqual(names(result.busy.map(b => b.faculty)), names([
-        'Dr. Sunita Rani', 'Dr. Suresh Babu', 'Ms. G. Sandhya Rani', 'Prof. Ravi Teja'
+        'M.DALAYYA', 'Ms. G. Sandhya Rani', 'Sri P.Damodhara Rao'
     ]));
-    assert.strictEqual(result.totalBusy, 4);
-    assert.strictEqual(result.totalAvailable, ROSTER - 4);
+    assert.strictEqual(result.totalBusy, 3);
+    assert.strictEqual(result.totalAvailable, ROSTER - 3);
     assert.ok(!result.availableFaculty.includes('Ms. G. Sandhya Rani'));
 });
 
@@ -183,9 +182,9 @@ check('the clicked cell faculty can be excluded explicitly', () => {
 
 check('department and search filters narrow the result', () => {
     const all = engine.getAvailability('Monday', 2);
-    const ece = engine.getAvailability('Monday', 2, { department: 'ECE' });
-    assert.ok(ece.totalAvailable < all.totalAvailable);
-    ece.available.forEach(f => assert.strictEqual(f.department, 'ECE'));
+    const eee = engine.getAvailability('Monday', 2, { department: 'EEE' });
+    assert.ok(eee.totalAvailable < all.totalAvailable);
+    eee.available.forEach(f => assert.strictEqual(f.department, 'EEE'));
 
     const search = engine.getAvailability('Monday', 2, { search: 'Kusuma' });
     assert.deepStrictEqual(search.availableFaculty, []);

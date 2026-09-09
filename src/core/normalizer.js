@@ -133,7 +133,7 @@ function parseSlotHeader(header, days = DEFAULT_DAYS, periods = DEFAULT_PERIODS)
  *
  * @returns {{ meta, faculty, records, busyRecords, issues }}
  */
-function normalize(source) {
+function normalize(source, options = {}) {
     const issues = [];
     const add = (severity, code, message, context) =>
         issues.push({ severity, code, message, context: context || null });
@@ -210,8 +210,9 @@ function normalize(source) {
     const busyRecords = [];
     const seen = new Map();
 
-    function pushActivity(day, period, subject, className, room, type) {
+    function pushActivity(day, period, subject, className, room, type, context) {
         const record = {
+            id: (context && (context.id || (context.entry && context.entry.id))) || null,
             faculty: null,
             facultyId: null,
             department: null,
@@ -237,6 +238,7 @@ function normalize(source) {
             return;
         }
         const record = {
+            id: (context && (context.id || (context.entry && context.entry.id))) || null,
             faculty: member.name,
             facultyId: member.id,
             department: member.department,
@@ -256,7 +258,7 @@ function normalize(source) {
 
     // --- shape A: long-form entries ---
     (Array.isArray(source.entries) ? source.entries : []).forEach((entry, index) => {
-        const line = { index };
+        const line = { index, id: entry.id, entry };
         const day = dayLookup.get(String(entry.day || '').trim().toUpperCase())
             || normalizeDayName(entry.day, days);
         if (!day) {
@@ -275,7 +277,7 @@ function normalize(source) {
         const subj = text(entry.subject);
         if (!entry.faculty && subj) {
             pushActivity(day, period, subj, text(entry.class || entry.className),
-                text(entry.room), entry.type || 'activity');
+                text(entry.room), entry.type || 'activity', line);
             return;
         }
 
@@ -289,7 +291,8 @@ function normalize(source) {
     });
 
     // --- shape B: per-class grids ---
-    (Array.isArray(source.classes) ? source.classes : []).forEach(cls => {
+    const hasEntries = Array.isArray(source.entries) && source.entries.length > 0;
+    (!hasEntries && Array.isArray(source.classes) ? source.classes : []).forEach(cls => {
         const className = text(cls && (cls.class || cls.name));
         if (!className) {
             add('error', 'CLASS_NO_NAME', 'A class entry has no name', cls);
@@ -373,10 +376,14 @@ function normalize(source) {
         });
     });
 
-    if (faculty.length === 0) add('error', 'NO_FACULTY', 'Timetable contains no faculty');
-    if (busyRecords.length === 0) add('error', 'EMPTY_TIMETABLE', 'Timetable contains no scheduled periods');
+    const allowEmpty = Boolean(options.allowEmpty || (source && source.allowEmpty));
+    if (!allowEmpty) {
+        if (faculty.length === 0) add('error', 'NO_FACULTY', 'Timetable contains no faculty');
+        if (busyRecords.length === 0) add('error', 'EMPTY_TIMETABLE', 'Timetable contains no scheduled periods');
+    }
 
-    const classNames = [...new Set(busyRecords.map(r => r.className).filter(Boolean))];
+    const declaredClasses = (Array.isArray(source.classes) ? source.classes : []).map(c => text(c.class || c.name)).filter(Boolean);
+    const classNames = [...new Set(declaredClasses.concat(busyRecords.map(r => r.className).filter(Boolean)))];
     const primaryClass = text(rawMeta.primaryClass) || classNames[0] || null;
 
     return {

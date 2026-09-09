@@ -8,14 +8,8 @@
  *   PUT    /api/timetable/entries/:id      edit
  *   DELETE /api/timetable/entries/:id      delete
  *
- * Writes require a configured database: an edit that vanished on restart would
- * be worse than refusing it, so with no DATABASE_URL these endpoints answer 503
- * and say what is missing. The read paths and the availability engine keep
- * working on the demo dataset regardless.
- *
- * Every write is validated twice — once here against the live timetable (so all
- * conflicts can be reported together) and once by the UNIQUE constraints in
- * schema.sql, which are what actually guarantee no double-booking.
+ * Writes require a configured database or explicit memory writes mode.
+ * All writes are validated against branch context, double booking, and reference integrity.
  */
 const express = require('express');
 const router = express.Router();
@@ -23,9 +17,14 @@ const router = express.Router();
 const store = require('../data/store');
 const db = require('../db/pool');
 const repository = require('../db/repository');
-const { DEPARTMENTS, nameFor: departmentName } = require('../data/departments');
+const { DEPARTMENTS, nameFor: departmentName, getBranch } = require('../data/departments');
 
 const TYPES = ['theory', 'lab'];
+const NON_FACULTY_PATTERN = /\b(library|counselling|counseling|tpc|placement|training|sports|games|seminar|mentoring|assembly|activity|break|lunch)\b/i;
+
+function isNonFacultyActivity(subject, type) {
+    return type === 'activity' || NON_FACULTY_PATTERN.test(subject || '');
+}
 
 /**
  * Class records from the live dataset, used when no database is serving.
@@ -85,9 +84,10 @@ function subjectsFromDataset() {
     return Array.from(subjectsMap.values()).sort((a, b) => a.name.localeCompare(b.name));
 }
 
-/** Writes need a database; reads of reference data do not. */
-function requireDatabase(req, res, next) {
+/** Storage guard for timetable writes */
+function requireStorage(req, res, next) {
     if (db.isConfigured() && store.usingDatabase) return next();
+    if (store.allowMemoryWrites) return next();
     return res.status(503).json({
         error: db.isConfigured()
             ? 'The database is configured but not currently serving the timetable' +
@@ -119,20 +119,91 @@ function parseEntry(body) {
     const subject = text(body.subject);
     if (!subject) errors.push('Subject is required');
 
-    const faculty = text(body.faculty);
-    if (!faculty) errors.push('Faculty is required');
-
-    const room = text(body.room) || null;
-
+    let faculty = text(body.faculty);
     let type = text(body.type).toLowerCase();
     if (!type) type = /\b(lab|laboratory|practical)\b/i.test(subject) ? 'lab' : 'theory';
-    if (!TYPES.includes(type)) errors.push(`Type must be one of: ${TYPES.join(', ')}`);
+
+    if (isNonFacultyActivity(subject, type)) {
+        if (!faculty || /^(none|nil|na|n\/a|-)$/i.test(faculty)) {
+            faculty = null;
+        }
+        if (!['theory', 'lab', 'activity'].includes(type)) {
+            type = 'activity';
+        }
+    } else {
+        if (!faculty) errors.push('Faculty is required');
+        if (!TYPES.includes(type)) errors.push(`Type must be one of: ${TYPES.join(', ')}`);
+    }
 
     if (errors.length) return { errors };
-    return { entry: { day, period, className, subject, faculty, room, type } };
+    return { entry: { day, period, className, subject, faculty, room: text(body.room) || null, type } };
 }
 
-/** Map a repository error onto an HTTP response. */
+/** Validate references against branch context in-memory when not running against DB */
+function validateEntryReferences(entry) {
+    const meta = store.engine.getMeta();
+    const knownClasses = meta.classes || [];
+    const knownFaculty = store.engine.getFaculty() || [];
+    const declaredSubjects = subjectsFromDataset();
+
+    const missing = [];
+    if (knownClasses.length && !knownClasses.some(c => c.toUpperCase() === entry.className.toUpperCase())) {
+        missing.push(`class "${entry.className}"`);
+    }
+
+    if (!isNonFacultyActivity(entry.subject) && declaredSubjects.length && !declaredSubjects.some(s => s.name.toUpperCase() === entry.subject.toUpperCase())) {
+        missing.push(`subject "${entry.subject}"`);
+    }
+
+    if (entry.faculty && knownFaculty.length && !knownFaculty.some(f => f.name.toUpperCase() === entry.faculty.toUpperCase())) {
+        missing.push(`faculty "${entry.faculty}"`);
+    }
+
+    if (missing.length) {
+        const err = new Error(`Unknown ${missing.join(', ')}`);
+        err.code = 'UNKNOWN_REFERENCE';
+        err.status = 400;
+        err.details = missing;
+        throw err;
+    }
+}
+
+/** Check slot conflicts against in-memory records */
+function checkMemoryConflicts(entry, excludeId = null) {
+    const records = (store.normalized && store.normalized.busyRecords) || [];
+    const conflicts = [];
+    records.forEach(r => {
+        if (r.day === entry.day && r.period === entry.period && r.id !== excludeId) {
+            if (r.className && r.className.toUpperCase() === entry.className.toUpperCase()) {
+                conflicts.push({
+                    code: 'CLASS_BUSY',
+                    message: `${entry.className} already has ${r.subject} at ${entry.day} P${entry.period}`
+                });
+            }
+            if (entry.faculty && r.faculty && r.faculty.toUpperCase() === entry.faculty.toUpperCase()) {
+                conflicts.push({
+                    code: 'FACULTY_BUSY',
+                    message: `${entry.faculty} already teaches ${r.subject} (${r.className}) at ${entry.day} P${entry.period}`
+                });
+            }
+            if (entry.room && r.room && r.room.toUpperCase() === entry.room.toUpperCase()) {
+                conflicts.push({
+                    code: 'ROOM_BUSY',
+                    message: `Room ${entry.room} is already used by ${r.className} at ${entry.day} P${entry.period}`
+                });
+            }
+        }
+    });
+    if (conflicts.length) {
+        const err = new Error(conflicts.map(c => c.message).join('; '));
+        err.code = 'SLOT_CONFLICT';
+        err.status = 400;
+        err.details = conflicts;
+        throw err;
+    }
+}
+
+/** Map an error onto an HTTP response. */
 function fail(res, err) {
     const status = err.status || 500;
     res.status(status).json({
@@ -149,8 +220,9 @@ function fail(res, err) {
  */
 router.get('/reference', async (req, res, next) => {
     const engine = store.engine;
-    const meta = engine.getMeta();
     try {
+        const branchCode = req.session ? req.session.department : null;
+        const branch = getBranch(branchCode);
         const fromDatabase = db.isConfigured() && store.usingDatabase;
         const [classes, subjects, rooms] = fromDatabase
             ? await Promise.all([repository.listClasses(), repository.listSubjects(), repository.listRooms()])
@@ -166,28 +238,40 @@ router.get('/reference', async (req, res, next) => {
             departmentName: cls.department ? departmentName(cls.department) : null
         }));
 
-        const deptCodes = [...new Set([
-            ...DEPARTMENTS.map(d => d.code),
-            ...withNames.map(c => c.department).filter(Boolean),
-            ...subjects.map(s => s.department).filter(Boolean)
-        ])].sort();
+        if (branchCode && req.query.branch && req.query.branch.trim().toUpperCase() !== branchCode.toUpperCase()) {
+            return res.status(403).json({ error: 'Cross-branch access is not allowed.', code: 'FORBIDDEN' });
+        }
+
+        const filterBranch = branchCode || req.query.branch || (process.env.EMPTY_TIMETABLE === 'true' ? branch.code : null);
+        const branchClasses = filterBranch
+            ? withNames.filter(cls => !cls.department || cls.department.toUpperCase() === filterBranch.toUpperCase())
+            : withNames;
+        const branchSubjects = filterBranch
+            ? subjects.filter(s => !s.department || s.department.toUpperCase() === filterBranch.toUpperCase())
+            : subjects;
+        const branchFaculty = filterBranch
+            ? engine.getFaculty().filter(f => !f.department || f.department.toUpperCase() === filterBranch.toUpperCase())
+            : engine.getFaculty();
+
+        const deptCodes = [...new Set(branchClasses.map(c => c.department).concat(branch.code).filter(Boolean))].sort();
+        const branchDepts = deptCodes.map(code => ({ code, name: departmentName(code) }));
 
         res.json({
             days: engine.getDays(),
             periods: engine.getPeriods(),
             types: TYPES,
-            classes: withNames,
-            departments: deptCodes.map(code => ({ code, name: departmentName(code) })),
-            subjects,
+            classes: branchClasses,
+            departments: branchDepts,
+            subjects: branchSubjects,
             rooms,
-            faculty: engine.getFaculty(),
-            editable: fromDatabase,
-            source: fromDatabase ? 'database' : 'in-memory demo dataset'
+            faculty: branchFaculty,
+            editable: fromDatabase || store.allowMemoryWrites,
+            source: fromDatabase ? 'database' : (store.allowMemoryWrites ? 'in-memory' : 'in-memory demo dataset')
         });
     } catch (err) { next(err); }
 });
 
-router.get('/', requireDatabase, async (req, res, next) => {
+router.get('/', async (req, res, next) => {
     try {
         const engine = store.engine;
         const filters = {};
@@ -205,54 +289,361 @@ router.get('/', requireDatabase, async (req, res, next) => {
             }
             filters.period = period;
         }
-        const entries = await repository.listEntries(filters);
-        res.json({ count: entries.length, entries });
+
+        // Enforce Read Isolation for faculty
+        if (req.session && req.session.role === 'faculty') {
+            const sessionFaculty = req.session.facultyName || req.session.name;
+            if (req.query.faculty && String(req.query.faculty).trim().toUpperCase() !== sessionFaculty.toUpperCase()) {
+                return res.status(403).json({
+                    error: 'Forbidden: Faculty members can only access their own timetable entries.',
+                    code: 'FORBIDDEN'
+                });
+            }
+            if (req.query.faculty_id && req.session.facultyId && String(req.query.faculty_id) !== String(req.session.facultyId)) {
+                return res.status(403).json({
+                    error: 'Forbidden: You cannot query another faculty_id.',
+                    code: 'FORBIDDEN'
+                });
+            }
+            if (req.query.facultyName && String(req.query.facultyName).trim().toUpperCase() !== sessionFaculty.toUpperCase()) {
+                return res.status(403).json({
+                    error: 'Forbidden: You cannot query another facultyName.',
+                    code: 'FORBIDDEN'
+                });
+            }
+            filters.faculty = sessionFaculty;
+        }
+
+        const sessionBranch = req.session && req.session.department ? req.session.department.toUpperCase() : null;
+        if (sessionBranch) {
+            filters.branch = sessionBranch;
+        }
+
+        if (db.isConfigured() && store.usingDatabase) {
+            const entries = await repository.listEntries(filters);
+            res.json({ count: entries.length, entries });
+        } else {
+            const entries = store.listEntriesInMemory(filters);
+            res.json({ count: entries.length, entries });
+        }
     } catch (err) { next(err); }
 });
 
-router.get('/:id(\\d+)', requireDatabase, async (req, res, next) => {
+// --- /mine dedicated endpoints for faculty self-management ---
+router.get('/mine', async (req, res, next) => {
+    if (!req.session || req.session.role !== 'faculty') {
+        return res.status(401).json({ error: 'Faculty sign-in required', code: 'UNAUTHORIZED' });
+    }
+    const sessionFaculty = req.session.facultyName || req.session.name;
     try {
-        const entry = await repository.getEntry(parseInt(req.params.id, 10));
+        let entries = [];
+        if (db.isConfigured() && store.usingDatabase) {
+            entries = await repository.listEntries({ faculty: sessionFaculty });
+        } else {
+            entries = store.listEntriesInMemory({ faculty: sessionFaculty });
+        }
+        res.json({
+            count: entries.length,
+            entries,
+            faculty: sessionFaculty,
+            branch: req.session.department
+        });
+    } catch (err) { next(err); }
+});
+
+router.post('/mine', checkPostOwnership, async (req, res, next) => {
+    if (!req.session || req.session.role !== 'faculty') {
+        return res.status(401).json({ error: 'Faculty sign-in required', code: 'UNAUTHORIZED' });
+    }
+    const sessionFaculty = req.session.facultyName || req.session.name;
+    const body = { ...req.body, faculty: sessionFaculty };
+    const parsed = parseEntry(body);
+    if (parsed.errors) {
+        return res.status(400).json({
+            error: parsed.errors.join('; '), code: 'INVALID_ENTRY', problems: parsed.errors
+        });
+    }
+    try {
+        validateEntryReferences(parsed.entry);
+        if (!db.isConfigured() || !store.usingDatabase) {
+            checkMemoryConflicts(parsed.entry);
+        }
+    } catch (err) {
+        return fail(res, err);
+    }
+
+    requireStorage(req, res, async () => {
+        try {
+            if (db.isConfigured() && store.usingDatabase) {
+                const entry = await repository.addEntry(parsed.entry);
+                await store.reloadFromDatabase();
+                res.status(201).json({ entry, saved: true });
+            } else {
+                const entry = store.addEntryInMemory(parsed.entry);
+                res.status(201).json({ entry, saved: true });
+            }
+        } catch (err) { fail(res, err); void next; }
+    });
+});
+
+router.put('/mine/:id(\\d+)', checkModifyOwnership, async (req, res, next) => {
+    if (!req.session || req.session.role !== 'faculty') {
+        return res.status(401).json({ error: 'Faculty sign-in required', code: 'UNAUTHORIZED' });
+    }
+    const sessionFaculty = req.session.facultyName || req.session.name;
+    const entryId = parseInt(req.params.id, 10);
+    const body = { ...req.body, faculty: sessionFaculty };
+    const parsed = parseEntry(body);
+    if (parsed.errors) {
+        return res.status(400).json({
+            error: parsed.errors.join('; '), code: 'INVALID_ENTRY', problems: parsed.errors
+        });
+    }
+    try {
+        validateEntryReferences(parsed.entry);
+        if (!db.isConfigured() || !store.usingDatabase) {
+            checkMemoryConflicts(parsed.entry, entryId);
+        }
+    } catch (err) {
+        return fail(res, err);
+    }
+
+    requireStorage(req, res, async () => {
+        try {
+            if (db.isConfigured() && store.usingDatabase) {
+                const entry = await repository.updateEntry(entryId, parsed.entry);
+                await store.reloadFromDatabase();
+                res.json({ entry, saved: true });
+            } else {
+                const entry = store.updateEntryInMemory(entryId, parsed.entry);
+                res.json({ entry, saved: true });
+            }
+        } catch (err) { fail(res, err); void next; }
+    });
+});
+
+router.delete('/mine/:id(\\d+)', checkDeleteOwnership, async (req, res, next) => {
+    if (!req.session || req.session.role !== 'faculty') {
+        return res.status(401).json({ error: 'Faculty sign-in required', code: 'UNAUTHORIZED' });
+    }
+    const entryId = parseInt(req.params.id, 10);
+    requireStorage(req, res, async () => {
+        try {
+            if (db.isConfigured() && store.usingDatabase) {
+                const removed = await repository.deleteEntry(entryId);
+                if (!removed) return res.status(404).json({ error: 'No such timetable entry', code: 'NOT_FOUND' });
+                await store.reloadFromDatabase();
+                res.json({ deleted: true, id: entryId });
+            } else {
+                const removed = store.deleteEntryInMemory(entryId);
+                if (!removed) return res.status(404).json({ error: 'No such timetable entry', code: 'NOT_FOUND' });
+                res.json({ deleted: true, id: entryId });
+            }
+        } catch (err) { next(err); }
+    });
+});
+
+router.get('/:id(\\d+)', async (req, res, next) => {
+    try {
+        const entryId = parseInt(req.params.id, 10);
+        let entry = null;
+        if (db.isConfigured() && store.usingDatabase) {
+            entry = await repository.getEntry(entryId);
+        } else {
+            entry = store.getEntryInMemory(entryId);
+        }
         if (!entry) return res.status(404).json({ error: 'No such timetable entry', code: 'NOT_FOUND' });
+
+        if (req.session && req.session.role === 'faculty') {
+            const sessionFaculty = req.session.facultyName || req.session.name;
+            if (!entry.faculty || String(entry.faculty).trim().toUpperCase() !== sessionFaculty.toUpperCase()) {
+                return res.status(403).json({
+                    error: 'Forbidden: Faculty members can only view their own timetable entries.',
+                    code: 'FORBIDDEN'
+                });
+            }
+        }
+
         res.json({ entry });
     } catch (err) { next(err); }
 });
 
-router.post('/', requireDatabase, async (req, res, next) => {
+function checkPostOwnership(req, res, next) {
+    if (req.session && req.session.role === 'faculty') {
+        const sessionFaculty = req.session.facultyName || req.session.name;
+        const sessionFacId = req.session.facultyId || req.session.id;
+        if (req.body && req.body.faculty && String(req.body.faculty).trim().toUpperCase() !== sessionFaculty.toUpperCase()) {
+            return res.status(403).json({
+                error: 'Faculty members cannot create master timetable entries for another faculty.',
+                code: 'FORBIDDEN'
+            });
+        }
+        if (req.body && req.body.faculty_id && (!sessionFacId || String(req.body.faculty_id) !== String(sessionFacId))) {
+            return res.status(403).json({
+                error: 'Faculty members cannot create master timetable entries for another faculty.',
+                code: 'FORBIDDEN'
+            });
+        }
+        if (req.body && req.body.facultyName && String(req.body.facultyName).trim().toUpperCase() !== sessionFaculty.toUpperCase()) {
+            return res.status(403).json({
+                error: 'Faculty members cannot create master timetable entries for another faculty.',
+                code: 'FORBIDDEN'
+            });
+        }
+        req.body.faculty = sessionFaculty;
+    }
+    next();
+}
+
+async function checkModifyOwnership(req, res, next) {
+    if (req.session && req.session.role === 'faculty') {
+        const sessionFaculty = req.session.facultyName || req.session.name;
+        const sessionFacId = req.session.facultyId || req.session.id;
+        const entryId = parseInt(req.params.id, 10);
+        let existing = null;
+        if (db.isConfigured() && store.usingDatabase) {
+            existing = await repository.getEntry(entryId);
+        } else {
+            existing = store.getEntryInMemory(entryId);
+        }
+        if (!existing) {
+            return res.status(404).json({ error: 'No such timetable entry', code: 'NOT_FOUND' });
+        }
+        if (!existing.faculty || String(existing.faculty).trim().toUpperCase() !== sessionFaculty.toUpperCase()) {
+            return res.status(403).json({
+                error: 'Faculty members cannot modify another faculty member\'s master timetable entry.',
+                code: 'FORBIDDEN'
+            });
+        }
+        if (req.body && req.body.faculty && String(req.body.faculty).trim().toUpperCase() !== sessionFaculty.toUpperCase()) {
+            return res.status(403).json({
+                error: 'Faculty members cannot reassign an entry to another faculty member.',
+                code: 'FORBIDDEN'
+            });
+        }
+        if (req.body && req.body.faculty_id && (!sessionFacId || String(req.body.faculty_id) !== String(sessionFacId))) {
+            return res.status(403).json({
+                error: 'Faculty members cannot reassign an entry to another faculty member.',
+                code: 'FORBIDDEN'
+            });
+        }
+        if (req.body && req.body.facultyName && String(req.body.facultyName).trim().toUpperCase() !== sessionFaculty.toUpperCase()) {
+            return res.status(403).json({
+                error: 'Faculty members cannot reassign an entry to another faculty member.',
+                code: 'FORBIDDEN'
+            });
+        }
+        req.body.faculty = sessionFaculty;
+    }
+    next();
+}
+
+async function checkDeleteOwnership(req, res, next) {
+    if (req.session && req.session.role === 'faculty') {
+        const sessionFaculty = req.session.facultyName || req.session.name;
+        const entryId = parseInt(req.params.id, 10);
+        let existing = null;
+        if (db.isConfigured() && store.usingDatabase) {
+            existing = await repository.getEntry(entryId);
+        } else {
+            existing = store.getEntryInMemory(entryId);
+        }
+        if (!existing) {
+            return res.status(404).json({ error: 'No such timetable entry', code: 'NOT_FOUND' });
+        }
+        if (!existing.faculty || String(existing.faculty).trim().toUpperCase() !== sessionFaculty.toUpperCase()) {
+            return res.status(403).json({
+                error: 'Faculty members cannot delete another faculty member\'s master timetable entry.',
+                code: 'FORBIDDEN'
+            });
+        }
+    }
+    next();
+}
+
+router.post('/', checkPostOwnership, async (req, res, next) => {
     const parsed = parseEntry(req.body || {});
     if (parsed.errors) {
         return res.status(400).json({
             error: parsed.errors.join('; '), code: 'INVALID_ENTRY', problems: parsed.errors
         });
     }
+    if (req.session && req.session.role === 'faculty') {
+        parsed.entry.faculty = req.session.facultyName || req.session.name;
+    }
     try {
-        const entry = await repository.addEntry(parsed.entry);
-        await store.reloadFromDatabase();
-        res.status(201).json({ entry, saved: true });
-    } catch (err) { fail(res, err); void next; }
+        validateEntryReferences(parsed.entry);
+        if (!db.isConfigured() || !store.usingDatabase) {
+            checkMemoryConflicts(parsed.entry);
+        }
+    } catch (err) {
+        return fail(res, err);
+    }
+
+    requireStorage(req, res, async () => {
+        try {
+            if (db.isConfigured() && store.usingDatabase) {
+                const entry = await repository.addEntry(parsed.entry);
+                await store.reloadFromDatabase();
+                res.status(201).json({ entry, saved: true });
+            } else {
+                const entry = store.addEntryInMemory(parsed.entry);
+                res.status(201).json({ entry, saved: true });
+            }
+        } catch (err) { fail(res, err); void next; }
+    });
 });
 
-router.put('/:id(\\d+)', requireDatabase, async (req, res, next) => {
+router.put('/:id(\\d+)', checkModifyOwnership, async (req, res, next) => {
+    const entryId = parseInt(req.params.id, 10);
     const parsed = parseEntry(req.body || {});
     if (parsed.errors) {
         return res.status(400).json({
             error: parsed.errors.join('; '), code: 'INVALID_ENTRY', problems: parsed.errors
         });
     }
+    if (req.session && req.session.role === 'faculty') {
+        parsed.entry.faculty = req.session.facultyName || req.session.name;
+    }
     try {
-        const entry = await repository.updateEntry(parseInt(req.params.id, 10), parsed.entry);
-        await store.reloadFromDatabase();
-        res.json({ entry, saved: true });
-    } catch (err) { fail(res, err); void next; }
+        validateEntryReferences(parsed.entry);
+        if (!db.isConfigured() || !store.usingDatabase) {
+            checkMemoryConflicts(parsed.entry, entryId);
+        }
+    } catch (err) {
+        return fail(res, err);
+    }
+
+    requireStorage(req, res, async () => {
+        try {
+            if (db.isConfigured() && store.usingDatabase) {
+                const entry = await repository.updateEntry(entryId, parsed.entry);
+                await store.reloadFromDatabase();
+                res.json({ entry, saved: true });
+            } else {
+                const entry = store.updateEntryInMemory(entryId, parsed.entry);
+                res.json({ entry, saved: true });
+            }
+        } catch (err) { fail(res, err); void next; }
+    });
 });
 
-router.delete('/:id(\\d+)', requireDatabase, async (req, res, next) => {
-    try {
-        const removed = await repository.deleteEntry(parseInt(req.params.id, 10));
-        if (!removed) return res.status(404).json({ error: 'No such timetable entry', code: 'NOT_FOUND' });
-        await store.reloadFromDatabase();
-        res.json({ deleted: true, id: parseInt(req.params.id, 10) });
-    } catch (err) { next(err); }
+router.delete('/:id(\\d+)', checkDeleteOwnership, async (req, res, next) => {
+    const entryId = parseInt(req.params.id, 10);
+    requireStorage(req, res, async () => {
+        try {
+            if (db.isConfigured() && store.usingDatabase) {
+                const removed = await repository.deleteEntry(entryId);
+                if (!removed) return res.status(404).json({ error: 'No such timetable entry', code: 'NOT_FOUND' });
+                await store.reloadFromDatabase();
+                res.json({ deleted: true, id: entryId });
+            } else {
+                const removed = store.deleteEntryInMemory(entryId);
+                if (!removed) return res.status(404).json({ error: 'No such timetable entry', code: 'NOT_FOUND' });
+                res.json({ deleted: true, id: entryId });
+            }
+        } catch (err) { next(err); }
+    });
 });
 
 router.use((req, res) => {
@@ -260,3 +651,4 @@ router.use((req, res) => {
 });
 
 module.exports = router;
+

@@ -1,0 +1,305 @@
+{
+  "name": "TecSubstitution - Gemini Vision Timetable Extraction",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "timetable-uploaded",
+        "responseMode": "onReceived",
+        "responseData": "allEntries",
+        "options": {}
+      },
+      "id": "11111111-0000-0000-0000-000000000001",
+      "name": "Webhook - Timetable Uploaded",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        200,
+        300
+      ],
+      "webhookId": "timetable-uploaded"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Validate incoming webhook payload\nconst body = $input.first().json.body || $input.first().json;\nconst uploadId = body.uploadId;\n\nif (!uploadId || typeof uploadId !== 'string') {\n  throw new Error('Missing or invalid uploadId in webhook payload.');\n}\n\nreturn [{\n  json: {\n    uploadId: uploadId,\n    departmentCode: body.departmentCode,\n    uploadType: body.uploadType,\n    facultyId: body.facultyId || null,\n    fileType: body.fileType || 'application/pdf'\n  }\n}];"
+      },
+      "id": "11111111-0000-0000-0000-000000000002",
+      "name": "Validate Webhook Payload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        420,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ $env.TECSUB_API_URL || 'http://127.0.0.1:3000' }}/api/internal/uploads/{{ $json.uploadId }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Internal-Secret",
+              "value": "={{ $env.INTERNAL_API_SECRET }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "11111111-0000-0000-0000-000000000003",
+      "name": "Get Upload Metadata",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        640,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.TECSUB_API_URL || 'http://127.0.0.1:3000' }}/api/internal/uploads/{{ $json.uploadId }}/status",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Internal-Secret",
+              "value": "={{ $env.INTERNAL_API_SECRET }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"status\": \"PROCESSING\"\n}",
+        "options": {}
+      },
+      "id": "11111111-0000-0000-0000-000000000004",
+      "name": "Mark Status PROCESSING",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        860,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ $env.TECSUB_API_URL || 'http://127.0.0.1:3000' }}/api/internal/uploads/{{ $('Get Upload Metadata').first().json.uploadId }}/file",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Internal-Secret",
+              "value": "={{ $env.INTERNAL_API_SECRET }}"
+            }
+          ]
+        },
+        "responseFormat": "file",
+        "options": {}
+      },
+      "id": "11111111-0000-0000-0000-000000000005",
+      "name": "Download Upload File",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        1080,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://generativelanguage.googleapis.com/v1beta/models/{{ $env.GEMINI_MODEL || 'gemini-2.5-flash' }}:generateContent",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-goog-api-key",
+              "value": "={{ $env.GEMINI_API_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"contents\": [\n    {\n      \"parts\": [\n        {\n          \"text\": \"You are a high-precision academic timetable vision system. Analyze the attached document and extract it into strictly valid JSON conforming to the B2.1 JSON schema. Return JSON ONLY without Markdown code fences, introductory, or concluding remarks. DO NOT invent faculty, subjects, rooms, or period timings. Null for unstated fields. Document branch code is \\\"\" + $('Get Upload Metadata').first().json.departmentCode + \"\\\". Timetable type is \\\"\" + $('Get Upload Metadata').first().json.uploadType + \"\\\".\"\n        },\n        {\n          \"inlineData\": {\n            \"mimeType\": $('Get Upload Metadata').first().json.fileType,\n            \"data\": $binary.data.data\n          }\n        }\n      ]\n    }\n  ],\n  \"generationConfig\": {\n    \"responseMimeType\": \"application/json\",\n    \"temperature\": 0.1\n  }\n}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "11111111-0000-0000-0000-000000000006",
+      "name": "Gemini Vision Extraction",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        1300,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Clean and parse Gemini response\nconst metadata = $('Get Upload Metadata').first().json;\nconst geminiRes = $input.first().json;\n\nconst candidates = geminiRes.candidates;\nif (!Array.isArray(candidates) || candidates.length === 0) {\n  throw new Error('Gemini returned no response candidates.');\n}\n\nlet text = candidates[0].content?.parts?.[0]?.text || '';\ntext = text.trim();\n\n// Strip Markdown code blocks\nif (text.startsWith('```')) {\n  text = text.replace(/^```(?:json)?\\s*\\n?([\\s\\S]*?)\\n?```$/i, '$1').trim();\n}\n\nlet parsed;\ntry {\n  parsed = JSON.parse(text);\n} catch (e) {\n  throw new Error('Failed to parse Gemini output as JSON: ' + e.message);\n}\n\nreturn [{\n  json: {\n    uploadId: metadata.uploadId,\n    extractedData: parsed\n  }\n}];"
+      },
+      "id": "11111111-0000-0000-0000-000000000007",
+      "name": "Clean & Parse JSON",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1520,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.TECSUB_API_URL || 'http://127.0.0.1:3000' }}/api/internal/uploads/{{ $json.uploadId }}/processed",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Internal-Secret",
+              "value": "={{ $env.INTERNAL_API_SECRET }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"uploadId\": \"{{ $json.uploadId }}\",\n  \"extractedData\": {{ JSON.stringify($json.extractedData) }}\n}",
+        "options": {}
+      },
+      "id": "11111111-0000-0000-0000-000000000008",
+      "name": "Post Processed Result",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        1740,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.TECSUB_API_URL || 'http://127.0.0.1:3000' }}/api/internal/uploads/{{ $('Get Upload Metadata').first().json.uploadId || $('Validate Webhook Payload').first().json.uploadId }}/fail",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Internal-Secret",
+              "value": "={{ $env.INTERNAL_API_SECRET }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"errorCode\": \"N8N_WORKFLOW_FAILED\",\n  \"errorMessage\": \"{{ $json.message || 'Extraction workflow encountered an error.' }}\"\n}",
+        "options": {}
+      },
+      "id": "11111111-0000-0000-0000-000000000009",
+      "name": "Notify Backend Failure",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        1520,
+        500
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook - Timetable Uploaded": {
+      "main": [
+        [
+          {
+            "node": "Validate Webhook Payload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Webhook Payload": {
+      "main": [
+        [
+          {
+            "node": "Get Upload Metadata",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Upload Metadata": {
+      "main": [
+        [
+          {
+            "node": "Mark Status PROCESSING",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mark Status PROCESSING": {
+      "main": [
+        [
+          {
+            "node": "Download Upload File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download Upload File": {
+      "main": [
+        [
+          {
+            "node": "Gemini Vision Extraction",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gemini Vision Extraction": {
+      "main": [
+        [
+          {
+            "node": "Clean & Parse JSON",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Clean & Parse JSON": {
+      "main": [
+        [
+          {
+            "node": "Post Processed Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveExecutionProgress": true
+  }
+}

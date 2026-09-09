@@ -16,8 +16,9 @@ const path = require('path');
 
 const db = require('./pool');
 const repository = require('./repository');
+const config = require('../config');
 const demoTimetable = require('../data/demoTimetable');
-const { DEPARTMENTS } = require('../data/departments');
+const { DEPARTMENTS, getBranch } = require('../data/departments');
 const { normalize } = require('../core/normalizer');
 
 const SCHEMA_PATH = path.join(__dirname, 'schema.sql');
@@ -28,24 +29,53 @@ async function migrate() {
 }
 
 /**
- * Insert the bundled demo dataset. Returns what was written, or
- * `{ seeded: false }` when the database already holds a timetable.
+ * Initialize single branch instance or insert demo dataset if requested.
+ * Returns what was written or `{ seeded: false }`.
  */
 async function seed(dataset = demoTimetable, options = {}) {
+    const shouldSeedDemo = Boolean(options.forceDemo || config.dbSeedDemo);
+
+    if (!shouldSeedDemo) {
+        // Single-branch clean initialization
+        const branch = getBranch();
+        await db.withTransaction(async client => {
+            const defaultPeriods = [
+                { period: 1, start: '09:00', end: '09:50' },
+                { period: 2, start: '09:50', end: '10:40' },
+                { period: 3, start: '10:50', end: '11:40' },
+                { period: 4, start: '11:40', end: '12:30' },
+                { period: 5, start: '01:30', end: '02:20' },
+                { period: 6, start: '02:20', end: '03:10' },
+                { period: 7, start: '03:10', end: '04:00' }
+            ];
+            for (const p of defaultPeriods) {
+                await client.query(
+                    `INSERT INTO periods (period, start_time, end_time) VALUES ($1, $2, $3)
+                     ON CONFLICT (period) DO NOTHING`,
+                    [p.period, p.start, p.end]);
+            }
+
+            if (branch && branch.configured && branch.code) {
+                await client.query(`
+                    INSERT INTO departments (code, name, academic_year, semester)
+                    VALUES ($1, $2, $3, $4)
+                    ON CONFLICT (code) DO UPDATE SET
+                        name = COALESCE(departments.name, EXCLUDED.name),
+                        academic_year = COALESCE(departments.academic_year, EXCLUDED.academic_year),
+                        semester = COALESCE(departments.semester, EXCLUDED.semester)
+                `, [branch.code, branch.name, branch.academicYear, branch.semester]);
+            }
+        });
+        return { seeded: true, singleBranch: true, counts: await repository.counts() };
+    }
+
     if (!options.force && !(await repository.isEmpty())) {
         return { seeded: false, reason: 'timetable already contains rows', counts: await repository.counts() };
     }
 
-    // Normalizing first means the rows written to the database are exactly the
-    // rows the engine would have served from memory — one source of truth for
-    // what "the demo data" is, including the inferred theory/lab type.
     const normalized = normalize(dataset);
 
     await db.withTransaction(async client => {
-        // ---- departments ----
-        // The canonical branch list first, then anything else the dataset
-        // mentions, so every branch is selectable even before a faculty
-        // member has been assigned to it.
         const declaredDepartments = dataset.departments || [];
         const mentioned = [...new Set(normalized.faculty.map(f => f.department))]
             .filter(code => !DEPARTMENTS.some(d => d.code === code) &&

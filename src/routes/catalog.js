@@ -22,7 +22,7 @@ const router = express.Router();
 const store = require('../data/store');
 const db = require('../db/pool');
 const repository = require('../db/repository');
-const { DEPARTMENTS, nameFor: departmentName } = require('../data/departments');
+const { DEPARTMENTS, getBranch, setBranch, nameFor: departmentName } = require('../data/departments');
 
 const SUBJECT_TYPES = ['theory', 'lab'];
 
@@ -74,12 +74,69 @@ function branchesFromDataset() {
     return [...seen.values()].sort((a, b) => a.code.localeCompare(b.code));
 }
 
+router.get('/branch', async (req, res) => {
+    try {
+        const branchCode = req.session ? req.session.department : null;
+        const branch = db.isConfigured()
+            ? await repository.getInstanceBranch()
+            : getBranch(branchCode);
+        if (!branch || !branch.configured || !branch.code) {
+            return res.json({
+                configured: false,
+                branch: null,
+                status: 'NOT CONFIGURED',
+                writable: db.isConfigured()
+            });
+        }
+        res.json({ configured: true, branch, writable: db.isConfigured() });
+    } catch (err) { fail(res, err); }
+});
+
+router.put('/branch', async (req, res) => {
+    if (req.session && req.session.role === 'faculty') {
+        return res.status(403).json({ error: 'Only HOS / Administrator can configure the branch.', code: 'FORBIDDEN' });
+    }
+    const body = req.body || {};
+    const sessionBranch = req.session ? req.session.department : null;
+    if (sessionBranch && body.code && body.code.trim().toUpperCase() !== sessionBranch.toUpperCase()) {
+        return res.status(403).json({ error: 'Cannot modify a different branch', code: 'FORBIDDEN' });
+    }
+    const code = sessionBranch || text(body.code);
+    const name = text(body.name);
+    const academicYear = text(body.academicYear);
+    const semester = body.semester != null && !isNaN(parseInt(body.semester, 10)) ? parseInt(body.semester, 10) : null;
+
+    try {
+        if (db.isConfigured()) {
+            const updated = await repository.updateInstanceBranch({ code, name, academicYear, semester });
+            return res.json({ message: 'Branch configuration updated', branch: updated });
+        } else {
+            const updated = setBranch({ code, name, academicYear, semester });
+            if (req.session && updated && updated.code) {
+                req.session.department = updated.code;
+                req.session.branchName = updated.name;
+            }
+            return res.json({ message: 'Branch configuration updated (in-memory)', branch: updated });
+        }
+    } catch (err) { fail(res, err); }
+});
+
 router.get('/branches', async (req, res) => {
     try {
-        const branches = db.isConfigured()
-            ? await repository.listDepartments()
-            : branchesFromDataset();
-        res.json({ count: branches.length, branches, writable: db.isConfigured() });
+        const branchCode = req.session ? req.session.department : null;
+        const branch = db.isConfigured()
+            ? await repository.getInstanceBranch(branchCode)
+            : getBranch(branchCode);
+        if (!branch || !branch.configured || !branch.code) {
+            return res.json({
+                count: 0,
+                branches: [],
+                branch: null,
+                status: 'NOT CONFIGURED',
+                writable: db.isConfigured()
+            });
+        }
+        res.json({ count: 1, branches: [branch], branch, writable: db.isConfigured() });
     } catch (err) { fail(res, err); }
 });
 
@@ -154,8 +211,18 @@ function byBranch(list, branch) {
 
 router.get('/subjects', async (req, res) => {
     try {
+        const sessionDept = req.session && req.session.department ? String(req.session.department).trim().toUpperCase() : null;
+        const queryDept = req.query.branch ? String(req.query.branch).trim().toUpperCase() : null;
+
+        if (sessionDept && queryDept && queryDept !== sessionDept) {
+            return res.status(403).json({
+                error: `Cross-branch queries are not allowed. Current branch is ${sessionDept}.`,
+                code: 'FORBIDDEN'
+            });
+        }
+        const effectiveBranch = queryDept || sessionDept;
         const all = db.isConfigured() ? await repository.listSubjects() : subjectsFromDataset();
-        const subjects = byBranch(all, req.query.branch);
+        const subjects = byBranch(all, effectiveBranch);
         res.json({ count: subjects.length, subjects, writable: db.isConfigured() });
     } catch (err) { fail(res, err); }
 });
@@ -229,8 +296,18 @@ function classesFromDataset() {
 
 router.get('/classes', async (req, res) => {
     try {
+        const sessionDept = req.session && req.session.department ? String(req.session.department).trim().toUpperCase() : null;
+        const queryDept = req.query.branch ? String(req.query.branch).trim().toUpperCase() : null;
+
+        if (sessionDept && queryDept && queryDept !== sessionDept) {
+            return res.status(403).json({
+                error: `Cross-branch queries are not allowed. Current branch is ${sessionDept}.`,
+                code: 'FORBIDDEN'
+            });
+        }
+        const effectiveBranch = queryDept || sessionDept;
         const all = db.isConfigured() ? await repository.listClasses() : classesFromDataset();
-        const classes = byBranch(all, req.query.branch);
+        const classes = byBranch(all, effectiveBranch);
         res.json({ count: classes.length, classes, writable: db.isConfigured() });
     } catch (err) { fail(res, err); }
 });

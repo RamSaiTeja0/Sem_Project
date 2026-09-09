@@ -24,6 +24,17 @@ router.get('/meta', (req, res) => {
 router.get('/records', (req, res) => {
     const engine = store.engine;
     const { day, period, faculty, status } = req.query;
+
+    if (req.session && req.session.role === 'faculty') {
+        const sessionFaculty = req.session.facultyName || req.session.name;
+        if (faculty && String(faculty).trim().toUpperCase() !== sessionFaculty.toUpperCase()) {
+            return res.status(403).json({
+                error: 'Forbidden: Faculty members can only access their own timetable records.',
+                code: 'FORBIDDEN'
+            });
+        }
+    }
+
     let records = engine.getRecords();
 
     if (day) {
@@ -48,8 +59,60 @@ router.get('/records', (req, res) => {
     res.json({ count: records.length, records });
 });
 
+router.get('/mine', (req, res) => {
+    if (!req.session || req.session.role !== 'faculty') {
+        return res.status(401).json({ error: 'Faculty sign-in required', code: 'UNAUTHORIZED' });
+    }
+    const facultyName = req.session.facultyName || req.session.name;
+    const engine = store.engine;
+    let grid = engine.getFacultyGrid(facultyName);
+    const meta = engine.getMeta();
+    if (!grid) {
+        const days = engine.getDays();
+        const periods = engine.getPeriods();
+        const cells = [];
+        days.forEach(day => periods.forEach(period => {
+            cells.push({
+                day, period,
+                subject: null, faculty: facultyName, facultyId: req.session.facultyId || null,
+                phone: null, className: null, room: null, status: 'free'
+            });
+        }));
+        grid = { view: 'faculty', name: facultyName, days, periods, cells };
+    }
+    res.json({
+        ...grid,
+        faculty: facultyName,
+        branch: req.session.department,
+        periodTimings: meta.periodTimings
+    });
+});
+
 router.get('/', (req, res) => {
     const engine = store.engine;
+
+    // Faculty query parameter isolation
+    if (req.session && req.session.role === 'faculty') {
+        const sessionFaculty = req.session.facultyName || req.session.name;
+        if (req.query.faculty && String(req.query.faculty).trim().toUpperCase() !== sessionFaculty.toUpperCase()) {
+            return res.status(403).json({
+                error: 'Forbidden: Faculty members can only view their own timetable.',
+                code: 'FORBIDDEN'
+            });
+        }
+        if (req.query.faculty_id && req.session.facultyId && String(req.query.faculty_id) !== String(req.session.facultyId)) {
+            return res.status(403).json({
+                error: 'Forbidden: You cannot query another faculty_id.',
+                code: 'FORBIDDEN'
+            });
+        }
+        if (req.query.facultyName && String(req.query.facultyName).trim().toUpperCase() !== sessionFaculty.toUpperCase()) {
+            return res.status(403).json({
+                error: 'Forbidden: You cannot query another facultyName.',
+                code: 'FORBIDDEN'
+            });
+        }
+    }
 
     if (req.query.faculty) {
         const grid = engine.getFacultyGrid(req.query.faculty);

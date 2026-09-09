@@ -159,6 +159,47 @@ a { color: var(--brand-600); }
 }
 .field textarea { resize: vertical; min-height: 120px; font-family: var(--mono); font-size: 0.82rem; }
 
+
+/* Password toggle styles */
+.password-input-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: 100%;
+}
+.password-input-wrapper input {
+  width: 100%;
+  padding-right: 44px !important;
+}
+.btn-toggle-pw {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: transparent;
+  border: none;
+  padding: 6px;
+  cursor: pointer;
+  color: var(--ink-500);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-sm);
+  transition: color 0.15s ease, background-color 0.15s ease;
+}
+.btn-toggle-pw:hover {
+  color: var(--ink-900);
+  background-color: var(--canvas-alt);
+}
+.btn-toggle-pw:focus-visible {
+  outline: 2px solid var(--brand-500);
+}
+.btn-toggle-pw svg {
+  display: block;
+  pointer-events: none;
+}
+
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; animation: none !important; }
 }
+

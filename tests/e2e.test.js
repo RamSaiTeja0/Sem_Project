@@ -521,7 +521,7 @@ async function httpRun() {
             faculty: cell.faculty, class: cell.className
         });
         assert.strictEqual(res.status, 200);
-        assert.strictEqual(res.body.totalAvailable, 13);
+        assert.strictEqual(res.body.totalAvailable, 18);
         assert.ok(!res.body.availableFaculty.includes(cell.faculty));
     });
 

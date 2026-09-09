@@ -21,6 +21,9 @@ const importRoutes = require('./src/routes/import');
 const entryRoutes = require('./src/routes/entries');
 const catalogRoutes = require('./src/routes/catalog');
 const authRoutes = require('./src/routes/auth');
+const uploadRoutes = require('./src/routes/uploads');
+const internalUploadRoutes = require('./src/routes/internalUploads');
+const stagingRoutes = require('./src/routes/staging');
 
 const app = express();
 
@@ -43,6 +46,11 @@ app.get(['/', '/home', '/home.html'], (req, res) => {
 // Sign-in page. Always reachable, including when auth is not enforced.
 app.get(['/login', '/login.html'], (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'login.html'));
+});
+
+// Create account page.
+app.get(['/register', '/register.html'], (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'register.html'));
 });
 
 // Health check, handy for deployment probes.
@@ -81,6 +89,9 @@ app.get('/api/storage', (req, res) => {
 // being signed in already.
 app.use('/api/auth', authRoutes);
 
+// Internal service-to-service automation API (Phase B2.3, authenticated via X-Internal-Secret)
+app.use('/api/internal/uploads', internalUploadRoutes);
+
 /**
  * Optional sign-in guard. Off by default (AUTH_REQUIRED=false) so the demo
  * dataset stays browsable; when on, API calls answer 401 in JSON and page
@@ -109,6 +120,8 @@ app.use('/api/timetable/entries', requireAuth, entryRoutes);
 app.use('/api/timetable', requireAuth, timetableRoutes);
 app.use('/api/faculty', requireAuth, facultyRoutes);
 app.use('/api/availability', requireAuth, availabilityRoutes);
+app.use('/api/uploads', requireAuth, uploadRoutes);
+app.use('/api/staging', requireAuth, stagingRoutes);
 // Branch / subject / class management. Reads work without a database; writes
 // need one, for the same reason timetable entry writes do.
 app.use('/api', requireAuth, catalogRoutes);
@@ -116,6 +129,11 @@ app.use('/api', requireAuth, catalogRoutes);
 // Unknown API paths answer in JSON instead of returning the dashboard HTML.
 app.use('/api', (req, res) => {
     res.status(404).json({ error: `Unknown endpoint: ${req.method} ${req.originalUrl}`, code: 'NOT_FOUND' });
+});
+
+// Uploaded files are private; direct web access is forbidden.
+app.use('/uploads', (req, res) => {
+    res.status(404).json({ error: 'Direct file access not allowed.', code: 'NOT_FOUND' });
 });
 
 // Everything else serves the dashboard, so its in-app views remain linkable.

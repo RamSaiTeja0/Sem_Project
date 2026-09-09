@@ -22,22 +22,16 @@
     <nav class="nav" id="nav">
       <a class="nav-item nav-link" href="/">Home</a>
       <button type="button" class="nav-item is-active" data-view="dashboard">Dashboard</button>
-      <button type="button" class="nav-item" data-view="schedule">My Schedule</button>
-      <button type="button" class="nav-item" data-view="substitute">Adjust / Substitute</button>
-      <button type="button" class="nav-item" data-view="availability">Faculty Availability</button>
-      <button type="button" class="nav-item" data-view="import">Upload Paper Sheet</button>
-      <button type="button" class="nav-item" data-view="attendance">Attendance Track</button>
+      <button type="button" class="nav-item" data-view="availability" id="navAvailability">Faculty Availability</button>
+      <button type="button" class="nav-item" data-view="substitute" id="navSubstitute">Adjust / Substitute</button>
+      <button type="button" class="nav-item" data-view="schedule" id="navSchedule">My Timetable</button>
+      <button type="button" class="nav-item" data-view="timetable" id="navTimetable">Master Timetable</button>
+      <button type="button" class="nav-item" data-view="faculty" id="navFaculty">Faculty Management</button>
 
-      <div class="nav-label">Manage</div>
-      <button type="button" class="nav-item" data-view="timetable">Master Timetable</button>
-      <button type="button" class="nav-item" data-view="manage">Add Timetable</button>
-      <button type="button" class="nav-item" data-view="branches">Branch Management</button>
-      <button type="button" class="nav-item" data-view="subjects">Subject Management</button>
-      <button type="button" class="nav-item" data-view="classes">Class Management</button>
-      <button type="button" class="nav-item" data-view="faculty">Faculty Directory</button>
-      <button type="button" class="nav-item" data-view="reports">Availability Summary</button>
-      <button type="button" class="nav-item" data-view="validation">Validation Report</button>
-      <button type="button" class="nav-item" data-view="about">Settings / About</button>
+      <div class="nav-label" id="navManageLabel">Manage</div>
+      <button type="button" class="nav-item" data-view="manage" id="navManage">Add Timetable</button>
+      <button type="button" class="nav-item" data-view="import" id="navImport">Upload Timetable</button>
+      <button type="button" class="nav-item" data-view="about" id="navAbout">Branch Settings</button>
     </nav>
 
     <div class="sidebar-foot">
@@ -137,12 +131,38 @@
         <div class="card">
           <div class="card-head">
             <div>
-              <h2>My Schedule</h2>
-              <p>One faculty member's own week. Click any period to see who could cover it.</p>
+              <h2 id="schedTitle">My Timetable</h2>
+              <p id="schedSubtitle">Your weekly schedule. Add or modify your assigned periods.</p>
             </div>
-            <label class="field inline"><span>Faculty</span><select id="schedFaculty"></select></label>
+            <div class="head-actions">
+              <span class="badge badge-primary" id="schedBranchBadge">Branch</span>
+              <span class="badge badge-neutral" id="schedFacultyBadge" style="display:none;">Faculty Name</span>
+              <label class="field inline" id="schedFacultyWrap"><span>Faculty</span><select id="schedFaculty"></select></label>
+            </div>
           </div>
           <div class="card-body">
+            <!-- Faculty Profile Summary -->
+            <div id="schedProfileCard" style="display:none; margin-bottom: 16px; padding: 14px 18px; background: var(--brand-050); border: 1px solid var(--brand-200); border-radius: var(--radius-sm);">
+              <div style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 12px;">
+                <div>
+                  <div style="display: flex; align-items: center; gap: 8px;">
+                    <strong id="schedProfName" style="font-size: 1.05rem; color: var(--brand-900);">Faculty Member</strong>
+                    <span class="badge badge-primary" id="schedProfBranch">Branch</span>
+                  </div>
+                  <div style="font-size: 0.82rem; color: var(--ink-600); margin-top: 4px;">
+                    <span>Phone: <strong id="schedProfPhone" class="mono">—</strong></span>
+                    <span style="margin: 0 6px;">&bull;</span>
+                    <span>Username: <strong id="schedProfUsername" class="mono">—</strong></span>
+                  </div>
+                </div>
+                <div>
+                  <div style="font-size: 0.74rem; font-weight: 700; text-transform: uppercase; color: var(--brand-800); margin-bottom: 4px;">
+                    Teaching Subjects / Expertise:
+                  </div>
+                  <div id="schedProfSubjects" style="display: flex; flex-wrap: wrap; gap: 6px;"></div>
+                </div>
+              </div>
+            </div>
             <div class="stats compact" id="schedStats"></div>
             <div class="table-scroll">
               <table class="timetable">
@@ -151,6 +171,60 @@
               </table>
             </div>
             <div id="schedState" class="notice notice-info" style="margin-top:12px;">Loading schedule…</div>
+          </div>
+        </div>
+
+        <!-- Upload My Timetable Card (Phase B1) -->
+        <div class="card" id="facUploadCard" style="margin-bottom: 20px;">
+          <div class="card-head">
+            <div>
+              <h2>Upload My Timetable</h2>
+              <p>Upload your personal timetable sheet as an image (PNG, JPG) or PDF document.</p>
+            </div>
+          </div>
+          <div class="card-body">
+            <form id="facUploadForm" enctype="multipart/form-data">
+              <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 12px;">
+                <input type="file" id="facTimetableFile" name="timetable" accept=".png,.jpg,.jpeg,.pdf" style="display:none;" />
+                <button type="button" class="btn btn-secondary" id="btnFacChooseFile">Choose File</button>
+                <button type="submit" class="btn btn-primary" id="btnFacUpload" disabled>Upload</button>
+              </div>
+              <div id="facSelectedFile" style="margin-top: 10px; font-size: 0.9rem; color: var(--ink-700);">
+                Selected file: <span id="facSelectedFileName" class="mono" style="font-weight: 600;">None</span>
+              </div>
+              <div id="facUploadStatus" style="margin-top: 12px; display: none;"></div>
+            </form>
+          </div>
+        </div>
+
+        <!-- Faculty Timetable Entry Management Form -->
+        <div class="card" id="schedManageCard">
+          <div class="card-head">
+            <div>
+              <h2 id="schedFormTitle">Add / Edit My Timetable Slot</h2>
+              <p>Schedule a period for yourself. All entries are validated against branch availability.</p>
+            </div>
+          </div>
+          <div class="card-body">
+            <form id="schedEntryForm">
+              <input type="hidden" id="schedEntryId" value="" />
+              <div class="field-grid">
+                <label class="field"><span>Class</span><select id="schedEntryClass" required></select></label>
+                <label class="field"><span>Day</span><select id="schedEntryDay" required></select></label>
+                <label class="field"><span>Period</span><select id="schedEntryPeriod" required></select></label>
+                <label class="field"><span>Subject</span><select id="schedEntrySubject" required></select></label>
+                <label class="field"><span>Room</span><input type="text" id="schedEntryRoom" placeholder="e.g. C-401" /></label>
+                <label class="field"><span>Session Type</span>
+                  <select id="schedEntryType"><option value="theory">Theory</option><option value="lab">Lab</option></select>
+                </label>
+              </div>
+              <div class="actions" style="margin-top:14px; display:flex; gap:8px; align-items:center;">
+                <button type="submit" class="btn btn-primary" id="schedSaveBtn">Save Entry</button>
+                <button type="button" class="btn btn-secondary" id="schedResetBtn">Clear</button>
+                <button type="button" class="btn btn-danger" id="schedDeleteBtn" style="display:none; margin-left:auto;">Delete Entry</button>
+              </div>
+              <div id="schedEntryNote" style="margin-top:10px;"></div>
+            </form>
           </div>
         </div>
 
@@ -218,7 +292,8 @@
             <form id="manageForm" autocomplete="off">
               <input type="hidden" id="manageId" value="" />
               <div class="controls">
-                <label class="field"><span>Department</span><select id="manageDept"></select></label>
+                <label class="field" style="display:none;"><select id="manageDept"></select></label>
+                <div class="field" style="align-self:center;"><span class="badge badge-primary" id="manageBranchBadge">Branch</span></div>
                 <label class="field"><span>Class / Section</span><select id="manageClass" required></select></label>
                 <label class="field"><span>Day</span><select id="manageDay" required></select></label>
                 <label class="field"><span>Period</span><select id="managePeriod" required></select></label>
@@ -274,6 +349,30 @@
 
       <!-- --------------------- FACULTY AVAILABILITY ------------------ -->
       <section class="view" id="view-availability">
+        <!-- HOS Faculty Availability Finder Card -->
+        <div class="card" id="availHOSCard" style="margin-bottom: 24px;">
+          <div class="card-head">
+            <div>
+              <h2>Faculty Availability Finder</h2>
+              <p>Determine which faculty members in this branch are free or busy during a specific period when a faculty member is absent.</p>
+            </div>
+            <span class="badge badge-primary" id="availBranchBadge">Branch</span>
+          </div>
+          <div class="card-body">
+            <div class="field-grid" style="grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 14px; align-items: flex-end;">
+              <label class="field"><span>Absent Faculty</span><select id="availAbsentFaculty"></select></label>
+              <label class="field"><span>Day</span><select id="availDay"></select></label>
+              <label class="field"><span>Period</span><select id="availPeriod"></select></label>
+              <div class="field" style="margin-bottom: 0;">
+                <button type="button" class="btn btn-primary" id="availCheckBtn" style="width: 100%;">Check Availability</button>
+              </div>
+            </div>
+            <div id="availHOSResult" class="result-panel" style="margin-top: 18px;">
+              <p class="muted">Select an absent faculty member, day, and period, then click Check Availability.</p>
+            </div>
+          </div>
+        </div>
+
         <div class="grid-2 wide-left">
           <div class="card">
             <div class="card-head">
@@ -307,7 +406,7 @@
             </div>
             <div class="card-body">
               <div class="controls" style="margin-bottom:14px;">
-                <label class="field"><span>Department</span><select id="availDept"></select></label>
+                <label class="field" style="display:none;"><select id="availDept"></select></label>
                 <label class="field"><span>Search</span><input type="text" id="availSearch" placeholder="Faculty name" /></label>
               </div>
               <div id="availResult" class="result-panel">
@@ -352,7 +451,7 @@
               </div>
               <div class="controls" style="margin-top:14px;">
                 <label class="field"><span>Class name (optional)</span>
-                  <input type="text" id="importClass" placeholder="e.g. CME-A" /></label>
+                  <input type="text" id="importClass" placeholder="e.g. Section-A" /></label>
                 <button type="button" class="btn" id="importPreview">Process &amp; preview</button>
               </div>
               <p class="muted" id="formatNote" style="margin-top:10px;"></p>
@@ -368,12 +467,12 @@
               <label class="field">
                 <span>Pasted timetable</span>
                 <textarea id="pasteText" placeholder="Faculty, Monday P1, Monday P2, Tuesday P1
-Ms. B. Kusuma, Python Programming, Python Programming, FREE
-Ms. G. Sandhya Rani, FREE, FREE, Big Data &amp; Cloud Computing"></textarea>
+Dr. A. Rao, Data Structures, Data Structures, FREE
+Prof. B. Kumar, FREE, FREE, Database Management Systems"></textarea>
               </label>
               <div class="controls" style="margin-top:12px;">
                 <label class="field"><span>Class name (optional)</span>
-                  <input type="text" id="pasteClass" placeholder="e.g. CME-A" /></label>
+                  <input type="text" id="pasteClass" placeholder="e.g. Section-A" /></label>
                 <button type="button" class="btn" id="pastePreview">Process &amp; preview</button>
                 <button type="button" class="btn btn-secondary" id="pasteClear">Clear</button>
               </div>
@@ -404,42 +503,115 @@ Ms. G. Sandhya Rani, FREE, FREE, Big Data &amp; Cloud Computing"></textarea>
         </div>
       </section>
 
-      <!-- ---------------------- ATTENDANCE TRACK --------------------- -->
-      <section class="view" id="view-attendance">
-        <div class="card">
+      <!-- ---------------------- MASTER TIMETABLE --------------------- -->
+      <section class="view" id="view-timetable">
+        <!-- Upload Master Timetable Card (Phase B1) -->
+        <div class="card" id="hosUploadCard" style="margin-bottom: 20px;">
           <div class="card-head">
             <div>
-              <h2>Attendance Track</h2>
-              <p>Mark whether each scheduled period was taken. Kept in this browser only.</p>
-            </div>
-            <div class="head-actions">
-              <label class="field inline"><span>Day</span><select id="attDay"></select></label>
-              <label class="field inline"><span>Class</span><select id="attClass"></select></label>
+              <h2>Upload Master Timetable</h2>
+              <p>Upload a branch timetable sheet as an image (PNG, JPG) or PDF document.</p>
             </div>
           </div>
           <div class="card-body">
-            <div class="notice notice-warn">
-              <strong>Local tracking.</strong> The server has no attendance store, so these marks are
-              saved in this browser (localStorage) and are never sent anywhere or written to a timetable.
-            </div>
-            <div class="stats compact" id="attStats" style="margin-top:16px;"></div>
-            <div class="table-scroll" style="margin-top:8px;">
-              <table class="data" id="attTable">
-                <thead>
-                  <tr><th>Period</th><th>Subject</th><th>Faculty</th><th>Room</th><th>Status</th><th>Mark</th></tr>
-                </thead>
-                <tbody id="attBody"></tbody>
-              </table>
-            </div>
-            <div class="controls" style="margin-top:14px;">
-              <button type="button" class="btn btn-secondary" id="attReset">Reset this day</button>
-            </div>
+            <form id="hosUploadForm" enctype="multipart/form-data">
+              <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 12px;">
+                <input type="file" id="hosTimetableFile" name="timetable" accept=".png,.jpg,.jpeg,.pdf" style="display:none;" />
+                <button type="button" class="btn btn-secondary" id="btnHosChooseFile">Choose File</button>
+                <button type="submit" class="btn btn-primary" id="btnHosUpload" disabled>Upload</button>
+              </div>
+              <div id="hosSelectedFile" style="margin-top: 10px; font-size: 0.9rem; color: var(--ink-700);">
+                Selected file: <span id="hosSelectedFileName" class="mono" style="font-weight: 600;">None</span>
+              </div>
+              <div id="hosUploadStatus" style="margin-top: 12px; display: none;"></div>
+              <div id="hosPendingWrap" style="margin-top: 14px; display: flex; align-items: center; gap: 10px;">
+                <button type="button" class="btn btn-secondary btn-sm" id="btnHosCheckPending">Check Staged Timetables</button>
+                <span id="hosPendingCount" class="muted" style="font-size: 0.85rem;"></span>
+              </div>
+            </form>
           </div>
         </div>
-      </section>
 
-      <!-- ---------------------- MASTER TIMETABLE --------------------- -->
-      <section class="view" id="view-timetable">
+        <!-- Staged Timetable Review & Approval Card (Phase B2.5) -->
+        <div class="card" id="hosStagingCard" style="display: none; margin-bottom: 20px;">
+          <div class="card-head">
+            <div>
+              <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+                <h2 style="margin: 0;">Review Staged Timetable</h2>
+                <span class="badge" id="stagingValidationBadge">VALID</span>
+                <span class="badge badge-neutral" id="stagingImportBadge">STAGED</span>
+              </div>
+              <p id="stagingMetaSubtitle" style="margin-top: 4px;">Extracted timetable review. Explicit HOS approval is required before importing into the live schedule.</p>
+            </div>
+            <div class="head-actions">
+              <button type="button" class="btn btn-sm btn-secondary" id="btnStagingClose">✕ Close</button>
+            </div>
+          </div>
+          <div class="card-body">
+            <!-- Metadata details -->
+            <div id="stagingDetailsBox" style="display: flex; flex-wrap: wrap; gap: 16px; padding: 12px 16px; background: var(--surface-subtle); border-radius: var(--radius-sm); margin-bottom: 14px; font-size: 0.88rem;">
+              <div><strong>Original File:</strong> <span id="stgFileName" class="mono">—</span></div>
+              <div><strong>Target Class:</strong> <span id="stgClass" class="mono">—</span></div>
+              <div><strong>Semester:</strong> <span id="stgSemester">—</span></div>
+              <div><strong>Academic Year:</strong> <span id="stgYear">—</span></div>
+              <div><strong>Slots Extracted:</strong> <span id="stgCount">—</span></div>
+            </div>
+
+            <!-- Unresolved Entities Banner -->
+            <div id="stagingUnresolvedBanner" style="display: none; margin-bottom: 16px; padding: 14px 18px; background: #fff8e6; border: 1px solid #f6c000; border-radius: var(--radius-sm);">
+              <div style="display: flex; align-items: flex-start; gap: 10px;">
+                <span style="font-size: 1.2rem;">⚠️</span>
+                <div style="flex: 1;">
+                  <strong style="color: #8c6200; font-size: 0.95rem;">Action Required: Unresolved Catalog References</strong>
+                  <p style="margin: 4px 0 10px; font-size: 0.86rem; color: #5c4100;">
+                    The following AI-extracted items could not be matched to your branch catalog. To protect catalog integrity, automatic creation is disabled. Map them to existing records below to enable approval.
+                  </p>
+                  <div id="stagingUnresolvedList" style="display: flex; flex-direction: column; gap: 8px;"></div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Diagnostic Errors / Warnings -->
+            <div id="stagingAlertBox" style="display: none; margin-bottom: 14px;"></div>
+
+            <!-- Staged Schedule Preview Matrix -->
+            <div style="margin-bottom: 16px;">
+              <h3 style="font-size: 1rem; margin-bottom: 8px;">Extracted Schedule Preview</h3>
+              <div class="table-scroll">
+                <table class="timetable" id="stagingTable">
+                  <thead id="stgHead"></thead>
+                  <tbody id="stgBody"></tbody>
+                </table>
+              </div>
+            </div>
+
+            <!-- Approval / Rejection Controls -->
+            <div style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 14px; padding-top: 14px; border-top: 1px solid var(--border);">
+              <div id="stagingNoticeText" style="font-size: 0.88rem; color: var(--ink-700);">
+                Review all periods and spans carefully before approving.
+              </div>
+              <div style="display: flex; gap: 10px; align-items: center;">
+                <button type="button" class="btn btn-danger" id="btnStagingReject">Reject</button>
+                <button type="button" class="btn btn-primary" id="btnStagingApprove" disabled>Approve &amp; Import to Live Timetable</button>
+              </div>
+            </div>
+
+            <!-- Reject Reason Modal / Prompt Box -->
+            <div id="stagingRejectBox" style="display: none; margin-top: 14px; padding: 14px; background: var(--danger-050); border: 1px solid var(--danger-200); border-radius: var(--radius-sm);">
+              <label class="field">
+                <span>Reason for Rejection</span>
+                <input type="text" id="stagingRejectReason" placeholder="e.g. Needs revision, wrong semester sheet" />
+              </label>
+              <div style="display: flex; gap: 8px; margin-top: 8px;">
+                <button type="button" class="btn btn-danger btn-sm" id="btnStagingConfirmReject">Confirm Rejection</button>
+                <button type="button" class="btn btn-secondary btn-sm" id="btnStagingCancelReject">Cancel</button>
+              </div>
+            </div>
+
+            <div id="stagingActionStatus" style="margin-top: 12px; display: none;"></div>
+          </div>
+        </div>
+
         <div class="card">
           <div class="card-head">
             <div>
@@ -447,7 +619,9 @@ Ms. G. Sandhya Rani, FREE, FREE, Big Data &amp; Cloud Computing"></textarea>
               <p>Every cell is clickable. Clicking sends its day and period to the availability engine.</p>
             </div>
             <div class="head-actions">
-              <label class="field inline"><span>Department</span><select id="ttDept"></select></label>
+              <span class="badge badge-primary" id="ttBranchBadge">Branch</span>
+              <button type="button" class="btn btn-sm btn-primary" id="ttManageBtn">+ Add / Edit Entry</button>
+              <label class="field inline" style="display:none;"><select id="ttDept"></select></label>
               <label class="field inline"><span>View</span><select id="ttView"></select></label>
             </div>
           </div>
@@ -471,39 +645,110 @@ Ms. G. Sandhya Rani, FREE, FREE, Big Data &amp; Cloud Computing"></textarea>
 
       <!-- --------------------- FACULTY DIRECTORY --------------------- -->
       <section class="view" id="view-faculty">
-        <div class="card">
+        <div class="card" id="facAddCard">
           <div class="card-head">
             <div>
-              <h2>Add Faculty</h2>
-              <p>Register a new faculty member. Saved to the database and immediately available for substitution.</p>
+              <h2>Create Faculty Account</h2>
+              <p>Create a faculty account for this branch. The faculty automatically belongs to your branch.</p>
             </div>
-            <span class="pill" id="facultyBackend">Checking storage…</span>
+            <div class="head-actions">
+              <span class="badge badge-primary" id="facNewBranchBadge">Branch</span>
+              <span class="pill" id="facultyBackend">Active Instance Storage</span>
+            </div>
           </div>
           <div class="card-body">
             <div id="facultyStorageNote"></div>
             <form id="facultyForm" autocomplete="off">
               <div class="controls">
-                <label class="field"><span>Faculty ID <em class="req">*</em></span>
-                  <input type="text" id="facNewId" placeholder="e.g. FAC022" required /></label>
-                <label class="field"><span>Faculty name <em class="req">*</em></span>
-                  <input type="text" id="facNewName" placeholder="e.g. Dr. Anjali Rao" required /></label>
-                <label class="field"><span>Department <em class="req">*</em></span>
-                  <select id="facNewDept" required></select></label>
-                <label class="field"><span>Designation</span>
-                  <select id="facNewDesignation"></select></label>
-                <label class="field"><span>Email</span>
-                  <input type="email" id="facNewEmail" placeholder="name@college.edu" /></label>
-                <label class="field"><span>Phone</span>
-                  <input type="text" id="facNewPhone" placeholder="optional" /></label>
-                <label class="field"><span>Max weekly periods</span>
-                  <input type="number" id="facNewMax" min="1" max="60" placeholder="optional" /></label>
-                <label class="field"><span>Status</span>
-                  <select id="facNewStatus"></select></label>
-                <button type="submit" class="btn" id="facSave">Add faculty</button>
-                <button type="button" class="btn btn-ghost" id="facReset">Clear</button>
+                <label class="field"><span>Full Name <em class="req" style="color:var(--danger-500);">*</em></span>
+                  <input type="text" id="facNewName" placeholder="e.g. Test Faculty" required /></label>
+                <label class="field"><span>Phone Number <em class="req" style="color:var(--danger-500);">*</em></span>
+                  <input type="text" id="facNewPhone" placeholder="e.g. 9876543210" required /></label>
+                <label class="field"><span>Username <em class="req" style="color:var(--danger-500);">*</em></span>
+                  <input type="text" id="facNewUsername" placeholder="e.g. test_faculty" required /></label>
+
+                <label class="field"><span>Password <em class="req" style="color:var(--danger-500);">*</em></span>
+                  <div class="password-input-wrapper">
+                    <input type="password" id="facNewPassword" placeholder="e.g. Test_123" required />
+                    <button type="button" class="btn-toggle-pw" id="toggleFacPassword" aria-label="Show password" title="Show password">
+                      <svg class="eye-icon" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                        <circle cx="12" cy="12" r="3"></circle>
+                      </svg>
+                      <svg class="eye-off-icon" style="display:none;" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path>
+                        <line x1="1" y1="1" x2="23" y2="23"></line>
+                      </svg>
+                    </button>
+                  </div>
+                </label>
+
+                <label class="field"><span>Confirm Password <em class="req" style="color:var(--danger-500);">*</em></span>
+                  <div class="password-input-wrapper">
+                    <input type="password" id="facNewConfirmPassword" placeholder="Repeat password" required />
+                    <button type="button" class="btn-toggle-pw" id="toggleFacConfirmPassword" aria-label="Show password" title="Show password">
+                      <svg class="eye-icon" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                        <circle cx="12" cy="12" r="3"></circle>
+                      </svg>
+                      <svg class="eye-off-icon" style="display:none;" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path>
+                        <line x1="1" y1="1" x2="23" y2="23"></line>
+                      </svg>
+                    </button>
+                  </div>
+                </label>
+
+                <div class="field" style="grid-column: 1 / -1; background: var(--brand-050); border: 1px solid var(--brand-200); padding: 12px 14px; border-radius: var(--radius-md);">
+                  <span style="font-size: 0.72rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--brand-700); display: block; margin-bottom: 4px;">Current Branch</span>
+                  <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+                    <span class="badge badge-primary" id="facBranchInheritBadge" style="font-size: 0.95rem; padding: 6px 14px; font-weight: 700;">Branch</span>
+                    <span class="muted" style="font-size: 0.82rem; color: var(--ink-600);">(Read-only · Automatically inherited from your authenticated HOS session)</span>
+                  </div>
+                </div>
+
+                <label class="field" style="grid-column: 1 / -1;"><span>Subjects / Expertise (comma-separated) <em class="req" style="color:var(--danger-500);">*</em></span>
+                  <input type="text" id="facNewSubjects" placeholder="e.g. Subject 1, Subject 2" required /></label>
+
+                <input type="hidden" id="facNewId" value="" />
+                <input type="hidden" id="facNewDesignation" value="" />
+                <input type="hidden" id="facNewEmail" value="" />
+                <input type="hidden" id="facNewStatus" value="active" />
+
+                <div style="grid-column: 1 / -1; display:flex; gap:10px; margin-top:8px;">
+                  <button type="submit" class="btn btn-primary" id="facSave">Create Faculty</button>
+                  <button type="button" class="btn btn-ghost" id="facReset">Clear</button>
+                </div>
               </div>
             </form>
             <div id="facultyResult" style="margin-top:16px;"></div>
+
+            <!-- One-time Faculty Account Created Success Panel -->
+            <div id="facultySuccessPanel" style="display:none; margin-top:20px; padding:18px 22px; background:var(--surface); border:2px solid var(--ok-500); border-radius:var(--radius-md); box-shadow:var(--shadow-sm);">
+              <div style="display:flex; align-items:center; gap:8px; margin-bottom:10px;">
+                <span class="tick" style="font-size:1.25rem;">✓</span>
+                <h3 style="margin:0; font-size:1.1rem; color:var(--ink-900);">Faculty Account Created Successfully</h3>
+              </div>
+              <p class="muted" style="font-size:0.86rem; margin-bottom:14px;">
+                The password below is displayed once so you can provide it to the faculty member. It is stored securely hashed on the server.
+              </p>
+              <div style="display:grid; grid-template-columns:auto 1fr; gap:8px 16px; font-size:0.92rem; background:var(--canvas-subtle); padding:14px; border-radius:var(--radius-sm); border:1px solid var(--line);">
+                <span style="font-weight:600; color:var(--ink-600);">Name:</span>
+                <span id="succFacName" style="font-weight:600; color:var(--ink-900);">—</span>
+                <span style="font-weight:600; color:var(--ink-600);">Username:</span>
+                <span id="succFacUsername" class="mono" style="font-weight:700; color:var(--brand-700);">—</span>
+                <span style="font-weight:600; color:var(--ink-600);">Password:</span>
+                <span id="succFacPassword" class="mono" style="font-weight:700; color:var(--brand-700); letter-spacing:0.02em;">—</span>
+                <span style="font-weight:600; color:var(--ink-600);">Branch:</span>
+                <div><span id="succFacBranch" class="badge badge-primary">—</span></div>
+              </div>
+              <div style="display:flex; gap:10px; margin-top:14px; flex-wrap:wrap; align-items:center;">
+                <button type="button" class="btn btn-secondary btn-sm" id="btnCopyUsername">Copy Username</button>
+                <button type="button" class="btn btn-secondary btn-sm" id="btnCopyPassword">Copy Password</button>
+                <button type="button" class="btn btn-ghost btn-sm" id="btnDismissSuccess">Dismiss</button>
+                <span id="copyFeedback" class="muted" style="font-size:0.82rem;"></span>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -514,7 +759,8 @@ Ms. G. Sandhya Rani, FREE, FREE, Big Data &amp; Cloud Computing"></textarea>
               <p>Every faculty member on record, with teaching load. Free periods are what availability draws on.</p>
             </div>
             <div class="head-actions">
-              <label class="field inline"><span>Department</span><select id="facDept"></select></label>
+              <span class="badge badge-primary" id="facBranchBadge">Branch</span>
+              <label class="field inline" style="display:none;"><select id="facDept"></select></label>
               <label class="field inline"><span>Search</span><input type="text" id="facSearch" placeholder="Name, ID or email" /></label>
               <label class="field inline"><span>Free at</span><select id="facSlotDay"></select></label>
               <label class="field inline"><span>&nbsp;</span><select id="facSlotPeriod"></select></label>
@@ -539,148 +785,33 @@ Ms. G. Sandhya Rani, FREE, FREE, Big Data &amp; Cloud Computing"></textarea>
         </div>
       </section>
 
-      <!-- ------------------------- REPORTS --------------------------- -->
-      <section class="view" id="view-reports">
-        <div class="card">
-          <div class="card-head">
-            <div>
-              <h2>Availability Summary</h2>
-              <p>Free faculty for every day and period across the week.</p>
-            </div>
-          </div>
-          <div class="card-body">
-            <div class="table-scroll"><table class="heat" id="heatTable"></table></div>
-            <p class="muted" style="margin-top:12px;">
-              Each cell shows how many faculty are free at that slot, out of the full roster.
-            </p>
-          </div>
-        </div>
-      </section>
-
-      <!-- --------------------- BRANCH MANAGEMENT --------------------- -->
-      <section class="view" id="view-branches">
-        <div class="card">
-          <div class="card-head">
-            <div>
-              <h2>Branch Management</h2>
-              <p>A branch is an academic programme (CME). A class/section such as CME-A
-                 lives inside a branch and is managed under Class Management.</p>
-            </div>
-            <span class="pill" id="branchBackend">Checking storage…</span>
-          </div>
-          <div class="card-body">
-            <div id="branchStorageNote"></div>
-            <form id="branchForm" class="form-grid">
-              <label class="field"><span>Branch code *</span>
-                <input type="text" id="branchCode" placeholder="e.g. EE" maxlength="16" /></label>
-              <label class="field" style="flex:2 1 280px;"><span>Branch name *</span>
-                <input type="text" id="branchName" placeholder="e.g. Electrical Engineering" /></label>
-              <button type="submit" class="btn" id="branchSubmit">Add branch</button>
-            </form>
-            <div id="branchResult" style="margin-top:12px;"></div>
-            <div class="table-scroll" style="margin-top:16px;">
-              <table class="data">
-                <thead><tr><th>Code</th><th>Name</th><th class="num">Faculty</th><th>Actions</th></tr></thead>
-                <tbody id="branchBody"></tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <!-- -------------------- SUBJECT MANAGEMENT --------------------- -->
-      <section class="view" id="view-subjects">
-        <div class="card">
-          <div class="card-head">
-            <div>
-              <h2>Subject Management</h2>
-              <p>Subjects belong to one branch. A subject added to ECE does not appear under CME.</p>
-            </div>
-            <span class="pill" id="subjectBackend">Checking storage…</span>
-          </div>
-          <div class="card-body">
-            <div id="subjectStorageNote"></div>
-            <form id="subjectForm" class="form-grid">
-              <label class="field"><span>Subject code *</span>
-                <input type="text" id="subjectCode" placeholder="e.g. AI301" /></label>
-              <label class="field" style="flex:2 1 240px;"><span>Subject name *</span>
-                <input type="text" id="subjectName" placeholder="e.g. Machine Learning" /></label>
-              <label class="field"><span>Branch *</span><select id="subjectBranch"></select></label>
-              <label class="field"><span>Type</span>
-                <select id="subjectType"><option value="theory">Theory</option><option value="lab">Lab</option></select></label>
-              <button type="submit" class="btn" id="subjectSubmit">Add subject</button>
-            </form>
-            <div id="subjectResult" style="margin-top:12px;"></div>
-            <div class="controls" style="margin-top:16px;">
-              <label class="field"><span>Filter by branch</span><select id="subjectFilter"></select></label>
-            </div>
-            <div class="table-scroll" style="margin-top:10px;">
-              <table class="data">
-                <thead><tr><th>Code</th><th>Name</th><th>Branch</th><th>Type</th><th>Actions</th></tr></thead>
-                <tbody id="subjectBody"></tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <!-- --------------------- CLASS MANAGEMENT ---------------------- -->
-      <section class="view" id="view-classes">
-        <div class="card">
-          <div class="card-head">
-            <div>
-              <h2>Class Management</h2>
-              <p>Classes/sections inside a branch — AIDS-A and AIDS-B both belong to AIDS.</p>
-            </div>
-            <span class="pill" id="classBackend">Checking storage…</span>
-          </div>
-          <div class="card-body">
-            <div id="classStorageNote"></div>
-            <form id="classForm" class="form-grid">
-              <label class="field"><span>Class code *</span>
-                <input type="text" id="classCode" placeholder="e.g. AIDS-A" /></label>
-              <label class="field"><span>Branch *</span><select id="classBranch"></select></label>
-              <label class="field"><span>Semester</span>
-                <input type="text" id="classSemester" placeholder="e.g. 5" /></label>
-              <label class="field"><span>Academic year</span>
-                <input type="text" id="classYear" placeholder="e.g. 2025-26" /></label>
-              <button type="submit" class="btn" id="classSubmit">Add class</button>
-            </form>
-            <div id="classResult" style="margin-top:12px;"></div>
-            <div class="controls" style="margin-top:16px;">
-              <label class="field"><span>Filter by branch</span><select id="classFilter"></select></label>
-            </div>
-            <div class="table-scroll" style="margin-top:10px;">
-              <table class="data">
-                <thead><tr><th>Code</th><th>Branch</th><th class="num">Semester</th><th>Academic year</th><th>Actions</th></tr></thead>
-                <tbody id="classBody"></tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-      </section>
-
       <!-- ------------------------- ABOUT ----------------------------- -->
-      <!-- ---------------------- VALIDATION REPORT -------------------- -->
-      <section class="view" id="view-validation">
-        <div class="card">
+      <section class="view" id="view-about">
+        <!-- Branch Configuration Card -->
+        <div class="card" id="aboutBranchCard" style="margin-bottom:20px;">
           <div class="card-head">
             <div>
-              <h2>Validation Report</h2>
-              <p>What the validator found in the loaded timetable. Errors block a timetable from loading; warnings do not.</p>
+              <h2>Branch Configuration</h2>
+              <p>Current academic branch instance settings.</p>
             </div>
-            <span class="pill" id="validationChip">Checking…</span>
+            <span class="badge badge-primary" id="aboutBranchBadge">Branch</span>
           </div>
           <div class="card-body">
-            <div class="stats compact" id="validationStats"></div>
-            <div id="validationBody" style="margin-top:18px;">
-              <p class="muted">Loading the validation report…</p>
-            </div>
+            <form id="branchConfigForm" autocomplete="off">
+              <div class="field-grid" style="grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 14px;">
+                <label class="field"><span>Branch Code</span><input type="text" id="cfgBranchCode" readonly /></label>
+                <label class="field"><span>Branch Name</span><input type="text" id="cfgBranchName" /></label>
+                <label class="field"><span>Academic Year</span><input type="text" id="cfgBranchYear" /></label>
+                <label class="field"><span>Semester</span><input type="number" id="cfgBranchSem" min="1" max="8" /></label>
+              </div>
+              <div id="cfgBranchActions" style="margin-top:14px;">
+                <button type="submit" class="btn btn-primary" id="cfgBranchSave">Save Branch Configuration</button>
+              </div>
+            </form>
+            <div id="cfgBranchNote" style="margin-top:10px;"></div>
           </div>
         </div>
-      </section>
 
-      <section class="view" id="view-about">
         <div class="card">
           <div class="card-head"><div><h2>Settings / About</h2></div></div>
           <div class="card-body">

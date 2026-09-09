@@ -18,7 +18,7 @@ const router = express.Router();
 const store = require('../data/store');
 const db = require('../db/pool');
 const repository = require('../db/repository');
-const { DEPARTMENTS, find: findDepartment } = require('../data/departments');
+const { DEPARTMENTS, getBranch, find: findDepartment } = require('../data/departments');
 
 const DESIGNATIONS = [
     'Professor', 'Associate Professor', 'Assistant Professor',
@@ -69,35 +69,21 @@ function requireDatabase(req, res, next) {
  */
 router.get('/departments', async (req, res, next) => {
     try {
-        const stats = store.engine.getFacultyStats();
-        const counted = new Map();
-        stats.forEach(f => counted.set(f.department, (counted.get(f.department) || 0) + 1));
-
-        let details;
-        if (db.isConfigured() && store.usingDatabase) {
-            const rows = await repository.listDepartments();
-            details = rows.map(row => ({
-                code: row.code,
-                name: row.name,
-                // The live roster is the authority on how many are loaded now.
-                facultyCount: counted.has(row.code) ? counted.get(row.code) : row.facultyCount
-            }));
-        } else {
-            details = DEPARTMENTS.map(d => ({
-                code: d.code, name: d.name, facultyCount: counted.get(d.code) || 0
-            }));
+        const branchCode = req.session ? req.session.department : null;
+        const branch = getBranch(branchCode);
+        if (!branch || !branch.configured || !branch.code) {
+            return res.json({ count: 0, departments: [], details: [] });
         }
+        const stats = store.engine ? store.engine.getFacultyStats() : [];
+        const count = stats.filter(f => !f.department || String(f.department).toUpperCase() === branch.code).length;
 
-        // Anything on the roster that is not a known branch is still listed,
-        // rather than being silently unfilterable.
-        counted.forEach((facultyCount, code) => {
-            if (!details.some(d => d.code === code)) {
-                details.push({ code, name: code, facultyCount });
-            }
-        });
-        details.sort((a, b) => a.code.localeCompare(b.code));
+        const details = [{
+            code: branch.code,
+            name: branch.name,
+            facultyCount: count
+        }];
 
-        res.json({ departments: details.map(d => d.code), details });
+        res.json({ count: details.length, departments: [branch.code], details });
     } catch (err) { next(err); }
 });
 
@@ -125,10 +111,21 @@ router.get('/', (req, res) => {
 
     let stats = engine.getFacultyStats(options);
 
-    if (department) {
-        const wanted = String(department).trim().toUpperCase();
-        stats = stats.filter(f => (f.department || '').toUpperCase() === wanted);
+    const sessionDept = req.session && req.session.department ? String(req.session.department).trim().toUpperCase() : null;
+    const queryDept = department ? String(department).trim().toUpperCase() : null;
+
+    if (sessionDept) {
+        if (queryDept && queryDept !== sessionDept) {
+            return res.status(403).json({
+                error: `Cross-branch queries are not allowed. Current branch is ${sessionDept}.`,
+                code: 'FORBIDDEN'
+            });
+        }
+        stats = stats.filter(f => (f.department || '').toUpperCase() === sessionDept);
+    } else if (queryDept) {
+        stats = stats.filter(f => (f.department || '').toUpperCase() === queryDept);
     }
+
     if (search) {
         const needle = String(search).trim().toUpperCase();
         stats = stats.filter(f =>
@@ -159,9 +156,10 @@ function parseFaculty(body, knownCodes) {
     if (!name) errors.push('Faculty name is required');
     else if (name.length < 3) errors.push('Faculty name is too short');
 
-    const department = text(body.department).toUpperCase();
+    const branch = getBranch();
+    const department = text(body.department || branch.code).toUpperCase();
     if (!department) errors.push('Department is required');
-    else if (!knownCodes.includes(department)) {
+    else if (!knownCodes.includes(department) && department !== branch.code) {
         errors.push(`Unknown department "${department}". Valid: ${knownCodes.join(', ')}`);
     }
 
@@ -191,7 +189,17 @@ function parseFaculty(body, knownCodes) {
     };
 }
 
-router.post('/', requireDatabase, async (req, res, next) => {
+function requireHOS(req, res, next) {
+    if (req.session && req.session.role === 'faculty') {
+        return res.status(403).json({
+            error: 'Faculty members cannot register new faculty. This action requires HOS / Administrator role.',
+            code: 'FORBIDDEN'
+        });
+    }
+    next();
+}
+
+router.post('/', requireHOS, requireDatabase, async (req, res, next) => {
     const parsed = parseFaculty(req.body || {}, await knownBranchCodes());
     if (parsed.errors) {
         return res.status(400).json({

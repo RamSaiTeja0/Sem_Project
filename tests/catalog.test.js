@@ -103,13 +103,10 @@ async function readTests() {
     console.log('\n[3] Catalog reads (work without a database)');
 
     const branches = await get('/api/branches');
-    check('GET /api/branches lists every branch', () => {
+    check('GET /api/branches lists the single active branch', () => {
         assert.strictEqual(branches.status, 200);
-        assert.ok(branches.body.count >= 4, 'the four seeded branches at least');
-        const codes = branches.body.branches.map(b => b.code);
-        ['EE', 'ECE', 'MEC', 'CME'].forEach(code => {
-            assert.ok(codes.includes(code), `${code} must still be listed`);
-        });
+        assert.strictEqual(branches.body.count, 1, 'exactly one active branch');
+        assert.strictEqual(branches.body.branches.length, 1);
         assert.strictEqual(typeof branches.body.writable, 'boolean');
     });
 

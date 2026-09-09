@@ -19,32 +19,52 @@
     </a>
     <h1>Smart Faculty Scheduling<br />Made Simple</h1>
     <p>
-      Sign in to open your own schedule, check faculty availability for any period,
-      and manage the department timetable.
+      Sign in to manage your branch master timetable, review personal schedules,
+      and find available substitute faculty in real time.
     </p>
     <ul class="login-points">
-      <li><span class="tick">✓</span> Centralized Master Timetable</li>
-      <li><span class="tick">✓</span> 1-Click Substitute Finding</li>
-      <li><span class="tick">✓</span> AI-Assisted Paper Extraction</li>
+      <li><span class="tick">✓</span> Single-Branch Instance Isolation</li>
+      <li><span class="tick">✓</span> Master Timetable &amp; Slot Management</li>
+      <li><span class="tick">✓</span> Real-Time Faculty Availability Engine</li>
     </ul>
   </aside>
 
-  <!-- Right: the form -->
+  <!-- Right: the real login form -->
   <main class="login-main">
     <div class="login-card">
       <h2>Sign in</h2>
-      <p class="muted">Use a faculty account, or the coordinator account for full access.</p>
+      <p class="muted">Enter your account credentials to access the branch dashboard.</p>
+
+      <!-- First-time setup banner if no HOS exists -->
+      <div id="setupBanner" style="display:none; margin-bottom: 18px; padding: 12px 14px; background: var(--brand-050); border: 1px solid var(--brand-200); border-radius: var(--radius-sm); font-size: 0.86rem; color: var(--brand-900);">
+        <strong>Instance Setup Required:</strong> No Head of Section (HOS) account exists yet.
+        <div style="margin-top: 4px;">
+          <a href="/register" style="color: var(--brand-700); font-weight: 700; text-decoration: underline;">Set up Branch &amp; Create Initial HOS &rarr;</a>
+        </div>
+      </div>
 
       <form id="loginForm" novalidate>
         <label class="field">
           <span>Username</span>
           <input type="text" id="username" name="username" autocomplete="username"
-                 placeholder="e.g. admin" required />
+                 placeholder="Enter username" required />
         </label>
         <label class="field">
           <span>Password</span>
-          <input type="password" id="password" name="password" autocomplete="current-password"
-                 placeholder="Your password" required />
+          <div class="password-input-wrapper">
+            <input type="password" id="password" name="password" autocomplete="current-password"
+                   placeholder="Enter password" required />
+            <button type="button" class="btn-toggle-pw" id="toggleLoginPassword" aria-label="Show password" title="Show password">
+              <svg class="eye-icon" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                <circle cx="12" cy="12" r="3"></circle>
+              </svg>
+              <svg class="eye-off-icon" style="display:none;" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path>
+                <line x1="1" y1="1" x2="23" y2="23"></line>
+              </svg>
+            </button>
+          </div>
         </label>
 
         <div id="loginMessage" class="login-message" role="status" aria-live="polite"></div>
@@ -52,23 +72,13 @@
         <button type="submit" class="btn login-submit" id="loginSubmit">Sign in</button>
       </form>
 
-      <div class="login-demo">
-        <div class="section-label">Demo accounts</div>
-        <p class="muted">This is a college project: every demo account shares one password.</p>
-        <div class="demo-grid">
-          <button type="button" class="demo-chip" data-user="admin">admin<span>Coordinator</span></button>
-          <button type="button" class="demo-chip" data-user="b.gopala.rao">b.gopala.rao<span>CME faculty</span></button>
-          <button type="button" class="demo-chip" data-user="g.sandhya.rani">g.sandhya.rani<span>CME faculty</span></button>
-          <button type="button" class="demo-chip" data-user="naveen.reddy">naveen.reddy<span>ECE faculty</span></button>
-        </div>
-        <p class="muted" style="margin-top:10px;">
-          Password: <span class="mono" id="demoPassword">tecsub123</span>
-        </p>
+      <div style="margin-top: 22px; padding-top: 18px; border-top: 1px solid var(--line-soft); display: flex; justify-content: space-between; align-items: center; font-size: 0.88rem;">
+        <span class="muted">Don't have an account?</span>
+        <a href="/register" id="createAccountLink" style="font-weight: 600; color: var(--brand-600); text-decoration: none;">Create Account</a>
       </div>
 
       <p class="login-foot">
         <a href="/">← Back to home</a>
-        <a href="/dashboard" id="guestLink">Continue as guest →</a>
       </p>
     </div>
   </main>

@@ -49,8 +49,8 @@ const config = {
     databaseUrl: (process.env.DATABASE_URL || '').trim() || null,
     dbPoolMax: intOr(process.env.DB_POOL_MAX, 5),
     dbConnectTimeoutMs: intOr(process.env.DB_CONNECT_TIMEOUT_MS, 10000),
-    /** Create tables and insert the demo rows on startup when the DB is empty. */
-    dbAutoSeed: boolOr(process.env.DB_AUTO_SEED, true),
+    /** Create tables and insert the demo rows on startup when the DB is empty (default false). */
+    dbAutoSeed: boolOr(process.env.DB_AUTO_SEED, false),
 
     /**
      * PDF.co — the document (PDF / image) table-extraction provider.
@@ -62,7 +62,41 @@ const config = {
      */
     pdfcoApiKey: (process.env.PDFCO_API_KEY || '').trim() || null,
     pdfcoBaseUrl: (process.env.PDFCO_BASE_URL || 'https://api.pdf.co/v1').replace(/\/$/, ''),
-    pdfcoTimeoutMs: intOr(process.env.PDFCO_TIMEOUT_MS, 120000)
+    pdfcoTimeoutMs: intOr(process.env.PDFCO_TIMEOUT_MS, 120000),
+
+    /**
+     * Service-to-service internal authentication secret (for n8n and automation).
+     * Must be passed via X-Internal-Secret header.
+     */
+    internalApiSecret: (process.env.INTERNAL_API_SECRET || '').trim() || null,
+
+    /**
+     * Google Gemini AI — Multimodal LLM/Vision provider for timetable extraction.
+     * Secret key is read from environment only, never exposed to client or logs.
+     */
+    geminiApiKey: (process.env.GEMINI_API_KEY || '').trim() || null,
+    geminiModel: (process.env.GEMINI_MODEL || 'gemini-3-flash-preview').trim(),
+    geminiBaseUrl: (process.env.GEMINI_BASE_URL || 'https://generativelanguage.googleapis.com').replace(/\/$/, ''),
+    geminiTimeoutMs: intOr(process.env.GEMINI_TIMEOUT_MS, 120000),
+
+    /**
+     * n8n Webhook URL for asynchronous notification when timetable is uploaded.
+     */
+    n8nWebhookUrl: (process.env.N8N_WEBHOOK_URL || '').trim() || null,
+
+    /**
+     * Single-branch configuration.
+     * Each deployment instance represents exactly one academic branch.
+     * In a fresh installation, branchName and branchCode are null until configured by initial HOS.
+     */
+    branchName: (process.env.BRANCH_NAME || '').trim() || null,
+    branchCode: (process.env.BRANCH_CODE || '').trim().toUpperCase() || null,
+    academicYear: (process.env.ACADEMIC_YEAR || '').trim() || null,
+    semester: process.env.SEMESTER ? intOr(process.env.SEMESTER, null) : null,
+    /** Whether to seed legacy multi-branch demo data (defaults to false). */
+    dbSeedDemo: boolOr(process.env.DB_SEED_DEMO, false),
+    /** Whether to load demo dataset into memory (defaults to false for fresh instances). */
+    loadDemoData: boolOr(process.env.LOAD_DEMO_DATA, false)
 };
 
 module.exports = config;

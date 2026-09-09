@@ -11,6 +11,7 @@
  * constraints in schema.sql.
  */
 const db = require('./pool');
+const { getBranch, setBranch } = require('../data/departments');
 
 const DAY_ORDER = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 
@@ -163,13 +164,13 @@ async function resolveRefs(client, entry) {
     // Sequential, not Promise.all: a single pg client runs one query at a time.
     const classId = await lookupId(client, 'classes', 'code', entry.className);
     const subjectId = await lookupId(client, 'subjects', 'name', entry.subject);
-    const facultyId = await lookupId(client, 'faculty', 'name', entry.faculty);
+    const facultyId = entry.faculty ? await lookupId(client, 'faculty', 'name', entry.faculty) : null;
     const roomId = entry.room ? await lookupId(client, 'rooms', 'code', entry.room) : null;
 
     const missing = [];
     if (!classId) missing.push(`class "${entry.className}"`);
     if (!subjectId) missing.push(`subject "${entry.subject}"`);
-    if (!facultyId) missing.push(`faculty "${entry.faculty}"`);
+    if (entry.faculty && !facultyId) missing.push(`faculty "${entry.faculty}"`);
     if (entry.room && !roomId) missing.push(`room "${entry.room}"`);
 
     return { classId, subjectId, facultyId, roomId, missing };
@@ -183,7 +184,7 @@ const ENTRY_SELECT = `
       FROM timetable t
       JOIN classes c ON c.id = t.class_id
       JOIN subjects s ON s.id = t.subject_id
-      JOIN faculty f ON f.id = t.faculty_id
+      LEFT JOIN faculty f ON f.id = t.faculty_id
       LEFT JOIN rooms r ON r.id = t.room_id`;
 
 async function listEntries(filters = {}) {
@@ -218,20 +219,20 @@ async function getEntry(id, client) {
  * at once rather than surfacing whichever constraint the database hit first.
  */
 async function findSlotConflicts(client, { classId, facultyId, roomId, day, period, excludeId }) {
-    const params = [day, period, classId, facultyId, roomId || null, excludeId || 0];
+    const params = [day, period, classId, facultyId || null, roomId || null, excludeId || 0];
     const { rows } = await client.query(`
         SELECT t.id,
                t.class_id = $3   AS class_clash,
-               t.faculty_id = $4 AS faculty_clash,
+               ($4::int IS NOT NULL AND t.faculty_id = $4) AS faculty_clash,
                ($5::int IS NOT NULL AND t.room_id = $5) AS room_clash,
                c.code AS "className", f.name AS faculty, r.code AS room, s.name AS subject
           FROM timetable t
           JOIN classes c ON c.id = t.class_id
-          JOIN faculty f ON f.id = t.faculty_id
+          LEFT JOIN faculty f ON f.id = t.faculty_id
           JOIN subjects s ON s.id = t.subject_id
           LEFT JOIN rooms r ON r.id = t.room_id
          WHERE t.day_of_week = $1 AND t.period = $2 AND t.id <> $6
-           AND (t.class_id = $3 OR t.faculty_id = $4 OR ($5::int IS NOT NULL AND t.room_id = $5))
+           AND (t.class_id = $3 OR ($4::int IS NOT NULL AND t.faculty_id = $4) OR ($5::int IS NOT NULL AND t.room_id = $5))
     `, params);
 
     return rows.map(row => {
@@ -340,13 +341,78 @@ async function listClasses() {
 }
 
 async function listDepartments() {
-    const { rows } = await db.query(`
-        SELECT d.code, d.name, COUNT(f.id)::int AS "facultyCount"
-          FROM departments d
-          LEFT JOIN faculty f ON f.department_id = d.id
-         GROUP BY d.code, d.name
-         ORDER BY d.code`);
-    return rows;
+    const branch = getBranch();
+    try {
+        const { rows } = await db.query(`
+            SELECT d.code, d.name, d.academic_year AS "academicYear", d.semester,
+                   COUNT(f.id)::int AS "facultyCount"
+              FROM departments d
+              LEFT JOIN faculty f ON f.department_id = d.id
+             WHERE UPPER(d.code) = UPPER($1)
+             GROUP BY d.code, d.name, d.academic_year, d.semester
+             ORDER BY d.code`, [branch.code]);
+        if (rows.length) return rows;
+    } catch (err) {
+        // Return default if query fails
+    }
+    return [{
+        code: branch.code,
+        name: branch.name,
+        academicYear: branch.academicYear,
+        semester: branch.semester,
+        facultyCount: 0
+    }];
+}
+
+async function getInstanceBranch(branchCode = null) {
+    const branch = getBranch(branchCode);
+    try {
+        const lookupCode = branch.code || branchCode;
+        if (!lookupCode) return { ...branch, facultyCount: 0 };
+        const { rows } = await db.query(`
+            SELECT d.code, d.name, d.academic_year AS "academicYear", d.semester,
+                   COUNT(f.id)::int AS "facultyCount"
+              FROM departments d
+              LEFT JOIN faculty f ON f.department_id = d.id
+             WHERE UPPER(d.code) = UPPER($1)
+             GROUP BY d.code, d.name, d.academic_year, d.semester`, [lookupCode]);
+        if (rows.length) {
+            return {
+                code: rows[0].code,
+                name: rows[0].name,
+                academicYear: rows[0].academicYear || branch.academicYear,
+                semester: rows[0].semester != null ? rows[0].semester : branch.semester,
+                facultyCount: rows[0].facultyCount || 0
+            };
+        }
+    } catch (err) {
+        // Fall back to in-memory branch
+    }
+    return { ...branch, facultyCount: 0 };
+}
+
+async function updateInstanceBranch(changes = {}) {
+    const branch = getBranch();
+    const newCode = changes.code ? String(changes.code).trim().toUpperCase() : branch.code;
+    const newName = changes.name ? String(changes.name).trim() : branch.name;
+    const newYear = changes.academicYear ? String(changes.academicYear).trim() : branch.academicYear;
+    const newSem = changes.semester != null && !isNaN(parseInt(changes.semester, 10))
+        ? parseInt(changes.semester, 10) : branch.semester;
+
+    return db.withTransaction(async client => {
+        const { rows } = await client.query(`
+            INSERT INTO departments (code, name, academic_year, semester)
+            VALUES ($1, $2, $3, $4)
+            ON CONFLICT (code) DO UPDATE SET
+                name = EXCLUDED.name,
+                academic_year = EXCLUDED.academic_year,
+                semester = EXCLUDED.semester
+            RETURNING code, name, academic_year AS "academicYear", semester`,
+            [newCode, newName, newYear, newSem]
+        );
+        setBranch({ code: newCode, name: newName, academicYear: newYear, semester: newSem });
+        return rows[0];
+    });
 }
 
 /* ======================================================================
@@ -669,6 +735,167 @@ async function getFaculty(id, client) {
     return rows[0] || null;
 }
 
+async function importStagedTimetable({ uploadRecord, stagedContract, resolvedMap, userId }) {
+    return db.withTransaction(async client => {
+        const className = stagedContract.class_name;
+        const targetDept = String(uploadRecord.departmentCode || '').toUpperCase();
+
+        // 1. Lock staging row to ensure idempotency
+        const stagingLock = await client.query(
+            'SELECT upload_id, import_status FROM timetable_staging WHERE upload_id = $1 FOR UPDATE',
+            [uploadRecord.uploadId]
+        );
+        if (stagingLock.rows.length && stagingLock.rows[0].import_status === 'IMPORTED') {
+            const err = new Error(`Timetable "${uploadRecord.uploadId}" has already been imported.`);
+            err.code = 'ALREADY_IMPORTED';
+            err.status = 409;
+            throw err;
+        }
+
+        // 2. Resolve class ID (class must already exist or be in resolvedMap)
+        let classId = resolvedMap.class && resolvedMap.class.id;
+        if (!classId) {
+            const clsRes = await client.query(
+                'SELECT id FROM classes WHERE UPPER(code) = UPPER($1)', [className]
+            );
+            if (!clsRes.rows.length) {
+                const err = new Error(`Class "${className}" must be resolved or registered before import.`);
+                err.code = 'UNRESOLVED_CLASS';
+                err.status = 422;
+                throw err;
+            }
+            classId = clsRes.rows[0].id;
+        }
+
+        // 3. Scoped replacement: delete prior entries for this class only
+        await client.query('DELETE FROM timetable WHERE class_id = $1', [classId]);
+
+        // 4. Expand slots & check cross-class conflicts
+        let totalInserted = 0;
+        const entries = stagedContract.entries || [];
+        for (const entry of entries) {
+            if (entry.is_free) continue;
+
+            // Resolve subject
+            const subjObj = resolvedMap.subjects && (resolvedMap.subjects[entry.subject_name] || resolvedMap.subjects[entry.subject_code]);
+            let subjectId = subjObj && subjObj.id;
+            if (!subjectId) {
+                const sRes = await client.query(
+                    'SELECT id FROM subjects WHERE UPPER(name) = UPPER($1) OR (code IS NOT NULL AND UPPER(code) = UPPER($2))',
+                    [entry.subject_name, entry.subject_code || '']
+                );
+                if (!sRes.rows.length) {
+                    const err = new Error(`Subject "${entry.subject_name}" must be resolved before import.`);
+                    err.code = 'UNRESOLVED_SUBJECT';
+                    err.status = 422;
+                    throw err;
+                }
+                subjectId = sRes.rows[0].id;
+            }
+
+            // Resolve faculty (nullable for activities)
+            let facultyId = null;
+            if (entry.faculty_name) {
+                const facObj = resolvedMap.faculty && resolvedMap.faculty[entry.faculty_name];
+                facultyId = facObj && facObj.id;
+                if (!facultyId) {
+                    const fRes = await client.query(
+                        'SELECT id FROM faculty WHERE UPPER(name) = UPPER($1) OR (code IS NOT NULL AND UPPER(code) = UPPER($1))',
+                        [entry.faculty_name]
+                    );
+                    if (!fRes.rows.length) {
+                        const err = new Error(`Faculty "${entry.faculty_name}" must be resolved before import.`);
+                        err.code = 'UNRESOLVED_FACULTY';
+                        err.status = 422;
+                        throw err;
+                    }
+                    facultyId = fRes.rows[0].id;
+                }
+            }
+
+            // Resolve room (nullable)
+            let roomId = null;
+            if (entry.room_code) {
+                const rObj = resolvedMap.rooms && resolvedMap.rooms[entry.room_code];
+                roomId = rObj && rObj.id;
+                if (!roomId) {
+                    const rRes = await client.query('SELECT id FROM rooms WHERE UPPER(code) = UPPER($1)', [entry.room_code]);
+                    if (rRes.rows.length) roomId = rRes.rows[0].id;
+                }
+            }
+
+            const startP = entry.period;
+            const endP = entry.span_to || entry.period;
+
+            for (let p = startP; p <= endP; p++) {
+                // Conflict check: faculty busy in another class
+                if (facultyId) {
+                    const facClash = await client.query(`
+                        SELECT t.id, c.code AS "className", f.name AS "facultyName", s.name AS "subjectName"
+                          FROM timetable t
+                          JOIN classes c ON c.id = t.class_id
+                          JOIN faculty f ON f.id = t.faculty_id
+                          JOIN subjects s ON s.id = t.subject_id
+                         WHERE t.day_of_week = $1 AND t.period = $2 AND t.faculty_id = $3 AND t.class_id <> $4
+                    `, [entry.day, p, facultyId, classId]);
+
+                    if (facClash.rows.length) {
+                        const row = facClash.rows[0];
+                        const err = new Error(`Faculty ${row.facultyName} already teaches ${row.subjectName} (${row.className}) at ${entry.day} P${p}`);
+                        err.code = 'SLOT_CONFLICT';
+                        err.status = 409;
+                        err.details = [{
+                            code: 'FACULTY_BUSY',
+                            message: err.message,
+                            day: entry.day,
+                            period: p,
+                            faculty: row.facultyName,
+                            conflictingClass: row.className
+                        }];
+                        throw err;
+                    }
+                }
+
+                // Conflict check: room busy in another class
+                if (roomId) {
+                    const roomClash = await client.query(`
+                        SELECT t.id, c.code AS "className", r.code AS "roomCode"
+                          FROM timetable t
+                          JOIN classes c ON c.id = t.class_id
+                          JOIN rooms r ON r.id = t.room_id
+                         WHERE t.day_of_week = $1 AND t.period = $2 AND t.room_id = $3 AND t.class_id <> $4
+                    `, [entry.day, p, roomId, classId]);
+
+                    if (roomClash.rows.length) {
+                        const row = roomClash.rows[0];
+                        const err = new Error(`Room ${row.roomCode} is already used by ${row.className} at ${entry.day} P${p}`);
+                        err.code = 'SLOT_CONFLICT';
+                        err.status = 409;
+                        err.details = [{
+                            code: 'ROOM_BUSY',
+                            message: err.message,
+                            day: entry.day,
+                            period: p,
+                            room: row.roomCode,
+                            conflictingClass: row.className
+                        }];
+                        throw err;
+                    }
+                }
+
+                await client.query(`
+                    INSERT INTO timetable (class_id, day_of_week, period, subject_id, faculty_id, room_id, session_type)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7)
+                `, [classId, entry.day, p, subjectId, facultyId, roomId, entry.session_type || 'theory']);
+
+                totalInserted++;
+            }
+        }
+
+        return { importedCount: totalInserted };
+    });
+}
+
 module.exports = {
     isEmpty, counts, loadSource,
     listEntries, getEntry, addEntry, updateEntry, deleteEntry,
@@ -677,5 +904,7 @@ module.exports = {
     addSubject, updateSubject, deleteSubject,
     addClass, updateClass, deleteClass,
     addFaculty, getFaculty, usernameFor,
+    getInstanceBranch, updateInstanceBranch,
+    importStagedTimetable,
     DAY_ORDER
 };

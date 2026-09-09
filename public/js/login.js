@@ -1,97 +1,137 @@
 /**
- * Sign-in page. Posts to /api/auth/login, which sets the session cookie, then
- * follows the ?next= parameter (or the dashboard).
+ * Real Account Login Handler.
+ *
+ * Checks instance status, handles credential submission, displays server error messages,
+ * and sets the session on successful authentication.
  */
 (function () {
     'use strict';
 
     function el(id) { return document.getElementById(id); }
 
-    function message(text, kind) {
+    function showMessage(text, kind) {
         var box = el('loginMessage');
+        if (!box) return;
+        box.className = 'login-message is-' + kind;
         box.textContent = text;
-        box.className = 'login-message is-visible is-' + (kind || 'info');
+        box.style.display = 'block';
     }
 
-    function nextUrl() {
-        var match = /[?&]next=([^&]+)/.exec(window.location.search);
-        if (!match) return '/dashboard';
-        var target = decodeURIComponent(match[1]);
-        // Only same-origin paths, so ?next= cannot be used to bounce elsewhere.
-        return /^\/(?!\/)/.test(target) ? target : '/dashboard';
+    function clearMessage() {
+        var box = el('loginMessage');
+        if (box) {
+            box.textContent = '';
+            box.style.display = 'none';
+        }
+    }
+
+    function setupPasswordToggle(btnId, inputId) {
+        var btn = el(btnId);
+        var input = el(inputId);
+        if (!btn || !input) return;
+
+        btn.addEventListener('click', function () {
+            var isPassword = input.type === 'password';
+            input.type = isPassword ? 'text' : 'password';
+
+            var eyeIcon = btn.querySelector('.eye-icon');
+            var eyeOffIcon = btn.querySelector('.eye-off-icon');
+
+            if (eyeIcon && eyeOffIcon) {
+                eyeIcon.style.display = isPassword ? 'none' : 'block';
+                eyeOffIcon.style.display = isPassword ? 'block' : 'none';
+            }
+
+            var label = isPassword ? 'Hide password' : 'Show password';
+            btn.setAttribute('aria-label', label);
+            btn.setAttribute('title', label);
+        });
     }
 
     document.addEventListener('DOMContentLoaded', function () {
         var form = el('loginForm');
-        var submit = el('loginSubmit');
+        var submitBtn = el('loginSubmit');
 
-        // If sign-in is not enforced, say so rather than implying it is required.
-        fetch('/api/auth/session').then(function (res) { return res.json(); })
+        setupPasswordToggle('toggleLoginPassword', 'password');
+
+        // Check if an initial HOS account is needed
+        fetch('/api/auth/status')
+            .then(function (res) { return res.json(); })
             .then(function (data) {
-                if (data.authenticated) {
-                    message('Already signed in as ' + data.user.name + '.', 'ok');
-                } else if (!data.authRequired) {
-                    message('Sign-in is optional on this deployment — you can also continue as a guest.', 'info');
+                var banner = el('setupBanner');
+                if (banner) {
+                    banner.style.display = data.hasHOS ? 'none' : 'block';
                 }
+            })
+            .catch(function () { /* ignore status error */ });
+
+        // Check whether sign-in is required or guest browsing is permitted
+        fetch('/api/auth/session')
+            .then(function (res) { return res.json(); })
+            .then(function (data) {
                 var guest = el('guestLink');
-                if (guest && data.authRequired) guest.style.display = 'none';
-            })
-            .catch(function () { /* the form still works */ });
-
-        // The password hint is only served while the demo default is in use.
-        fetch('/api/auth/accounts').then(function (res) { return res.json(); })
-            .then(function (data) {
-                var hint = el('demoPassword');
-                if (!hint) return;
-                if (data.demoPassword) {
-                    hint.textContent = data.demoPassword;
-                } else {
-                    var block = document.querySelector('.login-demo');
-                    if (block) block.style.display = 'none';
+                if (guest && data.authRequired) {
+                    guest.style.display = 'none';
                 }
             })
-            .catch(function () { /* keep the documented default on screen */ });
+            .catch(function () { /* fallback to default */ });
 
-        Array.prototype.forEach.call(document.querySelectorAll('.demo-chip'), function (chip) {
-            chip.addEventListener('click', function () {
-                el('username').value = chip.dataset.user;
-                el('password').value = el('demoPassword').textContent.trim();
-                el('password').focus();
-            });
-        });
+        if (form) {
+            form.addEventListener('submit', function (event) {
+                event.preventDefault();
+                clearMessage();
 
-        form.addEventListener('submit', function (event) {
-            event.preventDefault();
-            var username = el('username').value.trim();
-            var password = el('password').value;
+                var username = el('username').value.trim();
+                var password = el('password').value;
 
-            if (!username || !password) {
-                message('Enter both a username and a password.', 'error');
-                return;
-            }
-
-            submit.disabled = true;
-            message('Signing in…', 'info');
-
-            fetch('/api/auth/login', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ username: username, password: password })
-            }).then(function (res) {
-                return res.json().catch(function () { return null; })
-                    .then(function (body) { return { ok: res.ok, body: body }; });
-            }).then(function (res) {
-                if (!res.ok) {
-                    submit.disabled = false;
-                    message((res.body && res.body.error) || 'Sign-in failed.', 'error');
+                if (!username) {
+                    showMessage('Please enter your username.', 'error');
+                    el('username').focus();
                     return;
                 }
-                message('Signed in as ' + res.body.user.name + '. Opening the dashboard…', 'ok');
-                window.location.href = nextUrl();
-            }).catch(function () {
-                submit.disabled = false;
-                message('Could not reach the server. Check that it is running and try again.', 'error');
+                if (!password) {
+                    showMessage('Please enter your password.', 'error');
+                    el('password').focus();
+                    return;
+                }
+
+                if (submitBtn) {
+                    submitBtn.disabled = true;
+                    submitBtn.textContent = 'Signing in…';
+                }
+
+                fetch('/api/auth/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username: username, password: password })
+                })
+                    .then(function (res) {
+                        return res.json().then(function (data) {
+                            return { status: res.status, data: data };
+                        });
+                    })
+                    .then(function (res) {
+                        if (res.status !== 200) {
+                            if (submitBtn) {
+                                submitBtn.disabled = false;
+                                submitBtn.textContent = 'Sign in';
+                            }
+                            showMessage((res.data && res.data.error) || 'Incorrect username or password.', 'error');
+                            return;
+                        }
+
+                        showMessage('Sign-in successful. Opening dashboard…', 'info');
+                        var next = new URLSearchParams(window.location.search).get('next') || '/dashboard';
+                        window.location.href = next;
+                    })
+                    .catch(function (err) {
+                        if (submitBtn) {
+                            submitBtn.disabled = false;
+                            submitBtn.textContent = 'Sign in';
+                        }
+                        showMessage('Network error while signing in: ' + err.message, 'error');
+                    });
             });
-        });
+        }
     });
 })();

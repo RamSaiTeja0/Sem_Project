@@ -113,6 +113,31 @@ function handleUpload(action) {
                 filename: req.file.originalname,
                 mimeType: req.file.mimetype
             });
+
+            // Enforce upload boundaries: faculty can only upload their own timetable
+            if (req.session && req.session.role === 'faculty' && req.session.facultyName) {
+                const loggedFaculty = req.session.facultyName.toUpperCase();
+                const fileFaculty = (result.faculty || []).map(f => f.name.toUpperCase());
+                if (fileFaculty.length > 0 && !fileFaculty.includes(loggedFaculty)) {
+                    return res.status(403).json({
+                        error: `You are signed in as "${req.session.facultyName}". Faculty members can only upload their own timetable.`,
+                        code: 'FACULTY_UPLOAD_MISMATCH'
+                    });
+                }
+            }
+
+            // HOS can only upload for their own branch
+            if (req.session && req.session.role === 'hos' && req.session.department) {
+                const hosDept = req.session.department.toUpperCase();
+                const otherBranchFaculty = (result.faculty || []).filter(f => f.department && f.department.toUpperCase() !== hosDept);
+                if (otherBranchFaculty.length > 0) {
+                    return res.status(403).json({
+                        error: `As HOS of ${hosDept}, you can only upload timetables for your own branch.`,
+                        code: 'BRANCH_UPLOAD_MISMATCH'
+                    });
+                }
+            }
+
             res.json({
                 filename: result.filename,
                 format: result.format,

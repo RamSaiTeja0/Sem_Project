@@ -86,7 +86,7 @@ async function run() {
         assert.strictEqual(accounts.status, 200);
         const names = accounts.body.accounts.map(a => a.username);
         assert.ok(names.includes('admin'), 'the coordinator account must exist');
-        assert.strictEqual(accounts.body.accounts.length, 18, '1 coordinator + 17 faculty');
+        assert.strictEqual(accounts.body.accounts.length, 22, '1 coordinator + 21 faculty');
         // A password must never be attached to an account record.
         accounts.body.accounts.forEach(a =>
             assert.strictEqual(a.password, undefined, 'accounts must not carry passwords'));

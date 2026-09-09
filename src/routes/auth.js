@@ -2,19 +2,19 @@
  * Authentication routes.
  *
  *   GET  /api/auth/session   who is signed in, and whether sign-in is enforced
- *   GET  /api/auth/accounts  the demo account list (never includes passwords)
+ *   GET  /api/auth/status    setup status: hasHOS, branch, allowHOSCreation
+ *   POST /api/auth/register  create HOS or Faculty account (hashes password, sets session)
  *   POST /api/auth/login     { username, password } -> sets the session cookie
+ *   GET  /api/auth/profile   authenticated user's full profile
+ *   PUT  /api/auth/profile   update permitted profile fields (phone, subjects)
  *   POST /api/auth/logout    clears it
- *
- * Sessions identify the user for the dashboard. Whether an anonymous visitor
- * is turned away is a deployment choice (`AUTH_REQUIRED`), so the demo dataset
- * stays browsable by default.
  */
 const express = require('express');
 const router = express.Router();
 
 const config = require('../config');
 const users = require('../data/users');
+const { getBranch } = require('../data/departments');
 
 function publicUser(session) {
     if (!session) return null;
@@ -22,9 +22,13 @@ function publicUser(session) {
         id: session.id,
         username: session.username,
         name: session.name,
+        phone: session.phone || null,
         role: session.role,
         department: session.department,
-        facultyName: session.facultyName || null
+        branchName: session.branchName || session.department,
+        subjects: Array.isArray(session.subjects) ? session.subjects : [],
+        facultyName: session.facultyName || null,
+        facultyId: session.facultyId || null
     };
 }
 
@@ -36,16 +40,72 @@ router.get('/session', (req, res) => {
     });
 });
 
-router.get('/accounts', (req, res) => {
+router.get('/status', (req, res) => {
+    const isAuth = Boolean(req.session);
+    const isHosSession = isAuth && (req.session.role === 'hos' || req.session.role === 'coordinator');
+    const branchCode = isAuth ? req.session.department : null;
+    const branch = branchCode ? getBranch(branchCode) : (isAuth ? getBranch() : null);
+
+    // If an authenticated HOS is requesting status, provide their active branch.
+    // For unauthenticated public visitors, branch is empty so registration fields are never prefilled.
     res.json({
-        note: 'Demo directory. Every account signs in with the same demo password.',
-        // Shown on the sign-in page only while the password is the documented
-        // default. Override DEMO_PASSWORD and the hint disappears.
-        demoPassword: config.demoPassword === 'tecsub123' ? config.demoPassword : null,
-        accounts: users.list().map(u => ({
-            username: u.username, name: u.name, role: u.role, department: u.department
+        authenticated: isAuth,
+        isHOS: isHosSession,
+        hasHOS: users.hasHOS(),
+        allowHOSCreation: !isHosSession,
+        branch: (branch && branch.configured) ? {
+            configured: true,
+            code: branch.code,
+            name: branch.name,
+            academicYear: branch.academicYear,
+            semester: branch.semester
+        } : {
+            configured: false,
+            code: '',
+            name: '',
+            academicYear: '',
+            semester: null
+        },
+        userCount: users.list(branchCode).length
+    });
+});
+
+router.get('/accounts', (req, res) => {
+    const branchCode = req.session ? req.session.department : (req.query.branch || null);
+    const hosUser = users.findHOSByBranch(branchCode);
+    res.json({
+        note: 'Account directory for the branch.',
+        branch: branchCode,
+        hos: hosUser ? { username: hosUser.username, name: hosUser.name, role: hosUser.role, department: hosUser.department } : null,
+        accounts: users.list(branchCode).map(u => ({
+            username: u.username,
+            name: u.name,
+            role: u.role,
+            department: u.department,
+            phone: u.phone || null,
+            subjects: u.subjects || []
         }))
     });
+});
+
+router.post('/register', (req, res) => {
+    try {
+        const user = users.register(req.body || {}, req.session);
+        // If an already authenticated HOS is creating a faculty account, do not overwrite their session
+        const isHosCreating = req.session && (req.session.role === 'hos' || req.session.role === 'coordinator');
+        if (!isHosCreating) {
+            res.startSession(user);
+        }
+        res.status(201).json({
+            authenticated: true,
+            user: publicUser(user)
+        });
+    } catch (err) {
+        res.status(err.status || 400).json({
+            error: err.message,
+            code: err.code || 'REGISTRATION_FAILED'
+        });
+    }
 });
 
 router.post('/login', (req, res) => {
@@ -59,8 +119,6 @@ router.post('/login', (req, res) => {
 
     const user = users.authenticate(username, password);
     if (!user) {
-        // One message for both cases, so the response never reveals which
-        // usernames exist.
         return res.status(401).json({
             error: 'Incorrect username or password.', code: 'INVALID_CREDENTIALS'
         });
@@ -68,6 +126,28 @@ router.post('/login', (req, res) => {
 
     res.startSession(user);
     res.json({ authenticated: true, user: publicUser(user) });
+});
+
+router.get('/profile', (req, res) => {
+    if (!req.session) {
+        return res.status(401).json({ error: 'Sign in to access your profile.', code: 'UNAUTHENTICATED' });
+    }
+    const profile = users.getProfile(req.session.username);
+    res.json({ profile: publicUser(profile || req.session) });
+});
+
+router.put('/profile', (req, res) => {
+    if (!req.session) {
+        return res.status(401).json({ error: 'Sign in to update your profile.', code: 'UNAUTHENTICATED' });
+    }
+    try {
+        const updated = users.updateProfile(req.session.username, req.body || {});
+        if (updated.phone) req.session.phone = updated.phone;
+        if (updated.subjects) req.session.subjects = updated.subjects;
+        res.json({ profile: publicUser(updated) });
+    } catch (err) {
+        res.status(err.status || 400).json({ error: err.message, code: err.code || 'PROFILE_UPDATE_FAILED' });
+    }
 });
 
 router.post('/logout', (req, res) => {
