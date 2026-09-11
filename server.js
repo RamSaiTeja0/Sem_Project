@@ -217,10 +217,11 @@ function start(port = config.port, fallbacks = config.fallbackPorts) {
  * the bundled demo dataset so a demonstration is always possible.
  */
 async function bootstrap() {
-    const result = await store.initFromDatabase();
+    const shouldSeed = Boolean(config.dbSeedDemo);
+    const result = await store.initFromDatabase({ seed: shouldSeed });
     if (result.enabled) {
         console.log(`Database: connected to ${result.target}` +
-            (result.seeded ? ' (demo data seeded)' : ' (existing data kept)'));
+            (result.seeded ? ' (demo data seeded)' : ' (schema ready)'));
     } else if (result.error) {
         console.warn(`Database: ${result.error}\n  Falling back to the bundled demo dataset.`);
     } else {
