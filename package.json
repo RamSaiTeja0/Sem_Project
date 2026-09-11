@@ -13,6 +13,8 @@
     "test:e2e": "node tests/e2e.test.js",
     "test:db": "node tests/database.test.js",
     "test:persistence": "node tests/neon_persistence_verification.test.js",
+    "test:isolation": "node tests/branchisolation.test.js",
+    "test:browser": "node tests/browserisolation.test.js",
     "db:setup": "node scripts/setupDatabase.js"
   },
   "engines": {

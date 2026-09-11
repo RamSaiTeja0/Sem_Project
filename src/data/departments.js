@@ -5,11 +5,9 @@
  *   Branch CME -> HOS CME -> Faculty, Timetable
  *   Branch EEE -> HOS EEE -> Faculty, Timetable
  *   Branch MEC -> HOS MEC -> Faculty, Timetable
- *
  * Each branch context is preserved as entered and remains isolated.
  */
 const config = require('../config');
-
 // Stores registered branches keyed by uppercase code
 const branches = new Map();
 const DEPARTMENTS = [];
@@ -185,9 +183,16 @@ function getBranchSemesters(branchCode = null) {
     return Array.from({ length: count }, (_, i) => `SEM-${i + 1}`);
 }
 
+const ALIASES = { EE: 'EEE' };
+
+function canonical(code) {
+    const upper = String(code || '').trim().toUpperCase();
+    return ALIASES[upper] || upper;
+}
+
 function find(code) {
     if (!code) return null;
-    const raw = String(code).trim().toUpperCase();
+    const raw = canonical(code);
     if (branches.has(raw)) return branches.get(raw);
     if (raw.startsWith('D') && branches.has(raw.slice(1))) return branches.get(raw.slice(1));
     return null;
@@ -207,8 +212,18 @@ function list() {
     return Array.from(branches.values());
 }
 
+function activeCodes() {
+    return codes();
+}
+
+function isActive(code) {
+    const match = find(code);
+    return match ? match.active !== false : true;
+}
+
 module.exports = {
     DEPARTMENTS,
+    ALIASES,
     registerBranch,
     getBranch,
     setBranch,
@@ -218,6 +233,9 @@ module.exports = {
     nameFor,
     codes,
     list,
+    canonical,
+    activeCodes,
+    isActive,
     isConfigured,
     isBranchRegistered,
     getRegisteredBranchCodes

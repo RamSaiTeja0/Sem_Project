@@ -48,10 +48,10 @@ router.get('/document-status', (req, res) => {
 /**
  * Resolve the class name the user typed against the real class catalog.
  *
- * Typing "ece" must not quietly create a class called "ece" alongside the real
- * ECE-A and ECE-B — that produces a timetable nothing else can find. A case
- * difference is corrected silently; anything with no match is refused with the
- * list of classes that do exist.
+ * Typing a branch code such as "cme" must not quietly create a class called
+ * "cme" alongside the real CME-A — that produces a timetable nothing else can
+ * find. A case difference is corrected silently; anything with no match is
+ * refused with the list of classes that do exist.
  *
  * @returns {{ code: string|null }} or {{ error, code, choices }}
  */
