@@ -18,7 +18,9 @@ const router = express.Router();
 const store = require('../data/store');
 const db = require('../db/pool');
 const repository = require('../db/repository');
-const { DEPARTMENTS, getBranch, find: findDepartment } = require('../data/departments');
+const { DEPARTMENTS, getBranch, find: findDepartment, list: listBranches } = require('../data/departments');
+const users = require('../data/users');
+const { validatePhone } = require('../core/authSecurity');
 
 const DESIGNATIONS = [
     'Professor', 'Associate Professor', 'Assistant Professor',
@@ -37,12 +39,13 @@ async function knownBranchCodes() {
     if (db.isConfigured() && store.usingDatabase) {
         try {
             const rows = await repository.listDepartments();
-            if (rows.length) return rows.map(r => String(r.code).toUpperCase());
+            const valid = rows.map(r => r.code ? String(r.code).toUpperCase() : null).filter(Boolean);
+            if (valid.length) return valid;
         } catch (err) {
             // Fall through to the bundled list rather than blocking the write.
         }
     }
-    const codes = new Set(DEPARTMENTS.map(d => d.code.toUpperCase()));
+    const codes = new Set(DEPARTMENTS.map(d => d.code ? String(d.code).toUpperCase() : null).filter(Boolean));
     store.engine.getFaculty().forEach(f => {
         if (f.department) codes.add(String(f.department).toUpperCase());
     });
@@ -71,19 +74,51 @@ router.get('/departments', async (req, res, next) => {
     try {
         const branchCode = req.session ? req.session.department : null;
         const branch = getBranch(branchCode);
-        if (!branch || !branch.configured || !branch.code) {
-            return res.json({ count: 0, departments: [], details: [] });
+        if (branch && branch.configured && branch.code) {
+            const stats = store.engine ? store.engine.getFacultyStats() : [];
+            const count = stats.filter(f => !f.department || String(f.department).toUpperCase() === branch.code).length;
+
+            const details = [{
+                code: branch.code,
+                name: branch.name,
+                facultyCount: count
+            }];
+
+            return res.json({ count: details.length, departments: [branch.code], details });
         }
+
         const stats = store.engine ? store.engine.getFacultyStats() : [];
-        const count = stats.filter(f => !f.department || String(f.department).toUpperCase() === branch.code).length;
+        const counted = new Map();
+        stats.forEach(f => {
+            if (f.department) {
+                counted.set(String(f.department).toUpperCase(), (counted.get(String(f.department).toUpperCase()) || 0) + 1);
+            }
+        });
 
-        const details = [{
-            code: branch.code,
-            name: branch.name,
-            facultyCount: count
-        }];
+        const registered = listBranches ? listBranches() : [];
+        let details = [];
+        if (registered.length > 0) {
+            details = registered.map(b => ({
+                code: b.code,
+                name: b.name,
+                facultyCount: counted.get(b.code) || 0
+            }));
+        } else if (db.isConfigured && db.isConfigured() && store.usingDatabase) {
+            const rows = await repository.listDepartments();
+            details = rows.map(row => ({
+                code: row.code,
+                name: row.name,
+                facultyCount: counted.has(row.code) ? counted.get(row.code) : (row.facultyCount || 0)
+            }));
+        }
 
-        res.json({ count: details.length, departments: [branch.code], details });
+        counted.forEach((facultyCount, code) => {
+            if (code && !details.some(d => d.code === code)) {
+                details.push({ code, name: code, facultyCount });
+            }
+        });
+
+        res.json({ count: details.length, departments: details.map(d => d.code), details });
     } catch (err) { next(err); }
 });
 
@@ -222,4 +257,269 @@ router.post('/', requireHOS, requireDatabase, async (req, res, next) => {
     }
 });
 
+function findFacultyMember(engine, id) {
+    if (!engine || !id) return null;
+    const needle = String(id).trim().toUpperCase();
+    const roster = engine.getFaculty();
+    return roster.find(f =>
+        (f.id && String(f.id).toUpperCase() === needle) ||
+        (f.code && String(f.code).toUpperCase() === needle) ||
+        (f.name && f.name.toUpperCase() === needle)
+    );
+}
+
+function requireHOSUser(req, res, next) {
+    if (!req.session) {
+        return res.status(401).json({
+            error: 'Authentication required. Please sign in.',
+            code: 'UNAUTHENTICATED'
+        });
+    }
+    if (req.session.role === 'faculty') {
+        return res.status(403).json({
+            error: 'Faculty members cannot perform HOS faculty-management operations.',
+            code: 'FORBIDDEN'
+        });
+    }
+    if (!['hos', 'coordinator', 'admin'].includes(req.session.role)) {
+        return res.status(403).json({
+            error: 'This action requires HOS or Administrator role.',
+            code: 'FORBIDDEN'
+        });
+    }
+    next();
+}
+
+/**
+ * GET /api/faculty/:id — detailed profile of a single faculty member
+ */
+router.get('/:id', async (req, res) => {
+    const targetId = req.params.id;
+    const engine = store.engine;
+    let member = findFacultyMember(engine, targetId);
+
+    if (db.isConfigured() && store.usingDatabase) {
+        try {
+            const dbMember = await repository.getFaculty(targetId);
+            if (dbMember) member = dbMember;
+        } catch (err) {}
+    }
+
+    if (!member) {
+        return res.status(404).json({ error: `Faculty "${targetId}" not found.`, code: 'NOT_FOUND' });
+    }
+
+    const sessionDept = req.session && req.session.department ? String(req.session.department).trim().toUpperCase() : null;
+    if (sessionDept && member.department && member.department.toUpperCase() !== sessionDept) {
+        return res.status(403).json({
+            error: `Cross-branch queries are not allowed. Faculty belongs to ${member.department}, but current branch is ${sessionDept}.`,
+            code: 'FORBIDDEN'
+        });
+    }
+
+    res.json({ faculty: member });
+});
+
+/**
+ * PUT /api/faculty/:id — HOS edits faculty belonging to their branch
+ * Editable: Name, Phone, Designation, Subjects
+ * Protected: ID, Branch, Username, Password
+ */
+router.put('/:id', requireHOSUser, async (req, res) => {
+    const targetId = req.params.id;
+    const engine = store.engine;
+    const sessionDept = req.session.department ? String(req.session.department).trim().toUpperCase() : null;
+
+    let member = findFacultyMember(engine, targetId);
+    if (db.isConfigured() && store.usingDatabase) {
+        try {
+            const dbMember = await repository.getFaculty(targetId);
+            if (dbMember) member = dbMember;
+        } catch (err) {}
+    }
+
+    if (!member) {
+        return res.status(404).json({ error: `Faculty "${targetId}" not found.`, code: 'NOT_FOUND' });
+    }
+
+    // Branch Security: HOS can manage only their own branch faculty
+    if (sessionDept && member.department && member.department.toUpperCase() !== sessionDept) {
+        return res.status(403).json({
+            error: `Cross-branch faculty management is not allowed. Faculty belongs to ${member.department}, but current branch is ${sessionDept}.`,
+            code: 'FORBIDDEN'
+        });
+    }
+
+    const body = req.body || {};
+    const updates = {};
+
+    if (body.name !== undefined) {
+        const name = String(body.name || '').trim();
+        if (name.length < 2) {
+            return res.status(400).json({ error: 'Faculty name must be at least 2 characters.', code: 'INVALID_NAME' });
+        }
+        updates.name = name;
+    }
+
+    if (body.phone !== undefined) {
+        const phone = String(body.phone || '').trim();
+        if (phone && !validatePhone(phone)) {
+            return res.status(400).json({ error: 'A valid phone number is required.', code: 'INVALID_PHONE' });
+        }
+        updates.phone = phone || null;
+    }
+
+    if (body.designation !== undefined) {
+        updates.designation = String(body.designation || '').trim() || null;
+    }
+
+    if (body.subjects !== undefined) {
+        const rawSubjects = Array.isArray(body.subjects)
+            ? body.subjects
+            : String(body.subjects || '').split(',').map(s => s.trim()).filter(Boolean);
+        const cleaned = rawSubjects.map(s => String(s).trim()).filter(Boolean);
+        if (cleaned.length === 0) {
+            return res.status(400).json({ error: 'At least one subject or area of expertise is required.', code: 'SUBJECTS_REQUIRED' });
+        }
+        updates.subjects = cleaned;
+    }
+
+    if (body.maxWeeklyPeriods !== undefined) {
+        const mwp = parseInt(body.maxWeeklyPeriods, 10);
+        if (!Number.isFinite(mwp) || mwp < 1 || mwp > 60) {
+            return res.status(400).json({ error: 'Maximum weekly periods must be between 1 and 60.', code: 'INVALID_MAX_PERIODS' });
+        }
+        updates.maxWeeklyPeriods = mwp;
+    }
+
+    try {
+        let updated = null;
+        if (db.isConfigured() && store.usingDatabase) {
+            updated = await repository.updateFaculty(member.id || targetId, sessionDept, updates);
+            await store.reloadFromDatabase();
+        } else {
+            updated = store.updateFacultyInMemory(member.id || targetId, updates);
+        }
+
+        // Sync with registered users account
+        users.updateFacultyUser(member.id || targetId, updates);
+
+        res.json({
+            success: true,
+            faculty: {
+                id: updated.id || member.id,
+                name: updated.name,
+                department: updated.department || member.department,
+                designation: updated.designation,
+                phone: updated.phone,
+                email: updated.email,
+                subjects: updated.subjects || updates.subjects || [],
+                status: updated.status || member.status || 'active',
+                maxWeeklyPeriods: updated.maxWeeklyPeriods
+            }
+        });
+    } catch (err) {
+        res.status(err.status || 400).json({ error: err.message, code: err.code || 'UPDATE_FAILED' });
+    }
+});
+
+/**
+ * POST /api/faculty/:id/deactivate — HOS safely deactivates faculty
+ */
+router.post('/:id/deactivate', requireHOSUser, async (req, res) => {
+    const targetId = req.params.id;
+    const engine = store.engine;
+    const sessionDept = req.session.department ? String(req.session.department).trim().toUpperCase() : null;
+
+    let member = findFacultyMember(engine, targetId);
+    if (db.isConfigured() && store.usingDatabase) {
+        try {
+            const dbMember = await repository.getFaculty(targetId);
+            if (dbMember) member = dbMember;
+        } catch (err) {}
+    }
+
+    if (!member) {
+        return res.status(404).json({ error: `Faculty "${targetId}" not found.`, code: 'NOT_FOUND' });
+    }
+
+    if (sessionDept && member.department && member.department.toUpperCase() !== sessionDept) {
+        return res.status(403).json({
+            error: `Cross-branch faculty management is not allowed. Faculty belongs to ${member.department}, but current branch is ${sessionDept}.`,
+            code: 'FORBIDDEN'
+        });
+    }
+
+    try {
+        if (db.isConfigured() && store.usingDatabase) {
+            await repository.deactivateFaculty(member.id || targetId, sessionDept);
+            await store.reloadFromDatabase();
+        } else {
+            store.setFacultyStatusInMemory(member.id || targetId, 'inactive');
+        }
+
+        users.updateFacultyUser(member.id || targetId, { status: 'inactive' });
+
+        res.json({
+            success: true,
+            message: `Faculty ${member.name} has been safely deactivated.`,
+            id: member.id || targetId,
+            name: member.name,
+            status: 'inactive'
+        });
+    } catch (err) {
+        res.status(err.status || 400).json({ error: err.message, code: err.code || 'DEACTIVATION_FAILED' });
+    }
+});
+
+/**
+ * POST /api/faculty/:id/activate — HOS reactivates inactive faculty
+ */
+router.post('/:id/activate', requireHOSUser, async (req, res) => {
+    const targetId = req.params.id;
+    const engine = store.engine;
+    const sessionDept = req.session.department ? String(req.session.department).trim().toUpperCase() : null;
+
+    let member = findFacultyMember(engine, targetId);
+    if (db.isConfigured() && store.usingDatabase) {
+        try {
+            const dbMember = await repository.getFaculty(targetId);
+            if (dbMember) member = dbMember;
+        } catch (err) {}
+    }
+
+    if (!member) {
+        return res.status(404).json({ error: `Faculty "${targetId}" not found.`, code: 'NOT_FOUND' });
+    }
+
+    if (sessionDept && member.department && member.department.toUpperCase() !== sessionDept) {
+        return res.status(403).json({
+            error: `Cross-branch faculty management is not allowed. Faculty belongs to ${member.department}, but current branch is ${sessionDept}.`,
+            code: 'FORBIDDEN'
+        });
+    }
+
+    try {
+        if (db.isConfigured() && store.usingDatabase) {
+            await repository.activateFaculty(member.id || targetId, sessionDept);
+            await store.reloadFromDatabase();
+        } else {
+            store.setFacultyStatusInMemory(member.id || targetId, 'active');
+        }
+
+        users.updateFacultyUser(member.id || targetId, { status: 'active' });
+
+        res.json({
+            success: true,
+            message: `Faculty ${member.name} has been reactivated.`,
+            id: member.id || targetId,
+            name: member.name,
+            status: 'active'
+        });
+    } catch (err) {
+        res.status(err.status || 400).json({ error: err.message, code: err.code || 'ACTIVATION_FAILED' });
+    }
+});
+
 module.exports = router;
+

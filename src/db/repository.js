@@ -32,7 +32,11 @@ async function counts() {
             (SELECT COUNT(*)::int FROM timetable)     AS timetable,
             (SELECT COUNT(*)::int FROM users)         AS users,
             (SELECT COUNT(*)::int FROM substitutions) AS substitutions,
-            (SELECT COUNT(*)::int FROM attendance)    AS attendance
+            (SELECT COUNT(*)::int FROM attendance)    AS attendance,
+            (SELECT COUNT(*)::int FROM faculty_attendance) AS faculty_attendance,
+            (SELECT COUNT(*)::int FROM exam_invigilation)  AS exam_invigilation,
+            (SELECT COUNT(*)::int FROM faculty_substitutions) AS faculty_substitutions,
+            (SELECT COUNT(*)::int FROM faculty_registration_requests) AS faculty_registration_requests
     `);
     return rows[0];
 }
@@ -44,8 +48,9 @@ async function counts() {
  */
 async function loadSource(meta) {
     const [facultyRows, classRows, entryRows, periodRows, roomRows, subjectRows, deptRows] = await Promise.all([
-        db.query(`SELECT f.code, f.name, COALESCE(d.code, 'General') AS department,
-                         f.designation, f.email, f.phone, f.max_weekly_periods, f.status
+        db.query(`SELECT f.id, f.code, f.name, COALESCE(d.code, 'General') AS department,
+                         f.designation, f.email, f.phone, f.max_weekly_periods, f.status,
+                         COALESCE((SELECT array_agg(subject) FROM faculty_subjects WHERE faculty_id = f.id), ARRAY[]::text[]) AS subjects
                     FROM faculty f LEFT JOIN departments d ON d.id = f.department_id
                    ORDER BY f.code`),
         db.query(`SELECT c.code, c.semester, c.academic_year,
@@ -144,6 +149,7 @@ async function loadSource(meta) {
             designation: f.designation,
             email: f.email,
             phone: f.phone,
+            subjects: f.subjects || [],
             maxWeeklyPeriods: f.max_weekly_periods,
             status: f.status
         })),
@@ -162,13 +168,14 @@ async function lookupId(client, table, column, value) {
 /** Resolve the names an entry refers to into row ids, reporting what is missing. */
 async function resolveRefs(client, entry) {
     // Sequential, not Promise.all: a single pg client runs one query at a time.
-    const classId = await lookupId(client, 'classes', 'code', entry.className);
+    const className = entry.className || entry.class;
+    const classId = await lookupId(client, 'classes', 'code', className);
     const subjectId = await lookupId(client, 'subjects', 'name', entry.subject);
     const facultyId = entry.faculty ? await lookupId(client, 'faculty', 'name', entry.faculty) : null;
     const roomId = entry.room ? await lookupId(client, 'rooms', 'code', entry.room) : null;
 
     const missing = [];
-    if (!classId) missing.push(`class "${entry.className}"`);
+    if (!classId) missing.push(`class "${className || 'unspecified'}"`);
     if (!subjectId) missing.push(`subject "${entry.subject}"`);
     if (entry.faculty && !facultyId) missing.push(`faculty "${entry.faculty}"`);
     if (entry.room && !roomId) missing.push(`room "${entry.room}"`);
@@ -331,37 +338,61 @@ async function listSubjects() {
 
 async function listClasses() {
     const { rows } = await db.query(`
-        SELECT c.code, c.semester, c.academic_year AS "academicYear",
-               COALESCE(d.code, 'General') AS department, r.code AS room
+        SELECT c.id, c.code, c.semester, c.academic_year AS "academicYear",
+               c.section, COALESCE(d.code, 'General') AS department, r.code AS room
           FROM classes c
           LEFT JOIN departments d ON d.id = c.department_id
           LEFT JOIN rooms r ON r.id = c.home_room_id
          ORDER BY c.code`);
-    return rows;
+    return rows.map(r => {
+        let sec = r.section;
+        if (!sec && r.code) {
+            const m = r.code.match(/-([A-Za-z0-9])$/);
+            if (m) sec = m[1].toUpperCase();
+        }
+        return {
+            ...r,
+            section: sec || null
+        };
+    });
 }
 
 async function listDepartments() {
     const branch = getBranch();
     try {
-        const { rows } = await db.query(`
-            SELECT d.code, d.name, d.academic_year AS "academicYear", d.semester,
-                   COUNT(f.id)::int AS "facultyCount"
-              FROM departments d
-              LEFT JOIN faculty f ON f.department_id = d.id
-             WHERE UPPER(d.code) = UPPER($1)
-             GROUP BY d.code, d.name, d.academic_year, d.semester
-             ORDER BY d.code`, [branch.code]);
+        const queryText = branch.code
+            ? `SELECT d.code, d.name, d.academic_year AS "academicYear", d.semester,
+                      COALESCE(d.total_semesters, 6) AS "totalSemesters",
+                      COUNT(f.id)::int AS "facultyCount"
+                 FROM departments d
+                 LEFT JOIN faculty f ON f.department_id = d.id
+                WHERE UPPER(d.code) = UPPER($1)
+                GROUP BY d.code, d.name, d.academic_year, d.semester, d.total_semesters
+                ORDER BY d.code`
+            : `SELECT d.code, d.name, d.academic_year AS "academicYear", d.semester,
+                      COALESCE(d.total_semesters, 6) AS "totalSemesters",
+                      COUNT(f.id)::int AS "facultyCount"
+                 FROM departments d
+                 LEFT JOIN faculty f ON f.department_id = d.id
+                GROUP BY d.code, d.name, d.academic_year, d.semester, d.total_semesters
+                ORDER BY d.code`;
+        const params = branch.code ? [branch.code] : [];
+        const { rows } = await db.query(queryText, params);
         if (rows.length) return rows;
     } catch (err) {
         // Return default if query fails
     }
-    return [{
-        code: branch.code,
-        name: branch.name,
-        academicYear: branch.academicYear,
-        semester: branch.semester,
-        facultyCount: 0
-    }];
+    if (branch.code) {
+        return [{
+            code: branch.code,
+            name: branch.name,
+            academicYear: branch.academicYear,
+            semester: branch.semester,
+            totalSemesters: branch.totalSemesters || 6,
+            facultyCount: 0
+        }];
+    }
+    return [];
 }
 
 async function getInstanceBranch(branchCode = null) {
@@ -371,17 +402,19 @@ async function getInstanceBranch(branchCode = null) {
         if (!lookupCode) return { ...branch, facultyCount: 0 };
         const { rows } = await db.query(`
             SELECT d.code, d.name, d.academic_year AS "academicYear", d.semester,
+                   COALESCE(d.total_semesters, 6) AS "totalSemesters",
                    COUNT(f.id)::int AS "facultyCount"
               FROM departments d
               LEFT JOIN faculty f ON f.department_id = d.id
              WHERE UPPER(d.code) = UPPER($1)
-             GROUP BY d.code, d.name, d.academic_year, d.semester`, [lookupCode]);
+             GROUP BY d.code, d.name, d.academic_year, d.semester, d.total_semesters`, [lookupCode]);
         if (rows.length) {
             return {
                 code: rows[0].code,
                 name: rows[0].name,
                 academicYear: rows[0].academicYear || branch.academicYear,
                 semester: rows[0].semester != null ? rows[0].semester : branch.semester,
+                totalSemesters: rows[0].totalSemesters != null ? rows[0].totalSemesters : (branch.totalSemesters || 6),
                 facultyCount: rows[0].facultyCount || 0
             };
         }
@@ -398,19 +431,22 @@ async function updateInstanceBranch(changes = {}) {
     const newYear = changes.academicYear ? String(changes.academicYear).trim() : branch.academicYear;
     const newSem = changes.semester != null && !isNaN(parseInt(changes.semester, 10))
         ? parseInt(changes.semester, 10) : branch.semester;
+    const newTotalSemesters = changes.totalSemesters != null && !isNaN(parseInt(changes.totalSemesters, 10))
+        ? parseInt(changes.totalSemesters, 10) : (branch.totalSemesters || 6);
 
     return db.withTransaction(async client => {
         const { rows } = await client.query(`
-            INSERT INTO departments (code, name, academic_year, semester)
-            VALUES ($1, $2, $3, $4)
+            INSERT INTO departments (code, name, academic_year, semester, total_semesters)
+            VALUES ($1, $2, $3, $4, $5)
             ON CONFLICT (code) DO UPDATE SET
                 name = EXCLUDED.name,
                 academic_year = EXCLUDED.academic_year,
-                semester = EXCLUDED.semester
-            RETURNING code, name, academic_year AS "academicYear", semester`,
-            [newCode, newName, newYear, newSem]
+                semester = EXCLUDED.semester,
+                total_semesters = EXCLUDED.total_semesters
+            RETURNING code, name, academic_year AS "academicYear", semester, total_semesters AS "totalSemesters"`,
+            [newCode, newName, newYear, newSem, newTotalSemesters]
         );
-        setBranch({ code: newCode, name: newName, academicYear: newYear, semester: newSem });
+        setBranch({ code: newCode, name: newName, academicYear: newYear, semester: newSem, totalSemesters: newTotalSemesters });
         return rows[0];
     });
 }
@@ -611,11 +647,11 @@ async function addClass(section) {
         }
 
         const { rows } = await client.query(`
-            INSERT INTO classes (code, department_id, semester, academic_year, home_room_id)
-            VALUES (UPPER($1), $2, $3, $4, $5)
-            RETURNING code, semester, academic_year AS "academicYear"`,
+            INSERT INTO classes (code, department_id, semester, academic_year, home_room_id, section)
+            VALUES (UPPER($1), $2, $3, $4, $5, $6)
+            RETURNING id, code, semester, academic_year AS "academicYear", section`,
             [section.code, deptId, section.semester || null,
-             section.academicYear || null, roomId]);
+             section.academicYear || null, roomId, section.section || null]);
         return { ...rows[0], department: String(section.department).toUpperCase(), room: section.room || null };
     });
 }
@@ -633,11 +669,12 @@ async function updateClass(code, changes) {
             UPDATE classes
                SET department_id = COALESCE($2, department_id),
                    semester = COALESCE($3, semester),
-                   academic_year = COALESCE($4, academic_year)
+                   academic_year = COALESCE($4, academic_year),
+                   section = COALESCE($5, section)
              WHERE id = $1
-            RETURNING code, semester, academic_year AS "academicYear",
+            RETURNING id, code, semester, academic_year AS "academicYear", section,
                       (SELECT COALESCE(code, 'General') FROM departments WHERE id = classes.department_id) AS department`,
-            [id, deptId, changes.semester || null, changes.academicYear || null]);
+            [id, deptId, changes.semester || null, changes.academicYear || null, changes.section || null]);
         return rows[0];
     });
 }
@@ -659,6 +696,133 @@ async function deleteClass(code) {
 
         await client.query('DELETE FROM classes WHERE id = $1', [id]);
         return { code };
+    });
+}
+
+async function resolveOrCreateClass({ branch, academicYear, semester, section }) {
+    return db.withTransaction(async client => {
+        const branchCode = String(branch || '').trim().toUpperCase();
+        const semStr = semester ? String(semester).trim().toUpperCase() : null;
+        const secStr = section ? String(section).trim().toUpperCase() : null;
+        const yrStr = academicYear ? String(academicYear).trim() : null;
+
+        // 1. Match by department + semester + section
+        const q = await client.query(`
+            SELECT c.id, c.code, c.name, c.semester, c.academic_year AS "academicYear", c.section,
+                   d.code AS department
+              FROM classes c
+              JOIN departments d ON d.id = c.department_id
+             WHERE UPPER(d.code) = UPPER($1)
+               AND (c.semester = $2 OR ($2 IS NULL AND c.semester IS NULL))
+               AND (UPPER(c.section) = UPPER($3) OR ($3 IS NULL AND c.section IS NULL))
+             LIMIT 1
+        `, [branchCode, semStr, secStr]);
+
+        if (q.rows.length) {
+            return q.rows[0];
+        }
+
+        // 2. Fallback check for legacy classes (e.g. CME-A) if semStr is null or matches
+        if (secStr) {
+            const legacyCode = `${branchCode}-${secStr}`;
+            const legQ = await client.query(`
+                SELECT c.id, c.code, c.name, c.semester, c.academic_year AS "academicYear", c.section,
+                       d.code AS department
+                  FROM classes c
+                  JOIN departments d ON d.id = c.department_id
+                 WHERE UPPER(d.code) = UPPER($1)
+                   AND UPPER(c.code) = UPPER($2)
+                 LIMIT 1
+            `, [branchCode, legacyCode]);
+
+            if (legQ.rows.length) {
+                const legClass = legQ.rows[0];
+                if (!semStr || legClass.semester === semStr) {
+                    return legClass;
+                }
+            }
+        }
+
+        // 3. Resolve department ID
+        const deptQ = await client.query('SELECT id FROM departments WHERE UPPER(code) = UPPER($1)', [branchCode]);
+        let deptId;
+        if (deptQ.rows.length) {
+            deptId = deptQ.rows[0].id;
+        } else {
+            const newDept = await client.query(`
+                INSERT INTO departments (code, name, total_semesters)
+                VALUES ($1, $1, 6)
+                RETURNING id
+            `, [branchCode]);
+            deptId = newDept.rows[0].id;
+        }
+
+        const semClean = semStr ? semStr.replace(/[^A-Za-z0-9]/g, '') : '';
+        const generatedCode = `${branchCode}${semClean ? '-' + semClean : ''}${secStr ? '-' + secStr : ''}`;
+        const className = `${branchCode} ${semStr || ''} ${secStr ? 'Sec-' + secStr : ''}`.replace(/\s+/g, ' ').trim();
+
+        const ins = await client.query(`
+            INSERT INTO classes (code, name, department_id, semester, academic_year, section)
+            VALUES ($1, $2, $3, $4, $5, $6)
+            ON CONFLICT (code) DO UPDATE SET
+                semester = COALESCE(EXCLUDED.semester, classes.semester),
+                academic_year = COALESCE(EXCLUDED.academic_year, classes.academic_year),
+                section = COALESCE(EXCLUDED.section, classes.section)
+            RETURNING id, code, name, semester, academic_year AS "academicYear", section
+        `, [generatedCode, className, deptId, semStr, yrStr, secStr]);
+
+        return {
+            ...ins.rows[0],
+            department: branchCode
+        };
+    });
+}
+
+async function clearTimetable({ classId, className, branchCode }) {
+    return db.withTransaction(async client => {
+        let targetClass = null;
+        if (classId) {
+            const res = await client.query(`
+                SELECT c.id, c.code, d.code AS department
+                  FROM classes c
+                  JOIN departments d ON d.id = c.department_id
+                 WHERE c.id = $1
+            `, [classId]);
+            if (res.rows.length) targetClass = res.rows[0];
+        } else if (className) {
+            const res = await client.query(`
+                SELECT c.id, c.code, d.code AS department
+                  FROM classes c
+                  JOIN departments d ON d.id = c.department_id
+                 WHERE UPPER(c.code) = UPPER($1)
+            `, [className]);
+            if (res.rows.length) targetClass = res.rows[0];
+        }
+
+        if (!targetClass) {
+            const err = new Error(`Class not found for clear timetable.`);
+            err.code = 'NOT_FOUND';
+            err.status = 404;
+            throw err;
+        }
+
+        if (branchCode && targetClass.department.toUpperCase() !== branchCode.toUpperCase()) {
+            const err = new Error(`Cross-branch timetable management is not allowed. Target class belongs to ${targetClass.department}, but current branch is ${branchCode}.`);
+            err.code = 'FORBIDDEN';
+            err.status = 403;
+            throw err;
+        }
+
+        const del = await client.query(`
+            DELETE FROM timetable WHERE class_id = $1
+        `, [targetClass.id]);
+
+        return {
+            cleared: true,
+            classId: targetClass.id,
+            className: targetClass.code,
+            clearedCount: del.rowCount
+        };
     });
 }
 
@@ -727,12 +891,139 @@ function usernameFor(name) {
 async function getFaculty(id, client) {
     const runner = client || db;
     const { rows } = await runner.query(`
-        SELECT f.code AS id, f.name, COALESCE(d.code, 'General') AS department,
+        SELECT f.id AS numeric_id, f.code AS id, f.name, COALESCE(d.code, 'General') AS department,
                f.designation, f.email, f.phone,
-               f.max_weekly_periods AS "maxWeeklyPeriods", f.status
+               f.max_weekly_periods AS "maxWeeklyPeriods", f.status,
+               COALESCE((SELECT array_agg(subject) FROM faculty_subjects WHERE faculty_id = f.id), ARRAY[]::text[]) AS subjects
           FROM faculty f LEFT JOIN departments d ON d.id = f.department_id
-         WHERE f.id = $1`, [id]);
+         WHERE f.id::text = $1::text OR UPPER(f.code) = UPPER($1::text) OR UPPER(f.name) = UPPER($1::text)`, [String(id)]);
     return rows[0] || null;
+}
+
+async function updateFaculty(id, branchCode, updates) {
+    return db.withTransaction(async client => {
+        const found = await client.query(`
+            SELECT f.id, f.code, f.name, f.status, COALESCE(d.code, 'General') AS department
+              FROM faculty f LEFT JOIN departments d ON d.id = f.department_id
+             WHERE f.id::text = $1::text OR UPPER(f.code) = UPPER($1::text) OR UPPER(f.name) = UPPER($1::text)
+        `, [String(id)]);
+
+        if (!found.rows.length) {
+            const err = new Error(`Faculty "${id}" not found.`);
+            err.code = 'NOT_FOUND';
+            err.status = 404;
+            throw err;
+        }
+
+        const fac = found.rows[0];
+        if (branchCode && fac.department.toUpperCase() !== branchCode.toUpperCase()) {
+            const err = new Error(`Cross-branch faculty management is not allowed. Faculty belongs to ${fac.department}, but current branch is ${branchCode}.`);
+            err.code = 'FORBIDDEN';
+            err.status = 403;
+            throw err;
+        }
+
+        const newName = (updates.name && String(updates.name).trim().length >= 2) ? String(updates.name).trim() : fac.name;
+        const newPhone = updates.phone !== undefined ? (updates.phone ? String(updates.phone).trim() : null) : undefined;
+        const newDesignation = updates.designation !== undefined ? (updates.designation ? String(updates.designation).trim() : null) : undefined;
+        const newMaxWeeklyPeriods = updates.maxWeeklyPeriods !== undefined ? parseInt(updates.maxWeeklyPeriods, 10) : undefined;
+
+        await client.query(`
+            UPDATE faculty
+               SET name = COALESCE($2, name),
+                   phone = CASE WHEN $3::boolean THEN $4 ELSE phone END,
+                   designation = CASE WHEN $5::boolean THEN $6 ELSE designation END,
+                   max_weekly_periods = CASE WHEN $7::boolean THEN $8 ELSE max_weekly_periods END
+             WHERE id = $1
+        `, [
+            fac.id,
+            newName,
+            newPhone !== undefined, newPhone || null,
+            newDesignation !== undefined, newDesignation || null,
+            newMaxWeeklyPeriods !== undefined && Number.isFinite(newMaxWeeklyPeriods), newMaxWeeklyPeriods || null
+        ]);
+
+        if (Array.isArray(updates.subjects)) {
+            await client.query('DELETE FROM faculty_subjects WHERE faculty_id = $1', [fac.id]);
+            const subjects = updates.subjects.map(s => String(s).trim()).filter(Boolean);
+            for (const subj of subjects) {
+                await client.query(`
+                    INSERT INTO faculty_subjects (faculty_id, subject)
+                    VALUES ($1, $2)
+                    ON CONFLICT (faculty_id, subject) DO NOTHING
+                `, [fac.id, subj]);
+            }
+        }
+
+        await client.query(`
+            UPDATE users
+               SET name = $2,
+                   phone = CASE WHEN $3::boolean THEN $4 ELSE phone END
+             WHERE faculty_id = $1
+        `, [fac.id, newName, newPhone !== undefined, newPhone || null]);
+
+        return getFaculty(fac.id, client);
+    });
+}
+
+async function deactivateFaculty(id, branchCode) {
+    return db.withTransaction(async client => {
+        const found = await client.query(`
+            SELECT f.id, f.code, f.name, f.status, COALESCE(d.code, 'General') AS department
+              FROM faculty f LEFT JOIN departments d ON d.id = f.department_id
+             WHERE f.id::text = $1::text OR UPPER(f.code) = UPPER($1::text) OR UPPER(f.name) = UPPER($1::text)
+        `, [String(id)]);
+
+        if (!found.rows.length) {
+            const err = new Error(`Faculty "${id}" not found.`);
+            err.code = 'NOT_FOUND';
+            err.status = 404;
+            throw err;
+        }
+
+        const fac = found.rows[0];
+        if (branchCode && fac.department.toUpperCase() !== branchCode.toUpperCase()) {
+            const err = new Error(`Cross-branch faculty management is not allowed. Faculty belongs to ${fac.department}, but current branch is ${branchCode}.`);
+            err.code = 'FORBIDDEN';
+            err.status = 403;
+            throw err;
+        }
+
+        await client.query(`UPDATE faculty SET status = 'inactive' WHERE id = $1`, [fac.id]);
+        await client.query(`UPDATE users SET status = 'inactive' WHERE faculty_id = $1`, [fac.id]);
+
+        return { id: fac.code, name: fac.name, department: fac.department, status: 'inactive' };
+    });
+}
+
+async function activateFaculty(id, branchCode) {
+    return db.withTransaction(async client => {
+        const found = await client.query(`
+            SELECT f.id, f.code, f.name, f.status, COALESCE(d.code, 'General') AS department
+              FROM faculty f LEFT JOIN departments d ON d.id = f.department_id
+             WHERE f.id::text = $1::text OR UPPER(f.code) = UPPER($1::text) OR UPPER(f.name) = UPPER($1::text)
+        `, [String(id)]);
+
+        if (!found.rows.length) {
+            const err = new Error(`Faculty "${id}" not found.`);
+            err.code = 'NOT_FOUND';
+            err.status = 404;
+            throw err;
+        }
+
+        const fac = found.rows[0];
+        if (branchCode && fac.department.toUpperCase() !== branchCode.toUpperCase()) {
+            const err = new Error(`Cross-branch faculty management is not allowed. Faculty belongs to ${fac.department}, but current branch is ${branchCode}.`);
+            err.code = 'FORBIDDEN';
+            err.status = 403;
+            throw err;
+        }
+
+        await client.query(`UPDATE faculty SET status = 'active' WHERE id = $1`, [fac.id]);
+        await client.query(`UPDATE users SET status = 'active' WHERE faculty_id = $1`, [fac.id]);
+
+        return { id: fac.code, name: fac.name, department: fac.department, status: 'active' };
+    });
 }
 
 async function importStagedTimetable({ uploadRecord, stagedContract, resolvedMap, userId }) {
@@ -896,15 +1187,602 @@ async function importStagedTimetable({ uploadRecord, stagedContract, resolvedMap
     });
 }
 
+// ------------------------------------------------ Phase B7.1 Faculty Registration Requests
+
+async function createFacultyRequest(data) {
+    const { fullName, phone, username, passwordHash, designation, subjects, branchCode } = data;
+    const { rows } = await db.query(`
+        INSERT INTO faculty_registration_requests
+            (full_name, phone, username, password_hash, designation, subjects, branch_code, status)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, 'PENDING')
+        RETURNING id, full_name AS "fullName", phone, username, designation, subjects,
+                  branch_code AS "branchCode", status, rejection_reason AS "rejectionReason",
+                  reviewed_by AS "reviewedBy", reviewed_at AS "reviewedAt", created_at AS "createdAt"
+    `, [fullName, phone, username.toLowerCase(), passwordHash, designation || null, subjects || [], branchCode.toUpperCase()]);
+    return rows[0];
+}
+
+async function listFacultyRequests(branchCode, status = null) {
+    let sql = `
+        SELECT id, full_name AS "fullName", phone, username, designation, subjects,
+               branch_code AS "branchCode", status, rejection_reason AS "rejectionReason",
+               reviewed_by AS "reviewedBy", reviewed_at AS "reviewedAt", created_at AS "createdAt"
+          FROM faculty_registration_requests
+         WHERE UPPER(branch_code) = UPPER($1)
+    `;
+    const params = [branchCode];
+    if (status) {
+        sql += ` AND status = $2`;
+        params.push(status);
+    }
+    sql += ` ORDER BY created_at DESC`;
+    const { rows } = await db.query(sql, params);
+    return rows;
+}
+
+async function getFacultyRequestById(id) {
+    const { rows } = await db.query(`
+        SELECT id, full_name AS "fullName", phone, username, password_hash AS "passwordHash",
+               designation, subjects, branch_code AS "branchCode", status,
+               rejection_reason AS "rejectionReason", reviewed_by AS "reviewedBy",
+               reviewed_at AS "reviewedAt", created_at AS "createdAt"
+          FROM faculty_registration_requests
+         WHERE id = $1
+    `, [id]);
+    return rows[0] || null;
+}
+
+async function updateFacultyRequestStatus(id, branchCode, status, reviewedBy, rejectionReason = null) {
+    const { rows } = await db.query(`
+        UPDATE faculty_registration_requests
+           SET status = $1,
+               reviewed_by = $2,
+               reviewed_at = now(),
+               rejection_reason = $3
+         WHERE id = $4 AND UPPER(branch_code) = UPPER($5)
+        RETURNING id, full_name AS "fullName", phone, username, designation, subjects,
+                  branch_code AS "branchCode", status, rejection_reason AS "rejectionReason",
+                  reviewed_by AS "reviewedBy", reviewed_at AS "reviewedAt", created_at AS "createdAt"
+    `, [status, reviewedBy, rejectionReason, id, branchCode]);
+    return rows[0] || null;
+}
+
+// ------------------------------------------------ Phase B7.2 Faculty Attendance / Absence
+
+async function listFacultyAttendanceForDate(branchCode, date) {
+    const { rows } = await db.query(`
+        SELECT f.id, f.code, f.name, f.designation, f.phone, f.status AS "facultyStatus",
+               d.code AS department,
+               COALESCE(fa.status, 'PRESENT') AS status,
+               fa.id AS "attendanceId",
+               fa.marked_by AS "markedBy",
+               fa.updated_at AS "updatedAt"
+          FROM faculty f
+          JOIN departments d ON f.department_id = d.id
+          LEFT JOIN faculty_attendance fa
+            ON fa.faculty_id = f.id AND fa.attendance_date = $2
+         WHERE UPPER(d.code) = UPPER($1)
+           AND f.status = 'active'
+         ORDER BY f.name ASC
+    `, [branchCode, date]);
+    return rows;
+}
+
+async function markFacultyAttendance({ facultyId, date, status, markedBy }) {
+    const { rows } = await db.query(`
+        INSERT INTO faculty_attendance (faculty_id, attendance_date, status, marked_by, created_at, updated_at)
+        VALUES ($1, $2, $3, $4, now(), now())
+        ON CONFLICT (faculty_id, attendance_date)
+        DO UPDATE SET status = EXCLUDED.status,
+                      marked_by = EXCLUDED.marked_by,
+                      updated_at = now()
+        RETURNING id, faculty_id AS "facultyId", attendance_date AS "attendanceDate",
+                  status, marked_by AS "markedBy", created_at AS "createdAt", updated_at AS "updatedAt"
+    `, [facultyId, date, status, markedBy]);
+    return rows[0];
+}
+
+async function deleteFacultyAttendance(id, branchCode) {
+    const { rows } = await db.query(`
+        DELETE FROM faculty_attendance fa
+         USING faculty f, departments d
+         WHERE fa.faculty_id = f.id
+           AND f.department_id = d.id
+           AND fa.id = $1
+           AND UPPER(d.code) = UPPER($2)
+        RETURNING fa.id, fa.faculty_id AS "facultyId", fa.attendance_date AS "attendanceDate", fa.status
+    `, [id, branchCode]);
+    return rows[0] || null;
+}
+
+async function getAbsentFacultyForDate(date) {
+    const { rows } = await db.query(`
+        SELECT fa.id, fa.faculty_id AS "facultyId", f.name AS "facultyName", f.code AS "facultyCode",
+               d.code AS department, fa.attendance_date AS "date", fa.status
+          FROM faculty_attendance fa
+          JOIN faculty f ON fa.faculty_id = f.id
+          JOIN departments d ON f.department_id = d.id
+         WHERE fa.attendance_date = $1
+           AND fa.status = 'ABSENT'
+    `, [date]);
+    return rows;
+}
+
+async function getFacultyAttendanceHistory(facultyId, limit = 50) {
+    const { rows } = await db.query(`
+        SELECT id, faculty_id AS "facultyId", attendance_date AS "date",
+               status, marked_by AS "markedBy", created_at AS "createdAt", updated_at AS "updatedAt"
+          FROM faculty_attendance
+         WHERE faculty_id = $1
+         ORDER BY attendance_date DESC
+         LIMIT $2
+    `, [facultyId, limit]);
+    return rows;
+}
+
+// Phase B7.3 Exam Invigilation Requests & Assignments
+async function createInvigilationRequest({ facultyId, branchCode, examDate, periods, reason }) {
+    const { rows } = await db.query(`
+        INSERT INTO exam_invigilation_requests (faculty_id, branch_code, exam_date, periods, reason, status, created_at, updated_at)
+        VALUES ($1, $2, $3, $4, $5, 'PENDING', now(), now())
+        RETURNING id, faculty_id AS "facultyId", branch_code AS "branchCode", exam_date AS "examDate",
+                  periods, reason, status, created_at AS "createdAt", updated_at AS "updatedAt"
+    `, [facultyId, branchCode, examDate, periods, reason || null]);
+    return rows[0];
+}
+
+async function listInvigilationRequests({ branchCode, status, facultyId } = {}) {
+    let query = `
+        SELECT r.id, r.faculty_id AS "facultyId", f.name AS "facultyName", f.code AS "facultyCode",
+               r.branch_code AS "branchCode", r.exam_date AS "examDate", r.periods, r.reason,
+               r.status, r.reviewed_by AS "reviewedBy", r.reviewed_at AS "reviewedAt",
+               r.rejection_reason AS "rejectionReason", r.created_at AS "createdAt", r.updated_at AS "updatedAt"
+          FROM exam_invigilation_requests r
+          JOIN faculty f ON r.faculty_id = f.id
+         WHERE 1=1
+    `;
+    const params = [];
+    if (branchCode) {
+        params.push(branchCode);
+        query += ` AND UPPER(r.branch_code) = UPPER($${params.length})`;
+    }
+    if (status) {
+        params.push(status);
+        query += ` AND UPPER(r.status) = UPPER($${params.length})`;
+    }
+    if (facultyId) {
+        params.push(facultyId);
+        query += ` AND r.faculty_id = $${params.length}`;
+    }
+    query += ` ORDER BY r.created_at DESC`;
+    const { rows } = await db.query(query, params);
+    return rows;
+}
+
+async function getInvigilationRequestById(id) {
+    const { rows } = await db.query(`
+        SELECT r.id, r.faculty_id AS "facultyId", f.name AS "facultyName", f.code AS "facultyCode",
+               r.branch_code AS "branchCode", r.exam_date AS "examDate", r.periods, r.reason,
+               r.status, r.reviewed_by AS "reviewedBy", r.reviewed_at AS "reviewedAt",
+               r.rejection_reason AS "rejectionReason", r.created_at AS "createdAt", r.updated_at AS "updatedAt"
+          FROM exam_invigilation_requests r
+          JOIN faculty f ON r.faculty_id = f.id
+         WHERE r.id = $1
+    `, [id]);
+    return rows[0] || null;
+}
+
+async function updateInvigilationRequestStatus(id, { status, reviewedBy, rejectionReason }) {
+    const { rows } = await db.query(`
+        UPDATE exam_invigilation_requests
+           SET status = $2,
+               reviewed_by = $3,
+               reviewed_at = now(),
+               rejection_reason = $4,
+               updated_at = now()
+         WHERE id = $1
+        RETURNING id, faculty_id AS "facultyId", branch_code AS "branchCode", exam_date AS "examDate",
+                  periods, reason, status, reviewed_by AS "reviewedBy", reviewed_at AS "reviewedAt",
+                  rejection_reason AS "rejectionReason", updated_at AS "updatedAt"
+    `, [id, status, reviewedBy, rejectionReason || null]);
+    return rows[0] || null;
+}
+
+async function createActiveInvigilation({ facultyId, branchCode, examDate, period, source, requestId, assignedBy, notes }) {
+    const { rows } = await db.query(`
+        INSERT INTO exam_invigilation (faculty_id, branch_code, exam_date, period, source, request_id, assigned_by, notes, created_at, updated_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, now(), now())
+        RETURNING id, faculty_id AS "facultyId", branch_code AS "branchCode", exam_date AS "examDate",
+                  period, source, request_id AS "requestId", assigned_by AS "assignedBy", notes,
+                  created_at AS "createdAt", updated_at AS "updatedAt"
+    `, [facultyId, branchCode, examDate, period, source || 'DIRECT', requestId || null, assignedBy || null, notes || null]);
+    return rows[0];
+}
+
+async function listActiveInvigilation({ branchCode, examDate, period, facultyId } = {}) {
+    let query = `
+        SELECT ei.id, ei.faculty_id AS "facultyId", f.name AS "facultyName", f.code AS "facultyCode",
+               ei.branch_code AS "branchCode", ei.exam_date AS "examDate", ei.period,
+               ei.source, ei.request_id AS "requestId", ei.assigned_by AS "assignedBy",
+               ei.notes, ei.created_at AS "createdAt", ei.updated_at AS "updatedAt"
+          FROM exam_invigilation ei
+          JOIN faculty f ON ei.faculty_id = f.id
+         WHERE 1=1
+    `;
+    const params = [];
+    if (branchCode) {
+        params.push(branchCode);
+        query += ` AND UPPER(ei.branch_code) = UPPER($${params.length})`;
+    }
+    if (examDate) {
+        params.push(examDate);
+        query += ` AND ei.exam_date = $${params.length}`;
+    }
+    if (period !== undefined && period !== null) {
+        params.push(period);
+        query += ` AND ei.period = $${params.length}`;
+    }
+    if (facultyId) {
+        params.push(facultyId);
+        query += ` AND ei.faculty_id = $${params.length}`;
+    }
+    query += ` ORDER BY ei.exam_date ASC, ei.period ASC`;
+    const { rows } = await db.query(query, params);
+    return rows;
+}
+
+async function deleteActiveInvigilation(id, branchCode) {
+    const { rows } = await db.query(`
+        DELETE FROM exam_invigilation ei
+         USING faculty f, departments d
+         WHERE ei.faculty_id = f.id
+           AND f.department_id = d.id
+           AND ei.id = $1
+           AND UPPER(d.code) = UPPER($2)
+        RETURNING ei.id, ei.faculty_id AS "facultyId", ei.exam_date AS "examDate", ei.period
+    `, [id, branchCode]);
+    return rows[0] || null;
+}
+
+/* ======================================================================
+ * Faculty Substitutions (Phase B7.5) & User Persistence
+ * ====================================================================== */
+
+async function resolveFacultyDbId(clientOrDb, identifier, name = null) {
+    const runner = clientOrDb || db;
+    if (identifier !== undefined && identifier !== null && !isNaN(parseInt(identifier, 10))) {
+        const res = await runner.query('SELECT id FROM faculty WHERE id = $1', [parseInt(identifier, 10)]);
+        if (res.rows.length) return res.rows[0].id;
+    }
+    const lookupStr = String(identifier || name || '').trim();
+    if (lookupStr) {
+        const res = await runner.query(
+            'SELECT id FROM faculty WHERE UPPER(code) = UPPER($1) OR UPPER(name) = UPPER($1) LIMIT 1',
+            [lookupStr]
+        );
+        if (res.rows.length) return res.rows[0].id;
+    }
+    if (name) {
+        const res = await runner.query(
+            'SELECT id FROM faculty WHERE UPPER(name) = UPPER($1) LIMIT 1',
+            [String(name).trim()]
+        );
+        if (res.rows.length) return res.rows[0].id;
+    }
+    return null;
+}
+
+async function ensureFacultyDbRecord(clientOrDb, { id, name, department, phone, status }) {
+    const runner = clientOrDb || db;
+    const existingId = await resolveFacultyDbId(runner, id, name);
+    if (existingId) return existingId;
+
+    let deptId = null;
+    if (department) {
+        const dRes = await runner.query('SELECT id FROM departments WHERE UPPER(code) = UPPER($1)', [department]);
+        if (dRes.rows.length) {
+            deptId = dRes.rows[0].id;
+        } else {
+            const insD = await runner.query(
+                'INSERT INTO departments (code, name, total_semesters) VALUES ($1, $1, 6) ON CONFLICT (code) DO UPDATE SET name = EXCLUDED.name RETURNING id',
+                [department]
+            );
+            deptId = insD.rows[0].id;
+        }
+    }
+
+    const facCode = id ? String(id) : `FAC_${Date.now()}`;
+    const facName = name ? String(name) : facCode;
+    const ins = await runner.query(`
+        INSERT INTO faculty (code, name, department_id, phone, status)
+        VALUES ($1, $2, $3, $4, $5)
+        ON CONFLICT (code) DO UPDATE SET name = EXCLUDED.name
+        RETURNING id
+    `, [facCode, facName, deptId, phone || null, status || 'active']);
+    return ins.rows[0].id;
+}
+
+async function createFacultySubstitution({
+    id, date, dayOfWeek, period, className, subject, room,
+    originalFacultyId, originalFacultyName, originalFacultyBranch,
+    substituteFacultyId, substituteFacultyName, substituteFacultyBranch,
+    requestedBy, status
+}) {
+    return db.withTransaction(async client => {
+        const origId = await ensureFacultyDbRecord(client, {
+            id: originalFacultyId,
+            name: originalFacultyName,
+            department: originalFacultyBranch
+        });
+        const subId = await ensureFacultyDbRecord(client, {
+            id: substituteFacultyId,
+            name: substituteFacultyName,
+            department: substituteFacultyBranch
+        });
+
+        const { rows } = await client.query(`
+            INSERT INTO faculty_substitutions (
+                id, date, day_of_week, period, class_name, subject, room,
+                original_faculty_id, original_faculty_name, original_faculty_branch,
+                substitute_faculty_id, substitute_faculty_name, substitute_faculty_branch,
+                requested_by, status, created_at
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, now())
+            ON CONFLICT (id) DO UPDATE SET
+                status = EXCLUDED.status,
+                rejection_reason = EXCLUDED.rejection_reason
+            RETURNING
+                id, date::text, day_of_week AS "dayOfWeek", period,
+                class_name AS "className", subject, room,
+                original_faculty_id AS "originalFacultyId",
+                original_faculty_name AS "originalFacultyName",
+                original_faculty_branch AS "originalFacultyBranch",
+                substitute_faculty_id AS "substituteFacultyId",
+                substitute_faculty_name AS "substituteFacultyName",
+                substitute_faculty_branch AS "substituteFacultyBranch",
+                requested_by AS "requestedBy",
+                status, rejection_reason AS "rejectionReason",
+                created_at AS "createdAt",
+                responded_at AS "respondedAt",
+                cancelled_at AS "cancelledAt"
+        `, [
+            id, date, dayOfWeek, period, className || null, subject || null, room || null,
+            origId, originalFacultyName, originalFacultyBranch,
+            subId, substituteFacultyName, substituteFacultyBranch,
+            requestedBy, status || 'PENDING'
+        ]);
+
+        return rows[0];
+    });
+}
+
+async function getFacultySubstitutionById(id) {
+    const { rows } = await db.query(`
+        SELECT
+            id, date::text, day_of_week AS "dayOfWeek", period,
+            class_name AS "className", subject, room,
+            original_faculty_id AS "originalFacultyId",
+            original_faculty_name AS "originalFacultyName",
+            original_faculty_branch AS "originalFacultyBranch",
+            substitute_faculty_id AS "substituteFacultyId",
+            substitute_faculty_name AS "substituteFacultyName",
+            substitute_faculty_branch AS "substituteFacultyBranch",
+            requested_by AS "requestedBy",
+            status, rejection_reason AS "rejectionReason",
+            created_at AS "createdAt",
+            responded_at AS "respondedAt",
+            cancelled_at AS "cancelledAt"
+        FROM faculty_substitutions
+        WHERE id = $1
+    `, [id]);
+    return rows[0] || null;
+}
+
+async function updateFacultySubstitutionStatus(id, { status, rejectionReason, respondedAt, cancelledAt }) {
+    const { rows } = await db.query(`
+        UPDATE faculty_substitutions
+           SET status = $2,
+               rejection_reason = COALESCE($3, rejection_reason),
+               responded_at = COALESCE($4, responded_at),
+               cancelled_at = COALESCE($5, cancelled_at)
+         WHERE id = $1
+        RETURNING
+            id, date::text, day_of_week AS "dayOfWeek", period,
+            class_name AS "className", subject, room,
+            original_faculty_id AS "originalFacultyId",
+            original_faculty_name AS "originalFacultyName",
+            original_faculty_branch AS "originalFacultyBranch",
+            substitute_faculty_id AS "substituteFacultyId",
+            substitute_faculty_name AS "substituteFacultyName",
+            substitute_faculty_branch AS "substituteFacultyBranch",
+            requested_by AS "requestedBy",
+            status, rejection_reason AS "rejectionReason",
+            created_at AS "createdAt",
+            responded_at AS "respondedAt",
+            cancelled_at AS "cancelledAt"
+    `, [id, status, rejectionReason || null, respondedAt || null, cancelledAt || null]);
+    return rows[0] || null;
+}
+
+async function listFacultySubstitutions({ branchCode, date, period, originalFacultyId, substituteFacultyId, requestedBy, status } = {}) {
+    let query = `
+        SELECT
+            id, date::text, day_of_week AS "dayOfWeek", period,
+            class_name AS "className", subject, room,
+            original_faculty_id AS "originalFacultyId",
+            original_faculty_name AS "originalFacultyName",
+            original_faculty_branch AS "originalFacultyBranch",
+            substitute_faculty_id AS "substituteFacultyId",
+            substitute_faculty_name AS "substituteFacultyName",
+            substitute_faculty_branch AS "substituteFacultyBranch",
+            requested_by AS "requestedBy",
+            status, rejection_reason AS "rejectionReason",
+            created_at AS "createdAt",
+            responded_at AS "respondedAt",
+            cancelled_at AS "cancelledAt"
+        FROM faculty_substitutions
+        WHERE 1=1
+    `;
+    const params = [];
+    if (branchCode) {
+        params.push(branchCode);
+        query += ` AND UPPER(original_faculty_branch) = UPPER($${params.length})`;
+    }
+    if (date) {
+        params.push(date);
+        query += ` AND date = $${params.length}`;
+    }
+    if (period != null) {
+        params.push(period);
+        query += ` AND period = $${params.length}`;
+    }
+    if (originalFacultyId) {
+        params.push(String(originalFacultyId));
+        query += ` AND (original_faculty_id::text = $${params.length} OR UPPER(original_faculty_name) = UPPER($${params.length}))`;
+    }
+    if (substituteFacultyId) {
+        params.push(String(substituteFacultyId));
+        query += ` AND (substitute_faculty_id::text = $${params.length} OR UPPER(substitute_faculty_name) = UPPER($${params.length}))`;
+    }
+    if (requestedBy) {
+        params.push(String(requestedBy));
+        query += ` AND requested_by = $${params.length}`;
+    }
+    if (status) {
+        params.push(String(status).toUpperCase());
+        query += ` AND status = $${params.length}`;
+    }
+    query += ` ORDER BY date DESC, period ASC, created_at DESC`;
+
+    const { rows } = await db.query(query, params);
+    return rows;
+}
+
+async function hasAcceptedFacultySubstitution({ substituteFacultyId, substituteFacultyName, date, period }) {
+    const query = `
+        SELECT 1 FROM faculty_substitutions
+         WHERE status = 'ACCEPTED'
+           AND date = $1
+           AND period = $2
+           AND (
+               ($3::text IS NOT NULL AND substitute_faculty_id::text = $3)
+               OR ($4::text IS NOT NULL AND UPPER(substitute_faculty_name) = UPPER($4))
+           )
+         LIMIT 1
+    `;
+    const { rows } = await db.query(query, [
+        date,
+        period,
+        substituteFacultyId ? String(substituteFacultyId) : null,
+        substituteFacultyName ? String(substituteFacultyName) : null
+    ]);
+    return rows.length > 0;
+}
+
+async function saveUser({ username, name, phone, role, departmentCode, passwordHash, status, facultyId, subjects }) {
+    return db.withTransaction(async client => {
+        let deptId = null;
+        if (departmentCode) {
+            const dRes = await client.query('SELECT id FROM departments WHERE UPPER(code) = UPPER($1)', [departmentCode]);
+            if (dRes.rows.length) {
+                deptId = dRes.rows[0].id;
+            } else {
+                const insD = await client.query(
+                    'INSERT INTO departments (code, name, total_semesters) VALUES ($1, $1, 6) ON CONFLICT (code) DO UPDATE SET name = EXCLUDED.name RETURNING id',
+                    [departmentCode]
+                );
+                deptId = insD.rows[0].id;
+            }
+        }
+
+        let facId = null;
+        if (facultyId) {
+            facId = await resolveFacultyDbId(client, facultyId, name);
+        }
+
+        const { rows } = await client.query(`
+            INSERT INTO users (username, name, phone, role, department_id, faculty_id, password_hash, status, created_at)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, now())
+            ON CONFLICT (username) DO UPDATE SET
+                name = EXCLUDED.name,
+                phone = COALESCE(EXCLUDED.phone, users.phone),
+                role = EXCLUDED.role,
+                department_id = COALESCE(EXCLUDED.department_id, users.department_id),
+                faculty_id = COALESCE(EXCLUDED.faculty_id, users.faculty_id),
+                password_hash = COALESCE(EXCLUDED.password_hash, users.password_hash),
+                status = COALESCE(EXCLUDED.status, users.status)
+            RETURNING id, username, name, phone, role, status, created_at AS "createdAt"
+        `, [
+            String(username).toLowerCase(),
+            name,
+            phone || null,
+            role || 'faculty',
+            deptId,
+            facId,
+            passwordHash || null,
+            status || 'active'
+        ]);
+
+        if (facId && Array.isArray(subjects) && subjects.length > 0) {
+            for (const subj of subjects) {
+                await client.query(`
+                    INSERT INTO faculty_subjects (faculty_id, subject)
+                    VALUES ($1, $2)
+                    ON CONFLICT (faculty_id, subject) DO NOTHING
+                `, [facId, subj]);
+            }
+        }
+
+        return rows[0];
+    });
+}
+
+async function loadAllUsers() {
+    const { rows } = await db.query(`
+        SELECT u.id, u.username, u.name, u.phone, u.role, u.status, u.password_hash AS "passwordHash",
+               u.created_at AS "createdAt",
+               d.code AS department, d.name AS "branchName",
+               f.id AS "facultyId", f.name AS "facultyName",
+               COALESCE((SELECT array_agg(subject) FROM faculty_subjects WHERE faculty_id = f.id), ARRAY[]::text[]) AS subjects
+          FROM users u
+          LEFT JOIN departments d ON d.id = u.department_id
+          LEFT JOIN faculty f ON f.id = u.faculty_id
+         ORDER BY u.id ASC
+    `);
+    return rows;
+}
+
+async function loadAllDepartments() {
+    const { rows } = await db.query(`
+        SELECT code, name, academic_year AS "academicYear", semester,
+               COALESCE(total_semesters, 6) AS "totalSemesters"
+          FROM departments
+         ORDER BY code ASC
+    `);
+    return rows;
+}
+
 module.exports = {
     isEmpty, counts, loadSource,
     listEntries, getEntry, addEntry, updateEntry, deleteEntry,
     listRooms, listSubjects, listClasses, listDepartments,
     addDepartment, updateDepartment, deleteDepartment,
     addSubject, updateSubject, deleteSubject,
-    addClass, updateClass, deleteClass,
-    addFaculty, getFaculty, usernameFor,
+    addClass, updateClass, deleteClass, resolveOrCreateClass, clearTimetable,
+    addFaculty, getFaculty, updateFaculty, deactivateFaculty, activateFaculty, usernameFor,
     getInstanceBranch, updateInstanceBranch,
     importStagedTimetable,
+    createFacultyRequest, listFacultyRequests, getFacultyRequestById, updateFacultyRequestStatus,
+    listFacultyAttendanceForDate, markFacultyAttendance, deleteFacultyAttendance, getAbsentFacultyForDate, getFacultyAttendanceHistory,
+    createInvigilationRequest, listInvigilationRequests, getInvigilationRequestById, updateInvigilationRequestStatus,
+    createActiveInvigilation, listActiveInvigilation, deleteActiveInvigilation,
+    createFacultySubstitution, getFacultySubstitutionById, updateFacultySubstitutionStatus,
+    listFacultySubstitutions, hasAcceptedFacultySubstitution,
+    saveUser, loadAllUsers, loadAllDepartments,
+    resolveFacultyDbId, ensureFacultyDbRecord,
     DAY_ORDER
 };
+
+
+
+

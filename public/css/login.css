@@ -40,11 +40,15 @@
 .login-card form { margin-top: 24px; display: grid; gap: 16px; }
 .login-submit { width: 100%; padding: 11px 18px; }
 
-.login-message { display: none; }
-.login-message.is-visible {
-  display: block; padding: 10px 13px; border-radius: var(--radius-sm);
-  font-size: 0.87rem; border: 1px solid transparent;
+.login-message {
+  display: none;
+  padding: 10px 13px;
+  border-radius: var(--radius-sm);
+  font-size: 0.87rem;
+  line-height: 1.45;
+  border: 1px solid transparent;
 }
+.login-message.is-visible { display: block; }
 .login-message.is-error { background: var(--danger-100); border-color: var(--danger-line); color: var(--danger-700); }
 .login-message.is-ok { background: var(--ok-100); border-color: var(--ok-line); color: var(--ok-700); }
 .login-message.is-info { background: var(--brand-050); border-color: var(--brand-100); color: var(--ink-700); }

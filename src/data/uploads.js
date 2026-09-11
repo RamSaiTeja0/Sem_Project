@@ -57,6 +57,10 @@ async function saveUploadRecord(record) {
         facultyId: record.facultyId != null ? String(record.facultyId) : null,
         branchId: record.branchId != null ? String(record.branchId) : null,
         departmentCode: String(record.departmentCode || '').toUpperCase(),
+        academicYear: record.academicYear || null,
+        semester: record.semester || null,
+        section: record.section || null,
+        targetClass: record.targetClass || null,
         uploadType: record.uploadType, // 'MASTER_TIMETABLE' or 'FACULTY_TIMETABLE'
         status: record.status || 'UPLOADED',
         createdAt: record.createdAt || new Date().toISOString()

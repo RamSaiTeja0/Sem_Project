@@ -426,15 +426,15 @@ button.stat .stat-link {
 }
 
 /* ========================== faculty directory ========================= */
-/* Eleven columns do not fit a laptop viewport. Rather than squashing names
+/* Fourteen columns do not fit a laptop viewport. Rather than squashing names
    onto two lines and clipping the last column, the table keeps its natural
    width and the wrapper scrolls. */
-.data.directory { min-width: 1180px; }
-.data.directory td, .data.directory th { white-space: nowrap; }
+.data.directory-wide { min-width: 1180px; }
+.data td, .data th { white-space: nowrap; }
 
 /* The two list columns are the ones that genuinely vary in length; cap them
    and keep the full text in the title attribute. */
-.data.directory td.list {
+.data td.list {
   max-width: 220px; overflow: hidden; text-overflow: ellipsis;
 }
 

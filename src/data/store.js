@@ -122,8 +122,42 @@ async function initFromDatabase(options = {}) {
             ? { seeded: false, reason: 'seeding skipped' }
             : await seeder.seed();
 
+        // Restore departments/branches
+        try {
+            const dbDepts = await repository.loadAllDepartments();
+            const { registerBranch } = require('./departments');
+            for (const dept of dbDepts) {
+                registerBranch({
+                    code: dept.code,
+                    name: dept.name,
+                    academicYear: dept.academicYear,
+                    semester: dept.semester,
+                    totalSemesters: dept.totalSemesters
+                });
+            }
+        } catch (_) {}
+
+        // Restore registered users
+        try {
+            const dbUsers = await repository.loadAllUsers();
+            const usersModule = require('./users');
+            if (typeof usersModule.syncFromDatabase === 'function') {
+                usersModule.syncFromDatabase(dbUsers);
+            }
+        } catch (_) {}
+
+        // Restore faculty substitutions
+        try {
+            const dbSubs = await repository.listFacultySubstitutions();
+            const substitutionsModule = require('./substitutions');
+            if (typeof substitutionsModule.syncFromDatabase === 'function') {
+                substitutionsModule.syncFromDatabase(dbSubs);
+            }
+        } catch (_) {}
+
         const source = await repository.loadSource(demoTimetable.meta);
-        if (!source.classes.length) {
+        const counts = await repository.counts();
+        if (!source.classes.length || counts.timetable === 0) {
             source.allowEmpty = true;
         }
 
@@ -134,7 +168,7 @@ async function initFromDatabase(options = {}) {
             enabled: true,
             seeded: Boolean(seedResult.seeded),
             target: db.describeTarget(),
-            counts: await repository.counts()
+            counts
         };
     } catch (err) {
         databaseBacked = false;
@@ -147,8 +181,40 @@ async function initFromDatabase(options = {}) {
 async function reloadFromDatabase() {
     if (!databaseBacked) return false;
     const repository = require('../db/repository');
+
+    try {
+        const dbDepts = await repository.loadAllDepartments();
+        const { registerBranch } = require('./departments');
+        for (const dept of dbDepts) {
+            registerBranch({
+                code: dept.code,
+                name: dept.name,
+                academicYear: dept.academicYear,
+                semester: dept.semester,
+                totalSemesters: dept.totalSemesters
+            });
+        }
+    } catch (_) {}
+
+    try {
+        const dbUsers = await repository.loadAllUsers();
+        const usersModule = require('./users');
+        if (typeof usersModule.syncFromDatabase === 'function') {
+            usersModule.syncFromDatabase(dbUsers);
+        }
+    } catch (_) {}
+
+    try {
+        const dbSubs = await repository.listFacultySubstitutions();
+        const substitutionsModule = require('./substitutions');
+        if (typeof substitutionsModule.syncFromDatabase === 'function') {
+            substitutionsModule.syncFromDatabase(dbSubs);
+        }
+    } catch (_) {}
+
     const source = await repository.loadSource(demoTimetable.meta);
-    if (!source.classes.length) source.allowEmpty = true;
+    const counts = await repository.counts();
+    if (!source.classes.length || counts.timetable === 0) source.allowEmpty = true;
     state = buildState(source, 'neon-postgres');
     return true;
 }
@@ -284,7 +350,78 @@ function addFacultyInMemory(member) {
     return newFaculty;
 }
 
+function updateFacultyInMemory(id, updates = {}) {
+    if (!state.source.faculty) state.source.faculty = [];
+    const facultyId = String(id).trim();
+    const fac = state.source.faculty.find(f =>
+        (f.id && String(f.id).toLowerCase() === facultyId.toLowerCase()) ||
+        (f.code && String(f.code).toLowerCase() === facultyId.toLowerCase()) ||
+        (f.name && f.name.toLowerCase() === facultyId.toLowerCase())
+    );
+    if (!fac) {
+        const err = new Error(`Faculty "${id}" not found.`);
+        err.status = 404; err.code = 'NOT_FOUND';
+        throw err;
+    }
+
+    const oldName = fac.name;
+    if (updates.name && String(updates.name).trim().length >= 2) {
+        fac.name = String(updates.name).trim();
+    }
+    if (updates.phone !== undefined) {
+        fac.phone = updates.phone ? String(updates.phone).trim() : null;
+    }
+    if (updates.designation !== undefined) {
+        fac.designation = updates.designation ? String(updates.designation).trim() : null;
+    }
+    if (Array.isArray(updates.subjects)) {
+        fac.subjects = updates.subjects.map(s => String(s).trim()).filter(Boolean);
+    }
+    if (updates.maxWeeklyPeriods !== undefined) {
+        const mwp = parseInt(updates.maxWeeklyPeriods, 10);
+        if (Number.isFinite(mwp)) fac.maxWeeklyPeriods = mwp;
+    }
+
+    // Historical timetable slots: preserve ownership under updated name if name changed
+    if (oldName && fac.name !== oldName && Array.isArray(state.source.entries)) {
+        state.source.entries.forEach(e => {
+            if (e.faculty === oldName) e.faculty = fac.name;
+        });
+    }
+
+    state = buildState({ ...state.source, allowEmpty: true }, 'in-memory');
+    return fac;
+}
+
+function setFacultyStatusInMemory(id, status) {
+    if (!state.source.faculty) state.source.faculty = [];
+    const facultyId = String(id).trim();
+    const fac = state.source.faculty.find(f =>
+        (f.id && String(f.id).toLowerCase() === facultyId.toLowerCase()) ||
+        (f.code && String(f.code).toLowerCase() === facultyId.toLowerCase()) ||
+        (f.name && f.name.toLowerCase() === facultyId.toLowerCase())
+    );
+    if (!fac) {
+        const err = new Error(`Faculty "${id}" not found.`);
+        err.status = 404; err.code = 'NOT_FOUND';
+        throw err;
+    }
+    fac.status = status;
+    state = buildState({ ...state.source, allowEmpty: true }, 'in-memory');
+    return fac;
+}
+
 function resetForEmptyInstance(branch = null) {
+    try {
+        const attendance = require('./attendance');
+        if (attendance && typeof attendance.resetForTesting === 'function') {
+            attendance.resetForTesting();
+        }
+        const invigilation = require('./invigilation');
+        if (invigilation && typeof invigilation.resetForTesting === 'function') {
+            invigilation.resetForTesting();
+        }
+    } catch (_) {}
     state = buildState({
         allowEmpty: true,
         days: ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'],
@@ -413,6 +550,149 @@ function importStagedTimetableInMemory({ uploadRecord, stagedContract, resolvedM
     return { importedCount: newSlots.length };
 }
 
+function resolveOrCreateClassInMemory({ branch, academicYear, semester, section }) {
+    const branchCode = String(branch || '').trim().toUpperCase();
+    const semStr = semester ? String(semester).trim().toUpperCase() : null;
+    const secStr = section ? String(section).trim().toUpperCase() : null;
+    const yrStr = academicYear ? String(academicYear).trim() : null;
+
+    if (!state.source.classes) state.source.classes = [];
+    const sourceClasses = state.source.classes;
+
+    // 1. Match by branch + semester + section
+    let matched = sourceClasses.find(c => {
+        const cDept = String(c.department || c.branch || '').toUpperCase();
+        const cSem = c.semester ? String(c.semester).toUpperCase() : null;
+        let cSec = c.section ? String(c.section).toUpperCase() : null;
+        const cCode = String(c.code || c.class || '').toUpperCase();
+        if (!cSec && cCode) {
+            const m = cCode.match(/-([A-Za-z0-9])$/);
+            if (m) cSec = m[1].toUpperCase();
+        }
+        const matchesBranch = !branchCode || cDept === branchCode;
+        const matchesSem = semStr ? cSem === semStr : true;
+        const matchesSec = secStr ? cSec === secStr : true;
+        return matchesBranch && matchesSem && matchesSec;
+    });
+
+    if (matched) {
+        const code = matched.code || matched.class || '';
+        let sec = matched.section;
+        if (!sec && code) {
+            const m = code.match(/-([A-Za-z0-9])$/);
+            if (m) sec = m[1].toUpperCase();
+        }
+        return {
+            id: matched.id || code,
+            code: code,
+            class: code,
+            name: matched.name || code,
+            department: matched.department || branchCode,
+            branch: matched.department || branchCode,
+            semester: matched.semester || semStr,
+            academicYear: matched.academicYear || yrStr,
+            section: sec || secStr
+        };
+    }
+
+    // 2. Legacy fallback check (e.g. CME-A) if semStr is null or matches
+    if (secStr) {
+        const legacyCode = `${branchCode}-${secStr}`;
+        matched = sourceClasses.find(c => {
+            const cCode = String(c.code || c.class || '').toUpperCase();
+            return cCode === legacyCode;
+        });
+        if (matched) {
+            if (!semStr || (matched.semester && matched.semester.toUpperCase() === semStr)) {
+                return {
+                    id: matched.id || legacyCode,
+                    code: legacyCode,
+                    class: legacyCode,
+                    name: matched.name || legacyCode,
+                    department: branchCode,
+                    branch: branchCode,
+                    semester: matched.semester || null,
+                    academicYear: matched.academicYear || null,
+                    section: secStr
+                };
+            }
+        }
+    }
+
+    // 3. Create new class in memory
+    const semClean = semStr ? semStr.replace(/[^A-Za-z0-9]/g, '') : '';
+    const newCode = `${branchCode}${semClean ? '-' + semClean : ''}${secStr ? '-' + secStr : ''}`;
+    const newName = `${branchCode} ${semStr || ''} ${secStr ? 'Sec-' + secStr : ''}`.replace(/\s+/g, ' ').trim();
+    const newId = 5000 + sourceClasses.length + 1;
+
+    const newClassObj = {
+        id: newId,
+        code: newCode,
+        class: newCode,
+        name: newName,
+        department: branchCode,
+        branch: branchCode,
+        semester: semStr,
+        academicYear: yrStr,
+        section: secStr,
+        rows: {}
+    };
+
+    sourceClasses.push(newClassObj);
+    return newClassObj;
+}
+
+function clearTimetableInMemory({ classId, className, branchCode }) {
+    let targetClassName = className ? String(className).trim().toUpperCase() : null;
+    const sourceClasses = state.source.classes || [];
+
+    if (!targetClassName && classId) {
+        const c = sourceClasses.find(cls => String(cls.id) === String(classId));
+        if (c) targetClassName = String(c.code || c.class).trim().toUpperCase();
+    }
+
+    if (!targetClassName) {
+        const err = new Error('Class not found for clear timetable.');
+        err.code = 'NOT_FOUND';
+        err.status = 404;
+        throw err;
+    }
+
+    // Verify branch isolation
+    const matchedClass = sourceClasses.find(c => String(c.code || c.class).toUpperCase() === targetClassName);
+    let cDept = matchedClass ? String(matchedClass.department || matchedClass.branch || '').toUpperCase() : null;
+    if (!cDept && targetClassName.includes('-')) {
+        const prefix = targetClassName.split('-')[0].trim().toUpperCase();
+        if (prefix) cDept = prefix;
+    }
+    if (branchCode && cDept && cDept !== String(branchCode).toUpperCase()) {
+        const err = new Error(`Cross-branch timetable management is not allowed. Target class belongs to ${cDept}, but current branch is ${branchCode}.`);
+        err.code = 'FORBIDDEN';
+        err.status = 403;
+        throw err;
+    }
+
+    const beforeCount = (state.source.entries || []).length;
+    const remainingEntries = (state.source.entries || []).filter(e => {
+        const entryClass = String(e.class || e.className || '').trim().toUpperCase();
+        return entryClass !== targetClassName;
+    });
+    const clearedCount = beforeCount - remainingEntries.length;
+
+    const newSource = {
+        ...state.source,
+        allowEmpty: true,
+        entries: remainingEntries
+    };
+
+    state = buildState(newSource, 'in-memory-clear');
+    return {
+        cleared: true,
+        className: targetClassName,
+        clearedCount
+    };
+}
+
 module.exports = {
     buildState,
     init,
@@ -424,6 +704,10 @@ module.exports = {
     getEntryInMemory,
     listEntriesInMemory,
     addFacultyInMemory,
+    updateFacultyInMemory,
+    setFacultyStatusInMemory,
+    resolveOrCreateClassInMemory,
+    clearTimetableInMemory,
     resetForEmptyInstance,
     importStagedTimetableInMemory,
     get allowMemoryWrites() { return allowMemoryWrites || process.env.ALLOW_MEMORY_WRITES === 'true'; },

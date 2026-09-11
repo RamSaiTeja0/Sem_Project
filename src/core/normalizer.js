@@ -187,6 +187,7 @@ function normalize(source, options = {}) {
             designation: text(source.designation) || null,
             email: text(source.email) || null,
             phone: text(source.phone) || null,
+            subjects: Array.isArray(source.subjects) ? source.subjects : [],
             maxWeeklyPeriods: Number.isFinite(parseInt(source.maxWeeklyPeriods, 10))
                 ? parseInt(source.maxWeeklyPeriods, 10) : null,
             status: text(source.status) || 'active'
@@ -370,7 +371,8 @@ function normalize(source, options = {}) {
                     className: null,
                     room: null,
                     type: null,
-                    status: 'free'
+                    status: 'free',
+                    facultyStatus: member.status || 'active'
                 });
             });
         });

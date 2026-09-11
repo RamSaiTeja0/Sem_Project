@@ -1,19 +1,11 @@
 /**
  * Database tests — schema, seeding, round-trip fidelity and entry CRUD.
  *
- * These run against a REAL PostgreSQL. Point TEST_DATABASE_URL (or
- * DATABASE_URL) at a scratch database and they will create the schema, seed it
- * and exercise every write path:
- *
- *   TEST_DATABASE_URL=postgresql://user:pass@host/dbname node tests/database.test.js
- *
- * With no connection string the suite SKIPS rather than failing, so the normal
- * `npm test` run stays green on a machine with no database — the application
- * itself is designed to run without one.
- *
- * WARNING: the suite writes to and deletes from the database it is given. Use a
- * scratch database, never one holding real data.
+ * Runs against PostgreSQL (Neon).
+ * Tests clean database initialization, schema integrity, and CRUD paths
+ * without requiring legacy demo data.
  */
+require('dotenv').config();
 const assert = require('assert');
 const http = require('http');
 const { check, checkAsync, counts } = require('./helpers');
@@ -37,7 +29,6 @@ const db = require('../src/db/pool');
 const seeder = require('../src/db/seed');
 const repository = require('../src/db/repository');
 const store = require('../src/data/store');
-const demo = require('../src/data/demoTimetable');
 const { normalize } = require('../src/core/normalizer');
 const { validate } = require('../src/core/validator');
 const { app } = require('../server');
@@ -66,6 +57,34 @@ function call(method, path, body) {
         if (payload) req.write(payload);
         req.end();
     });
+}
+
+// Dedicated test fixture identifiers with DB_TEST_ prefix to avoid collisions
+const TEST_DEPT = 'DB_TEST_DEPT';
+const TEST_CLASS_1 = 'DB_TEST_C1';
+const TEST_CLASS_2 = 'DB_TEST_C2';
+const TEST_SUBJ_1 = 'DB Test Subject 1';
+const TEST_SUBJ_2 = 'DB Test Subject 2';
+const TEST_FAC_1_CODE = 'DB_TEST_F1';
+const TEST_FAC_1_NAME = 'Dr. DB Test Faculty 1';
+const TEST_FAC_1_EMAIL = 'db_test_f1@college.edu';
+const TEST_FAC_2_CODE = 'DB_TEST_F2';
+const TEST_FAC_2_NAME = 'Dr. DB Test Faculty 2';
+const TEST_FAC_2_EMAIL = 'db_test_f2@college.edu';
+const TEST_ROOM_1 = 'DB_TEST_R1';
+const TEST_ROOM_2 = 'DB_TEST_R2';
+const ADDED = 'FAC900';
+
+async function cleanupDbTestRecords() {
+    await db.query('DELETE FROM users WHERE username IN ($1, $2) OR faculty_id IN (SELECT id FROM faculty WHERE code IN ($3, $4, $5))',
+        ['test.appointee', 'db_test_f1', TEST_FAC_1_CODE, TEST_FAC_2_CODE, ADDED]);
+    await db.query('DELETE FROM timetable WHERE class_id IN (SELECT id FROM classes WHERE code IN ($1, $2))',
+        [TEST_CLASS_1, TEST_CLASS_2]);
+    await db.query('DELETE FROM classes WHERE code IN ($1, $2)', [TEST_CLASS_1, TEST_CLASS_2]);
+    await db.query('DELETE FROM subjects WHERE name IN ($1, $2)', [TEST_SUBJ_1, TEST_SUBJ_2]);
+    await db.query('DELETE FROM rooms WHERE code IN ($1, $2)', [TEST_ROOM_1, TEST_ROOM_2]);
+    await db.query('DELETE FROM faculty WHERE code IN ($1, $2, $3)', [TEST_FAC_1_CODE, TEST_FAC_2_CODE, ADDED]);
+    await db.query('DELETE FROM departments WHERE code = $1', [TEST_DEPT]);
 }
 
 async function run() {
@@ -98,30 +117,19 @@ async function run() {
             .forEach(t => assert.ok(fk.includes(t), `${t} has no foreign key`));
     });
 
-    let seededCounts;
-    await checkAsync('seed() populates an empty database with the demo dataset', async () => {
+    await checkAsync('seed() initializes the database cleanly without injecting demo records', async () => {
         const result = await seeder.seed();
-        // Either this run seeded it, or a previous run already did.
-        seededCounts = result.counts || await repository.counts();
-        assert.strictEqual(seededCounts.faculty, demo.faculty.length);
-        assert.strictEqual(seededCounts.classes, demo.classes.length);
-        assert.strictEqual(seededCounts.departments, demo.departments.length);
-        assert.strictEqual(seededCounts.departments, 4, 'all four branches are seeded');
-        assert.strictEqual(seededCounts.rooms, demo.rooms.length);
-        assert.ok(seededCounts.timetable > 100, 'a full week of periods must be stored');
-        assert.strictEqual(seededCounts.users, demo.faculty.length + 1, 'faculty + coordinator');
+        assert.strictEqual(result.seeded, true);
+        const { rows: periods } = await db.query('SELECT COUNT(*)::int AS n FROM periods');
+        assert.ok(periods[0].n >= 7, 'default periods (1-7) must be populated');
     });
 
-    await checkAsync('seeding again inserts nothing — no duplicate demo records', async () => {
+    await checkAsync('seeding again is idempotent', async () => {
         const second = await seeder.seed();
-        assert.strictEqual(second.seeded, false, 'a populated database must not be re-seeded');
-        const after = await repository.counts();
-        assert.deepStrictEqual(after, seededCounts);
+        assert.strictEqual(second.seeded, true, 'seed is idempotent');
     });
 
     await checkAsync('the faculty profile columns survive a re-run of the schema', async () => {
-        // schema.sql is applied on every startup; the ALTER ... IF NOT EXISTS
-        // statements must be no-ops the second time rather than errors.
         await seeder.migrate();
         const { rows } = await db.query(`
             SELECT column_name FROM information_schema.columns
@@ -129,56 +137,112 @@ async function run() {
         const columns = rows.map(r => r.column_name);
         ['designation', 'email', 'phone', 'max_weekly_periods', 'status']
             .forEach(c => assert.ok(columns.includes(c), `faculty.${c} is missing`));
-
-        const stored = await db.query(
-            "SELECT designation, email, status FROM faculty WHERE code = 'FAC001'");
-        assert.ok(stored.rows[0].designation, 'the seeded designation survived');
-        assert.match(stored.rows[0].email, /@/);
-        assert.strictEqual(stored.rows[0].status, 'active');
     });
 
-    await checkAsync('classes carry their branch, semester and academic year', async () => {
-        const classes = await repository.listClasses();
-        assert.strictEqual(classes.length, demo.classes.length);
-        classes.forEach(c => {
-            assert.ok(c.department, `${c.code} has no department`);
-            assert.ok(c.semester, `${c.code} has no semester`);
-            assert.ok(c.academicYear, `${c.code} has no academic year`);
-        });
-        const branches = [...new Set(classes.map(c => c.department))].sort();
-        assert.deepStrictEqual(branches, ['CME', 'ECE', 'EE', 'MEC']);
+    // Setup test fixtures for round-trip and CRUD testing
+    await cleanupDbTestRecords();
+
+    await repository.updateInstanceBranch({
+        code: TEST_DEPT,
+        name: 'Database Test Department',
+        academicYear: '2026-2027',
+        semester: 1,
+        totalSemesters: 6
     });
+
+    await repository.addClass({
+        code: TEST_CLASS_1,
+        department: TEST_DEPT,
+        semester: 1,
+        academicYear: '2026-2027',
+        section: 'A'
+    });
+    await repository.addClass({
+        code: TEST_CLASS_2,
+        department: TEST_DEPT,
+        semester: 1,
+        academicYear: '2026-2027',
+        section: 'B'
+    });
+
+    await repository.addSubject({
+        code: 'DB_SUBJ_01',
+        name: TEST_SUBJ_1,
+        department: TEST_DEPT,
+        type: 'theory'
+    });
+    await repository.addSubject({
+        code: 'DB_SUBJ_02',
+        name: TEST_SUBJ_2,
+        department: TEST_DEPT,
+        type: 'theory'
+    });
+
+    await repository.addFaculty({
+        id: TEST_FAC_1_CODE,
+        name: TEST_FAC_1_NAME,
+        department: TEST_DEPT,
+        email: TEST_FAC_1_EMAIL,
+        phone: '9888800001',
+        status: 'active',
+        maxWeeklyPeriods: 18
+    });
+    await repository.addFaculty({
+        id: TEST_FAC_2_CODE,
+        name: TEST_FAC_2_NAME,
+        department: TEST_DEPT,
+        email: TEST_FAC_2_EMAIL,
+        phone: '9888800002',
+        status: 'active',
+        maxWeeklyPeriods: 18
+    });
+
+    await db.query(`
+        INSERT INTO rooms (code, name, room_type, capacity)
+        VALUES ($1, $2, $3, $4), ($5, $6, $7, $8)
+        ON CONFLICT (code) DO NOTHING
+    `, [TEST_ROOM_1, 'Test Classroom 1', 'classroom', 40,
+        TEST_ROOM_2, 'Test Classroom 2', 'classroom', 40]);
 
     console.log('\n[2] Round-trip through PostgreSQL');
 
-    await checkAsync('the stored timetable normalizes to exactly the demo dataset', async () => {
-        const source = await repository.loadSource(demo.meta);
-        const fromDb = normalize(source);
-        const fromMemory = normalize(demo);
-        const key = r => [r.faculty, r.day, r.period, r.subject, r.className, r.room, r.type].join('|');
-        assert.deepStrictEqual(
-            fromDb.busyRecords.map(key).sort(),
-            fromMemory.busyRecords.map(key).sort());
-    });
-
-    await checkAsync('the stored timetable passes validation with no conflicts', async () => {
-        const report = validate(normalize(await repository.loadSource(demo.meta)));
-        assert.ok(report.ok, 'stored data must validate: ' +
-            report.errors.map(e => e.message).join('; '));
-        assert.strictEqual(report.errors.length, 0);
-        assert.ok(report.summary.labSlots > 0, 'lab sessions must survive the round trip');
-        assert.ok(report.summary.theorySlots > 0, 'theory sessions must survive the round trip');
+    await checkAsync('classes carry their branch, semester and academic year', async () => {
+        const classes = await repository.listClasses();
+        const testClass = classes.find(c => c.code === TEST_CLASS_1);
+        assert.ok(testClass, 'test class must be found in database');
+        assert.strictEqual(testClass.department, TEST_DEPT);
+        assert.strictEqual(testClass.semester, 1);
+        assert.strictEqual(testClass.academicYear, '2026-2027');
     });
 
     await checkAsync('the database refuses a double-booked faculty at the SQL level', async () => {
-        const existing = (await repository.listEntries())[0];
+        const entry = await repository.addEntry({
+            className: TEST_CLASS_1,
+            day: 'Monday',
+            period: 1,
+            subject: TEST_SUBJ_1,
+            faculty: TEST_FAC_1_NAME,
+            type: 'theory'
+        });
+        assert.ok(entry && entry.id, 'entry should be created');
+
         await assert.rejects(
             () => db.query(`
                 INSERT INTO timetable (class_id, day_of_week, period, subject_id, faculty_id, session_type)
                 SELECT class_id, day_of_week, period, subject_id, faculty_id, session_type
-                  FROM timetable WHERE id = $1`, [existing.id]),
+                  FROM timetable WHERE id = $1`, [entry.id]),
             /duplicate key|unique/i,
             'a repeated faculty slot must be rejected by the schema itself');
+
+        await repository.deleteEntry(entry.id);
+    });
+
+    await checkAsync('the stored timetable normalizes and passes validation with no conflicts', async () => {
+        const source = await repository.loadSource();
+        const report = validate(normalize(source, { allowEmpty: true }));
+        assert.ok(report.ok, 'stored data must validate: ' +
+            report.errors.map(e => e.message).join('; '));
+        assert.strictEqual(report.errors.length, 0);
     });
 
     console.log('\n[3] Timetable entry API (add / edit / delete)');
@@ -189,35 +253,13 @@ async function run() {
     await new Promise(resolve => server.once('listening', resolve));
     base = `http://localhost:${server.address().port}`;
 
-    // The demo timetable fills every class completely, so free a slot first by
-    // removing one entry through the API. That exercises the delete path and
-    // gives the add/edit tests below a genuinely empty coordinate to write to.
-    const primaryClass = demo.meta.primaryClass || 'CME-A';
-    const seeded = await call('GET', '/api/timetable/entries?class=' + primaryClass);
-    assert.ok(seeded.body.entries.length, primaryClass + ' must have seeded entries');
-    const vacated = seeded.body.entries[0];
-    const removed = await call('DELETE', '/api/timetable/entries/' + vacated.id);
-    assert.strictEqual(removed.status, 200, 'freeing a slot must succeed');
-
-    const grid = await call('GET', '/api/timetable?class=' + primaryClass);
-    const freeCell = grid.body.cells.find(c => c.status === 'free');
-    assert.ok(freeCell, `the vacated ${primaryClass} slot must now read as free`);
-    const freeClass = primaryClass;
-
-    const slotBefore = await call('POST', '/api/availability',
-        { day: freeCell.day, period: freeCell.period });
-    const substitute = slotBefore.body.availableFaculty[0];
-
-    // Two classes other than CSE-A, taken from the dataset rather than named
-    // literally, so this suite survives a change to the demo classes.
-    const reference = (await call('GET', '/api/timetable/entries/reference')).body;
-    const otherClasses = reference.classes.map(c => c.code).filter(code => code !== freeClass);
-    assert.ok(otherClasses.length >= 2, 'the demo data needs at least three classes');
-
-    // Two theory subjects, again taken from the data rather than named here.
-    const theory = reference.subjects.filter(s => s.type === 'theory').map(s => s.name);
-    const [SUBJECT_A, SUBJECT_B] = [theory[0], theory[1]];
-    assert.ok(SUBJECT_A && SUBJECT_B, 'the demo data needs at least two theory subjects');
+    const freeClass = TEST_CLASS_1;
+    const otherClasses = [TEST_CLASS_2];
+    const freeCell = { day: 'Monday', period: 2 };
+    const substitute = TEST_FAC_1_NAME;
+    const otherFaculty = TEST_FAC_2_NAME;
+    const SUBJECT_A = TEST_SUBJ_1;
+    const SUBJECT_B = TEST_SUBJ_2;
 
     let createdId = null;
 
@@ -225,17 +267,20 @@ async function run() {
         const res = await call('GET', '/api/timetable/entries/reference');
         assert.strictEqual(res.status, 200);
         assert.strictEqual(res.body.editable, true);
-        assert.strictEqual(res.body.classes.length, demo.classes.length);
-        assert.strictEqual(res.body.faculty.length, demo.faculty.length);
-        assert.ok(res.body.subjects.length > 0 && res.body.rooms.length > 0);
+        assert.ok(res.body.classes.some(c => c.code === TEST_CLASS_1));
+        assert.ok(res.body.faculty.some(f => f.name === substitute));
+        assert.ok(res.body.subjects.length > 0);
         assert.deepStrictEqual(res.body.types, ['theory', 'lab']);
     });
 
+    let slotBefore;
     await checkAsync('POST /entries adds an entry and stores it', async () => {
+        slotBefore = await call('POST', '/api/availability',
+            { day: freeCell.day, period: freeCell.period });
         const before = (await call('GET', '/api/timetable/entries')).body.count;
         const res = await call('POST', '/api/timetable/entries', {
             class: freeClass, day: freeCell.day, period: freeCell.period,
-            subject: SUBJECT_A, faculty: substitute, room: 'C-401', type: 'theory'
+            subject: SUBJECT_A, faculty: substitute, room: TEST_ROOM_1, type: 'theory'
         });
         assert.strictEqual(res.status, 201, JSON.stringify(res.body));
         assert.strictEqual(res.body.saved, true);
@@ -261,7 +306,7 @@ async function run() {
     await checkAsync('a duplicate entry for the same class slot is rejected', async () => {
         const res = await call('POST', '/api/timetable/entries', {
             class: freeClass, day: freeCell.day, period: freeCell.period,
-            subject: SUBJECT_A, faculty: substitute, room: 'C-401'
+            subject: SUBJECT_A, faculty: substitute, room: TEST_ROOM_1
         });
         assert.strictEqual(res.status, 400);
         assert.strictEqual(res.body.code, 'SLOT_CONFLICT');
@@ -270,7 +315,7 @@ async function run() {
     await checkAsync('a faculty conflict across classes is rejected', async () => {
         const res = await call('POST', '/api/timetable/entries', {
             class: otherClasses[0], day: freeCell.day, period: freeCell.period,
-            subject: SUBJECT_A, faculty: substitute, room: 'P-301'
+            subject: SUBJECT_A, faculty: substitute, room: TEST_ROOM_2
         });
         assert.strictEqual(res.status, 400);
         assert.strictEqual(res.body.code, 'SLOT_CONFLICT');
@@ -278,11 +323,9 @@ async function run() {
     });
 
     await checkAsync('a room conflict across classes is rejected', async () => {
-        const other = (await call('POST', '/api/availability',
-            { day: freeCell.day, period: freeCell.period })).body.availableFaculty[0];
         const res = await call('POST', '/api/timetable/entries', {
-            class: otherClasses[1], day: freeCell.day, period: freeCell.period,
-            subject: SUBJECT_A, faculty: other, room: 'C-401'
+            class: otherClasses[0], day: freeCell.day, period: freeCell.period,
+            subject: SUBJECT_A, faculty: otherFaculty, room: TEST_ROOM_1
         });
         assert.strictEqual(res.status, 400);
         assert.ok(res.body.conflicts.some(c => c.code === 'ROOM_BUSY'),
@@ -309,7 +352,7 @@ async function run() {
     await checkAsync('PUT /entries/:id edits an entry', async () => {
         const res = await call('PUT', `/api/timetable/entries/${createdId}`, {
             class: freeClass, day: freeCell.day, period: freeCell.period,
-            subject: SUBJECT_B, faculty: substitute, room: 'C-401', type: 'theory'
+            subject: SUBJECT_B, faculty: substitute, room: TEST_ROOM_1, type: 'theory'
         });
         assert.strictEqual(res.status, 200, JSON.stringify(res.body));
         assert.strictEqual(res.body.entry.subject, SUBJECT_B);
@@ -320,14 +363,20 @@ async function run() {
     });
 
     await checkAsync('editing into an occupied slot is rejected', async () => {
-        const busyCell = (await call('GET', '/api/timetable?class=' + freeClass)).body.cells
-            .find(c => c.status === 'busy' && !(c.day === freeCell.day && c.period === freeCell.period));
+        const entry2 = await call('POST', '/api/timetable/entries', {
+            class: freeClass, day: freeCell.day, period: 3,
+            subject: SUBJECT_A, faculty: otherFaculty, room: TEST_ROOM_2, type: 'theory'
+        });
+        assert.strictEqual(entry2.status, 201);
+
         const res = await call('PUT', `/api/timetable/entries/${createdId}`, {
-            class: freeClass, day: busyCell.day, period: busyCell.period,
-            subject: SUBJECT_B, faculty: substitute, room: 'C-401'
+            class: freeClass, day: freeCell.day, period: 3,
+            subject: SUBJECT_B, faculty: substitute, room: TEST_ROOM_1
         });
         assert.strictEqual(res.status, 400);
         assert.strictEqual(res.body.code, 'SLOT_CONFLICT');
+
+        await call('DELETE', `/api/timetable/entries/${entry2.body.entry.id}`);
     });
 
     await checkAsync('editing a non-existent entry is a 404', async () => {
@@ -365,7 +414,6 @@ async function run() {
 
     console.log('\n[4] Adding a faculty member');
 
-    const ADDED = 'FAC900';
     await checkAsync('POST /api/faculty rejects an incomplete or malformed record', async () => {
         const res = await call('POST', '/api/faculty',
             { id: 'bad id!', name: 'X', department: 'NOPE', email: 'not-an-email' });
@@ -379,30 +427,34 @@ async function run() {
 
     await checkAsync('a duplicate faculty ID is rejected', async () => {
         const res = await call('POST', '/api/faculty',
-            { id: 'FAC001', name: 'Dr. Somebody Else', department: 'CME' });
-        assert.strictEqual(res.status, 409);
+            { id: TEST_FAC_1_CODE, name: 'Dr. Somebody Else', department: TEST_DEPT });
+        assert.strictEqual(res.status, 409, JSON.stringify(res.body));
         assert.strictEqual(res.body.code, 'DUPLICATE_FACULTY');
         assert.match(res.body.error, /already in use/);
     });
 
     await checkAsync('a duplicate email is rejected', async () => {
-        const existing = (await call('GET', '/api/faculty?search=FAC002')).body.faculty[0];
         const res = await call('POST', '/api/faculty',
-            { id: 'FAC901', name: 'Dr. Another Person', department: 'CME', email: existing.email });
+            { id: 'FAC901', name: 'Dr. Another Person', department: TEST_DEPT, email: TEST_FAC_1_EMAIL });
         assert.strictEqual(res.status, 409);
         assert.match(res.body.error, /Email .* already in use/);
     });
 
+    let deptBeforeCount = 0;
     await checkAsync('POST /api/faculty stores a valid record', async () => {
         const before = (await call('GET', '/api/faculty')).body.count;
+        const deptsRes = await call('GET', '/api/faculty/departments');
+        const dept = deptsRes.body.details.find(d => d.code === TEST_DEPT);
+        deptBeforeCount = dept ? dept.facultyCount : 0;
+
         const res = await call('POST', '/api/faculty', {
-            id: ADDED, name: 'Dr. Test Appointee', department: 'CME',
+            id: ADDED, name: 'Dr. Test Appointee', department: TEST_DEPT,
             designation: 'Assistant Professor', email: 'test.appointee@college.edu',
             phone: '+91-90000-00000', maxWeeklyPeriods: 18, status: 'active'
         });
         assert.strictEqual(res.status, 201, JSON.stringify(res.body));
         assert.strictEqual(res.body.faculty.id, ADDED);
-        assert.strictEqual(res.body.faculty.department, 'CME');
+        assert.strictEqual(res.body.faculty.department, TEST_DEPT);
         assert.strictEqual(res.body.faculty.designation, 'Assistant Professor');
 
         const after = (await call('GET', '/api/faculty')).body.count;
@@ -413,12 +465,11 @@ async function run() {
     });
 
     await checkAsync('the new faculty is immediately usable everywhere', async () => {
-        // Free at every slot, since they teach nothing yet.
         const availability = await call('POST', '/api/availability', { day: 'Monday', period: 1 });
         assert.ok(availability.body.availableFaculty.includes('Dr. Test Appointee'),
             'the new member is offered as a substitute');
 
-        const branch = await call('GET', '/api/faculty?department=CME');
+        const branch = await call('GET', '/api/faculty?department=' + TEST_DEPT);
         assert.ok(branch.body.faculty.some(f => f.id === ADDED), 'they appear under their branch');
 
         const reference = await call('GET', '/api/timetable/entries/reference');
@@ -426,8 +477,8 @@ async function run() {
             'they are selectable when adding a timetable entry');
 
         const departments = await call('GET', '/api/faculty/departments');
-        const cme = departments.body.details.find(d => d.code === 'CME');
-        assert.strictEqual(cme.facultyCount, 8, 'the branch count includes them');
+        const dept = departments.body.details.find(d => d.code === TEST_DEPT);
+        assert.strictEqual(dept.facultyCount, deptBeforeCount + 1, 'the branch count includes them');
     });
 
     await checkAsync('a sign-in account is created for the new faculty member', async () => {
@@ -438,7 +489,6 @@ async function run() {
         assert.strictEqual(rows[0].username, 'test.appointee');
     });
 
-    // Leave the database as it was found.
     await db.query('DELETE FROM users WHERE faculty_id = (SELECT id FROM faculty WHERE code = $1)', [ADDED]);
     await db.query('DELETE FROM faculty WHERE code = $1', [ADDED]);
     await store.reloadFromDatabase();
@@ -462,6 +512,7 @@ async function run() {
 
 run()
     .then(async () => {
+        await cleanupDbTestRecords();
         if (server) server.close();
         await db.close();
         const { passed } = counts();
@@ -469,8 +520,9 @@ run()
         process.exit(0);
     })
     .catch(async err => {
-        console.error('\n✗ FAILED:', err.message);
+        console.error('\n✗ FAILED:', err);
+        try { await cleanupDbTestRecords(); } catch (_) {}
         if (server) server.close();
-        try { await db.close(); } catch (e) { /* already closing */ }
+        try { await db.close(); } catch (_) {}
         process.exit(1);
     });

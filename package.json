@@ -12,6 +12,7 @@
     "test:auth": "node tests/auth.test.js",
     "test:e2e": "node tests/e2e.test.js",
     "test:db": "node tests/database.test.js",
+    "test:persistence": "node tests/neon_persistence_verification.test.js",
     "db:setup": "node scripts/setupDatabase.js"
   },
   "engines": {

@@ -105,13 +105,15 @@ router.put('/branch', async (req, res) => {
     const name = text(body.name);
     const academicYear = text(body.academicYear);
     const semester = body.semester != null && !isNaN(parseInt(body.semester, 10)) ? parseInt(body.semester, 10) : null;
+    const rawTotal = body.totalSemesters != null ? body.totalSemesters : body.total_semesters;
+    const totalSemesters = rawTotal != null && !isNaN(parseInt(rawTotal, 10)) ? parseInt(rawTotal, 10) : null;
 
     try {
         if (db.isConfigured()) {
-            const updated = await repository.updateInstanceBranch({ code, name, academicYear, semester });
+            const updated = await repository.updateInstanceBranch({ code, name, academicYear, semester, totalSemesters });
             return res.json({ message: 'Branch configuration updated', branch: updated });
         } else {
-            const updated = setBranch({ code, name, academicYear, semester });
+            const updated = setBranch({ code, name, academicYear, semester, totalSemesters });
             if (req.session && updated && updated.code) {
                 req.session.department = updated.code;
                 req.session.branchName = updated.name;
@@ -283,12 +285,15 @@ router.delete('/subjects/:code', async (req, res) => {
 function classesFromDataset() {
     const declared = (store.source && store.source.classes) || [];
     return store.engine.getMeta().classes.map(code => {
-        const match = declared.find(c => (c.class || c.name) === code) || {};
+        const match = declared.find(c => (c.class || c.name || c.code) === code) || {};
+        const derivedSection = match.section || (code.includes('-') ? code.split('-').pop() : 'A');
         return {
+            id: match.id || code,
             code,
             department: match.department || 'General',
             semester: match.semester || null,
             academicYear: match.academicYear || null,
+            section: derivedSection,
             room: match.room || null
         };
     });

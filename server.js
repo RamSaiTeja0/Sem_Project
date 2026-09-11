@@ -24,6 +24,10 @@ const authRoutes = require('./src/routes/auth');
 const uploadRoutes = require('./src/routes/uploads');
 const internalUploadRoutes = require('./src/routes/internalUploads');
 const stagingRoutes = require('./src/routes/staging');
+const facultyRequestRoutes = require('./src/routes/facultyRequests');
+const attendanceRoutes = require('./src/routes/attendance');
+const invigilationRoutes = require('./src/routes/invigilation');
+const substitutionRoutes = require('./src/routes/substitutions');
 
 const app = express();
 
@@ -92,6 +96,9 @@ app.use('/api/auth', authRoutes);
 // Internal service-to-service automation API (Phase B2.3, authenticated via X-Internal-Secret)
 app.use('/api/internal/uploads', internalUploadRoutes);
 
+// Faculty Registration Requests API (Phase B7.1)
+app.use('/api/faculty-requests', facultyRequestRoutes);
+
 /**
  * Optional sign-in guard. Off by default (AUTH_REQUIRED=false) so the demo
  * dataset stays browsable; when on, API calls answer 401 in JSON and page
@@ -120,6 +127,9 @@ app.use('/api/timetable/entries', requireAuth, entryRoutes);
 app.use('/api/timetable', requireAuth, timetableRoutes);
 app.use('/api/faculty', requireAuth, facultyRoutes);
 app.use('/api/availability', requireAuth, availabilityRoutes);
+app.use('/api/attendance', requireAuth, attendanceRoutes);
+app.use('/api/invigilation', requireAuth, invigilationRoutes);
+app.use('/api/substitutions', requireAuth, substitutionRoutes);
 app.use('/api/uploads', requireAuth, uploadRoutes);
 app.use('/api/staging', requireAuth, stagingRoutes);
 // Branch / subject / class management. Reads work without a database; writes

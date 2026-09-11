@@ -152,7 +152,6 @@
     function updateRoleUI(selectedRole) {
         var isHOS = selectedRole === 'hos';
         var subjectsSec = el('facultySubjectsSection');
-        var facultyNote = el('facultyPublicNote');
         var branchRow = el('branchRow');
         var currentBranchBox = el('currentBranchBox');
         var currentBranchDisplay = el('currentBranchDisplay');
@@ -168,6 +167,8 @@
 
         var branchNameInput = el('regBranchName');
         var branchCodeInput = el('regBranchCode');
+        var facultyBranchRow = el('facultyBranchRow');
+        var facultyDesignationRow = el('facultyDesignationRow');
 
         if (isHOSSession) {
             // FLOW B: Authenticated HOS is creating faculty
@@ -176,16 +177,20 @@
             if (hosFacultyHeader) hosFacultyHeader.style.display = 'block';
             if (roleSelectorWrap) roleSelectorWrap.style.display = 'none';
             if (branchRow) branchRow.style.display = 'none'; // strictly hidden
+            if (facultyBranchRow) facultyBranchRow.style.display = 'none';
+            if (facultyDesignationRow) facultyDesignationRow.style.display = 'none';
             if (currentBranchBox) currentBranchBox.style.display = 'block';
             if (currentBranchDisplay) {
                 var bName = sessionBranch.name || sessionBranch.code;
                 currentBranchDisplay.textContent = sessionBranch.code + (bName && bName !== sessionBranch.code ? ' — ' + bName : '');
             }
             if (subjectsSec) subjectsSec.style.display = 'block';
-            if (facultyNote) facultyNote.style.display = 'none';
-            if (submitBtn) submitBtn.textContent = 'Create Faculty Account';
+            if (submitBtn) {
+                submitBtn.disabled = false;
+                submitBtn.textContent = 'Create Faculty Account';
+            }
         } else {
-            // FLOW A: Unauthenticated visitor / New HOS
+            // FLOW A: Unauthenticated visitor / New HOS or Faculty Registration
             if (hosFacultyHeader) hosFacultyHeader.style.display = 'none';
             if (roleSelectorWrap) roleSelectorWrap.style.display = 'block';
             if (currentBranchBox) currentBranchBox.style.display = 'none';
@@ -194,8 +199,9 @@
                 // Initial HOS creating new branch: inputs are EMPTY and EDITABLE
                 if (registerTitle) registerTitle.textContent = 'Create Head of Section Account';
                 if (subjectsSec) subjectsSec.style.display = 'none';
-                if (facultyNote) facultyNote.style.display = 'none';
                 if (branchRow) branchRow.style.display = 'grid';
+                if (facultyBranchRow) facultyBranchRow.style.display = 'none';
+                if (facultyDesignationRow) facultyDesignationRow.style.display = 'none';
                 if (branchNameInput && branchCodeInput) {
                     branchNameInput.readOnly = false;
                     branchCodeInput.readOnly = false;
@@ -205,14 +211,15 @@
                     submitBtn.textContent = 'Register HOS Account';
                 }
             } else {
-                // Public visitor selected Faculty (warn them & disable submission)
-                if (registerTitle) registerTitle.textContent = 'Create Account';
-                if (subjectsSec) subjectsSec.style.display = 'none';
-                if (facultyNote) facultyNote.style.display = 'block';
+                // Public visitor selected Faculty Registration (Flow C)
+                if (registerTitle) registerTitle.textContent = 'Request Faculty Account';
+                if (subjectsSec) subjectsSec.style.display = 'block';
                 if (branchRow) branchRow.style.display = 'none';
+                if (facultyBranchRow) facultyBranchRow.style.display = 'block';
+                if (facultyDesignationRow) facultyDesignationRow.style.display = 'block';
                 if (submitBtn) {
-                    submitBtn.disabled = true;
-                    submitBtn.textContent = 'Faculty Registration Disabled (Contact HOS)';
+                    submitBtn.disabled = false;
+                    submitBtn.textContent = 'Submit Registration Request';
                 }
             }
         }
@@ -325,6 +332,51 @@
             });
         }
 
+        // Setup branch dropdown change listener
+        if (el('regFacultyBranchSelect')) {
+            el('regFacultyBranchSelect').addEventListener('change', function () {
+                if (el('regFacultyBranchCode')) {
+                    el('regFacultyBranchCode').value = this.value;
+                }
+            });
+        }
+
+        if (el('btnNewFacultyRequest')) {
+            el('btnNewFacultyRequest').addEventListener('click', function () {
+                var panel = el('facultyRequestSuccessPanel');
+                if (panel) panel.style.display = 'none';
+                clearMessage();
+            });
+        }
+
+        function loadRegisteredBranches() {
+            fetch('/api/faculty-requests/branches')
+                .then(function (res) { return res.json(); })
+                .then(function (data) {
+                    var sel = el('regFacultyBranchSelect');
+                    if (!sel || !data || !Array.isArray(data.branches)) return;
+                    sel.innerHTML = '<option value="">-- Select Registered Branch --</option>';
+                    data.branches.forEach(function (b) {
+                        var opt = document.createElement('option');
+                        opt.value = b.code;
+                        opt.textContent = b.code + (b.name && b.name !== b.code ? ' — ' + b.name : '');
+                        sel.appendChild(opt);
+                    });
+                })
+                .catch(function () {});
+        }
+        loadRegisteredBranches();
+
+        // Check URL params for role=faculty or role=faculty_request
+        var urlParams = new URLSearchParams(window.location.search);
+        if (urlParams.get('role') === 'faculty' || urlParams.get('role') === 'faculty_request') {
+            var facRadioParam = el('roleFaculty');
+            if (facRadioParam) {
+                facRadioParam.checked = true;
+                updateRoleUI('faculty_request');
+            }
+        }
+
         // Form submission
         if (form) {
             form.addEventListener('submit', function (event) {
@@ -334,16 +386,9 @@
                 var role = isHOSSession ? 'faculty' : ((document.querySelector('input[name="role"]:checked') || {}).value || 'hos');
                 var name = el('regName').value.trim();
                 var phone = el('regPhone').value.trim();
-                var branchName = isHOSSession ? sessionBranch.name : el('regBranchName').value.trim();
-                var branchCode = isHOSSession ? sessionBranch.code : el('regBranchCode').value.trim().toUpperCase();
                 var username = el('regUsername').value.trim();
                 var password = el('regPassword').value;
                 var confirmPassword = el('regConfirmPassword').value;
-
-                if (role === 'faculty' && !isHOSSession) {
-                    showMessage('Faculty accounts must be created by the Head of Section (HOS) for your branch. Please sign in as HOS or select Head of Section to create your branch account.', 'error');
-                    return;
-                }
 
                 if (!name || name.length < 2) {
                     showMessage('Please enter your full name (at least 2 characters).', 'error');
@@ -354,19 +399,6 @@
                     showMessage('Please enter your phone number.', 'error');
                     el('regPhone').focus();
                     return;
-                }
-
-                if (role === 'hos') {
-                    if (!branchName) {
-                        showMessage('Please enter the branch name.', 'error');
-                        el('regBranchName').focus();
-                        return;
-                    }
-                    if (!branchCode) {
-                        showMessage('Please enter the branch code.', 'error');
-                        el('regBranchCode').focus();
-                        return;
-                    }
                 }
 
                 if (!username || username.length < 3) {
@@ -388,18 +420,137 @@
                     return;
                 }
 
-                if (role === 'faculty') {
+                // FLOW C: Faculty Self-Registration Request
+                if (role === 'faculty_request') {
+                    var facBranchCode = '';
+                    if (el('regFacultyBranchCode') && el('regFacultyBranchCode').value.trim()) {
+                        facBranchCode = el('regFacultyBranchCode').value.trim().toUpperCase();
+                    } else if (el('regFacultyBranchSelect') && el('regFacultyBranchSelect').value.trim()) {
+                        facBranchCode = el('regFacultyBranchSelect').value.trim().toUpperCase();
+                    }
+
+                    if (!facBranchCode) {
+                        showMessage('Please select or enter your branch code.', 'error');
+                        if (el('regFacultyBranchCode')) el('regFacultyBranchCode').focus();
+                        return;
+                    }
+
                     if (subjects.length === 0) {
                         var subInputVal = el('subjectInput') ? el('subjectInput').value.trim() : '';
                         if (subInputVal) {
                             subjects.push(subInputVal);
                             renderSubjectTags();
                         } else {
-                            showMessage('Please add at least one subject or area of expertise for this faculty member.', 'error');
+                            showMessage('Please add at least one subject or area of expertise.', 'error');
                             var errBox = el('subjectError');
                             if (errBox) {
                                 errBox.textContent = 'At least one subject is required.';
                                 errBox.style.display = 'block';
+                            }
+                            if (el('subjectInput')) el('subjectInput').focus();
+                            return;
+                        }
+                    }
+
+                    var designation = el('regDesignation') ? el('regDesignation').value : null;
+
+                    var requestPayload = {
+                        name: name,
+                        phone: phone,
+                        branchCode: facBranchCode,
+                        username: username,
+                        password: password,
+                        confirmPassword: confirmPassword,
+                        designation: designation,
+                        subjects: subjects
+                    };
+
+                    if (submitBtn) {
+                        submitBtn.disabled = true;
+                        submitBtn.textContent = 'Submitting Request…';
+                    }
+
+                    fetch('/api/faculty-requests', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(requestPayload)
+                    })
+                        .then(function (res) {
+                            return res.json().then(function (data) {
+                                return { status: res.status, data: data };
+                            });
+                        })
+                        .then(function (res) {
+                            if (res.status >= 400) {
+                                if (submitBtn) {
+                                    submitBtn.disabled = false;
+                                    submitBtn.textContent = 'Submit Registration Request';
+                                }
+                                showMessage((res.data && res.data.error) || 'Registration request failed.', 'error');
+                                return;
+                            }
+
+                            if (submitBtn) {
+                                submitBtn.disabled = false;
+                                submitBtn.textContent = 'Submit Registration Request';
+                            }
+
+                            showMessage('Registration request submitted successfully for Head of Section review.', 'ok');
+                            var panel = el('facultyRequestSuccessPanel');
+                            if (panel) {
+                                if (el('succReqBranch')) {
+                                    el('succReqBranch').textContent = (res.data && res.data.request && res.data.request.branchCode) || facBranchCode;
+                                }
+                                panel.style.display = 'block';
+                                panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                            }
+
+                            ['regName', 'regPhone', 'regUsername', 'regPassword', 'regConfirmPassword', 'subjectInput', 'regFacultyBranchCode'].forEach(function (id) {
+                                if (el(id)) el(id).value = '';
+                            });
+                            if (el('regFacultyBranchSelect')) el('regFacultyBranchSelect').value = '';
+                            subjects = [];
+                            renderSubjectTags();
+                        })
+                        .catch(function (err) {
+                            if (submitBtn) {
+                                submitBtn.disabled = false;
+                                submitBtn.textContent = 'Submit Registration Request';
+                            }
+                            showMessage('Network error: ' + err.message, 'error');
+                        });
+                    return;
+                }
+
+                // FLOW A (HOS Registration) or FLOW B (HOS creating faculty directly)
+                var branchName = isHOSSession ? sessionBranch.name : el('regBranchName').value.trim();
+                var branchCode = isHOSSession ? sessionBranch.code : el('regBranchCode').value.trim().toUpperCase();
+
+                if (role === 'hos') {
+                    if (!branchName) {
+                        showMessage('Please enter the branch name.', 'error');
+                        el('regBranchName').focus();
+                        return;
+                    }
+                    if (!branchCode) {
+                        showMessage('Please enter the branch code.', 'error');
+                        el('regBranchCode').focus();
+                        return;
+                    }
+                }
+
+                if (role === 'faculty') {
+                    if (subjects.length === 0) {
+                        var subInputVal2 = el('subjectInput') ? el('subjectInput').value.trim() : '';
+                        if (subInputVal2) {
+                            subjects.push(subInputVal2);
+                            renderSubjectTags();
+                        } else {
+                            showMessage('Please add at least one subject or area of expertise for this faculty member.', 'error');
+                            var errBox2 = el('subjectError');
+                            if (errBox2) {
+                                errBox2.textContent = 'At least one subject is required.';
+                                errBox2.style.display = 'block';
                             }
                             if (el('subjectInput')) el('subjectInput').focus();
                             return;
@@ -485,3 +636,4 @@
         }
     });
 })();
+

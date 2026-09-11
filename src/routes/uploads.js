@@ -202,6 +202,11 @@ router.post('/master-timetable', fileUploadHandler, async (req, res) => {
 
         validateUploadedFile(req.file);
 
+        const reqAcademicYear = req.body && req.body.academicYear ? String(req.body.academicYear).trim() : null;
+        const reqSemester = req.body && req.body.semester ? String(req.body.semester).trim().toUpperCase() : null;
+        const reqSection = req.body && req.body.section ? String(req.body.section).trim().toUpperCase() : null;
+        const reqClass = req.body && (req.body.className || req.body.class) ? String(req.body.className || req.body.class).trim() : null;
+
         const uploadRecord = await saveUploadRecord({
             uploadId: req._uploadId,
             originalFilename: req.file.originalname,
@@ -212,6 +217,10 @@ router.post('/master-timetable', fileUploadHandler, async (req, res) => {
             facultyId: null,
             branchId: sessionDept,
             departmentCode: sessionDept,
+            academicYear: reqAcademicYear,
+            semester: reqSemester,
+            section: reqSection,
+            targetClass: reqClass,
             uploadType: 'MASTER_TIMETABLE',
             status: 'UPLOADED'
         });

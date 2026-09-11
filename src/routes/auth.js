@@ -14,7 +14,10 @@ const router = express.Router();
 
 const config = require('../config');
 const users = require('../data/users');
-const { getBranch } = require('../data/departments');
+const { getBranch, getRegisteredBranchCodes } = require('../data/departments');
+const facultyRequestsRouter = require('./facultyRequests');
+
+router.use('/faculty-requests', facultyRequestsRouter);
 
 function publicUser(session) {
     if (!session) return null;
@@ -58,16 +61,34 @@ router.get('/status', (req, res) => {
             code: branch.code,
             name: branch.name,
             academicYear: branch.academicYear,
-            semester: branch.semester
+            semester: branch.semester,
+            totalSemesters: branch.totalSemesters || 6
         } : {
             configured: false,
             code: '',
             name: '',
             academicYear: '',
-            semester: null
+            semester: null,
+            totalSemesters: 6
         },
         userCount: users.list(branchCode).length
     });
+});
+
+router.get('/branches', (req, res) => {
+    try {
+        const codes = getRegisteredBranchCodes();
+        const list = codes.map(code => {
+            const b = getBranch(code);
+            return {
+                code: b.code || code,
+                name: b.name || code
+            };
+        });
+        res.json({ count: list.length, branches: list });
+    } catch (err) {
+        res.status(500).json({ error: err.message, code: 'SERVER_ERROR' });
+    }
 });
 
 router.get('/accounts', (req, res) => {
@@ -117,15 +138,22 @@ router.post('/login', (req, res) => {
         });
     }
 
-    const user = users.authenticate(username, password);
-    if (!user) {
-        return res.status(401).json({
-            error: 'Incorrect username or password.', code: 'INVALID_CREDENTIALS'
+    try {
+        const user = users.authenticate(username, password);
+        if (!user) {
+            return res.status(401).json({
+                error: 'Incorrect username or password.', code: 'INVALID_CREDENTIALS'
+            });
+        }
+
+        res.startSession(user);
+        res.json({ authenticated: true, user: publicUser(user) });
+    } catch (err) {
+        return res.status(err.status || 401).json({
+            error: err.message,
+            code: err.code || 'INVALID_CREDENTIALS'
         });
     }
-
-    res.startSession(user);
-    res.json({ authenticated: true, user: publicUser(user) });
 });
 
 router.get('/profile', (req, res) => {

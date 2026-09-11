@@ -52,6 +52,16 @@
   --topbar: 66px;
   --font: "Inter", "Segoe UI", Roboto, -apple-system, BlinkMacSystemFont, Arial, sans-serif;
   --mono: "Cascadia Mono", "SF Mono", Consolas, "Courier New", monospace;
+
+  /* Aliases & convenience tokens */
+  --border: var(--line);
+  --radius-md: 10px;
+  --surface-subtle: #f8fafc;
+  --canvas-subtle: var(--canvas-alt);
+  --brand-200: #c7d2fe;
+  --brand-800: #312e81;
+  --danger-050: #fef2f2;
+  --danger-200: var(--danger-line);
 }
 
 /* ---------------------------------------------------------- shared basics */
@@ -115,6 +125,15 @@ a { color: var(--brand-600); }
 
 .btn-sm { padding: 7px 13px; font-size: 0.82rem; }
 
+.btn-primary { background: var(--brand-600); color: #ffffff; border-color: var(--brand-600); }
+.btn-primary:hover { background: var(--brand-700); border-color: var(--brand-700); }
+
+.btn-danger { background: var(--danger-500); color: #ffffff; border-color: var(--danger-500); }
+.btn-danger:hover { background: var(--danger-700); border-color: var(--danger-700); }
+
+.btn-success { background: var(--ok-500); color: #ffffff; border-color: var(--ok-500); }
+.btn-success:hover { background: var(--ok-700); border-color: var(--ok-700); }
+
 /* --------------------------------------------------------------- badges */
 .badge {
   display: inline-block; padding: 3px 10px; border-radius: 999px;
@@ -124,6 +143,11 @@ a { color: var(--brand-600); }
 .badge-busy { background: var(--danger-100); color: var(--danger-700); }
 .badge-neutral { background: var(--brand-050); color: var(--brand-700); }
 .badge-muted { background: var(--canvas-alt); color: var(--ink-500); }
+.badge-primary { background: var(--brand-100); color: var(--brand-700); }
+.badge-success { background: var(--ok-100); color: var(--ok-700); }
+.badge-warning { background: var(--warn-100); color: var(--warn-700); }
+.badge-danger { background: var(--danger-100); color: var(--danger-700); }
+.badge-info { background: var(--brand-050); color: var(--brand-700); border: 1px solid var(--brand-100); }
 
 /* -------------------------------------------------------------- notices */
 .notice {
@@ -131,9 +155,11 @@ a { color: var(--brand-600); }
   font-size: 0.88rem; border: 1px solid transparent;
 }
 .notice-info { background: var(--brand-050); border-color: var(--brand-100); color: var(--ink-700); }
-.notice-ok { background: var(--ok-100); border-color: var(--ok-line); color: var(--ok-700); }
+.notice-ok,
+.notice-success { background: var(--ok-100); border-color: var(--ok-line); color: var(--ok-700); }
 .notice-warn { background: var(--warn-100); border-color: var(--warn-line); color: var(--warn-700); }
-.notice-error { background: var(--danger-100); border-color: var(--danger-line); color: var(--danger-700); }
+.notice-error,
+.notice-danger { background: var(--danger-100); border-color: var(--danger-line); color: var(--danger-700); }
 .notice + .notice { margin-top: 8px; }
 
 .muted { color: var(--ink-500); font-size: 0.87rem; }

@@ -26,7 +26,11 @@
         designations: '/api/faculty/designations',
         health: '/api/health',
         session: '/api/auth/session',
-        logout: '/api/auth/logout'
+        logout: '/api/auth/logout',
+        facultyRequests: '/api/faculty-requests',
+        attendance: '/api/attendance',
+        invigilation: '/api/invigilation',
+        substitutions: '/api/substitutions'
     };
 
     var state = {
@@ -159,6 +163,15 @@
         schedule: 'My Schedule',
         timetable: 'Master Timetable',
         faculty: 'Faculty Directory',
+        requests: 'Faculty Registration Requests',
+        attendance: 'Faculty Attendance',
+        'my-attendance': 'My Attendance',
+        invigilation: 'Exam Invigilation',
+        'invig-requests': 'Invigilation Requests',
+        'my-invigilation': 'My Invigilation',
+        'request-invigilation': 'Request Invigilation',
+        'faculty-substitutions': 'Faculty Substitutions',
+        'hos-substitutions': 'Branch Substitutions',
         manage: 'Add Timetable',
         import: 'Upload Timetable',
         about: 'Settings / About'
@@ -182,6 +195,15 @@
         el('viewTitle').textContent = TITLES[name] || 'Dashboard';
 
         if (name === 'faculty') { loadFacultyForm(); loadFacultyTable(); }
+        if (name === 'requests') { loadFacultyRequests(); }
+        if (name === 'attendance') { loadHOSAttendance(); }
+        if (name === 'my-attendance') { loadMyAttendance(); }
+        if (name === 'invigilation') { loadHOSInvigilation(); }
+        if (name === 'invig-requests') { loadHOSInvigRequests(); }
+        if (name === 'my-invigilation') { loadMyInvigilation(); }
+        if (name === 'request-invigilation') { loadRequestInvigilationForm(); }
+        if (name === 'faculty-substitutions') { loadFacultySubstitutionsView(); }
+        if (name === 'hos-substitutions') { loadHOSSubstitutionsView(); }
         if (name === 'schedule') loadSchedule();
         if (name === 'manage') { loadDocumentStatus(); loadManage(); }
         if (name === 'timetable') { applyTimetableDepartment(); }
@@ -215,14 +237,32 @@
         }
 
         var isFaculty = state.user && state.user.role === 'faculty';
+        var isHOS = state.user && (state.user.role === 'hos' || state.user.role === 'coordinator' || state.user.role === 'admin');
 
         // Role-based navigation visibility
         if (el('navFaculty')) el('navFaculty').style.display = isFaculty ? 'none' : '';
+        if (el('navRequests')) el('navRequests').style.display = isHOS ? '' : 'none';
+        if (el('navAttendance')) el('navAttendance').style.display = isHOS ? '' : 'none';
+        if (el('navMyAttendance')) el('navMyAttendance').style.display = isFaculty ? '' : 'none';
+        if (el('navInvigilation')) el('navInvigilation').style.display = isHOS ? '' : 'none';
+        if (el('navInvigRequests')) el('navInvigRequests').style.display = isHOS ? '' : 'none';
+        if (el('navMyInvigilation')) el('navMyInvigilation').style.display = isFaculty ? '' : 'none';
+        if (el('navRequestInvigilation')) el('navRequestInvigilation').style.display = isFaculty ? '' : 'none';
+        if (el('navFacultySubstitutions')) el('navFacultySubstitutions').style.display = isFaculty ? '' : 'none';
+        if (el('navHosSubstitutions')) el('navHosSubstitutions').style.display = isHOS ? '' : 'none';
         if (el('navManageLabel')) el('navManageLabel').style.display = isFaculty ? 'none' : '';
         if (el('navManage')) el('navManage').style.display = isFaculty ? 'none' : '';
         if (el('navImport')) el('navImport').style.display = isFaculty ? 'none' : '';
         if (el('navAbout')) el('navAbout').style.display = isFaculty ? 'none' : '';
         if (el('navSchedule')) el('navSchedule').style.display = isFaculty ? '' : 'none';
+
+        if (isHOS) {
+            updatePendingRequestsBadge();
+            updatePendingInvigRequestsBadge();
+        }
+        if (isFaculty) {
+            updatePendingSubstitutionsBadge();
+        }
 
         var manageBtn = el('ttManageBtn');
         if (manageBtn) {
@@ -243,7 +283,7 @@
         var branchName = state.user ? (state.user.branchName || '') : '';
         var branchDisplay = deptCode ? (branchName && branchName !== deptCode ? deptCode + ' — ' + branchName : deptCode) : 'Branch';
 
-        ['schedBranchBadge', 'availBranchBadge', 'facBranchBadge', 'facNewBranchBadge', 'ttBranchBadge', 'aboutBranchBadge'].forEach(function (id) {
+        ['schedBranchBadge', 'availBranchBadge', 'facBranchBadge', 'facNewBranchBadge', 'ttBranchBadge', 'aboutBranchBadge', 'reqBranchBadge', 'hosSubBranchBadge'].forEach(function (id) {
             if (el(id)) el(id).textContent = deptCode;
         });
         if (el('facBranchInheritBadge')) el('facBranchInheritBadge').textContent = branchDisplay;
@@ -486,19 +526,71 @@
         var container = el(containerId);
         if (!container) return;
 
-        var freeHtml = result.availableFaculty.length
-            ? '<ul class="faculty-list">' + result.available.map(function (f) {
+        var freeList = result.available || [];
+        var sameBranchCode = (result.sameBranch && result.sameBranch.branch) ||
+            result.priorityBranch || (cell && cell.branch) || result.branch || '';
+
+        var sameList = (result.sameBranch && result.sameBranch.available) || freeList.filter(function (f) {
+            return sameBranchCode && (f.department || '').toUpperCase() === sameBranchCode.toUpperCase();
+        });
+        var otherList = (result.otherBranches && result.otherBranches.available) || freeList.filter(function (f) {
+            return !sameBranchCode || (f.department || '').toUpperCase() !== sameBranchCode.toUpperCase();
+        });
+
+        var freeHtml = '';
+        if (freeList.length === 0) {
+            freeHtml = notice('No faculty are free during this period.', 'warn');
+        } else if (sameBranchCode) {
+            var sameSection = '';
+            if (sameList.length > 0) {
+                sameSection = '<div style="font-weight:650; font-size:0.86rem; color:var(--ink-800); margin:8px 0 6px 0;">Same Branch — ' + esc(sameBranchCode) + ' (' + sameList.length + ')</div>' +
+                    '<ul class="faculty-list">' + sameList.map(function (f) {
+                        var phoneHtml = f.phone
+                            ? '<div class="faculty-phone"><span class="phone-icon">📞</span> ' + esc(f.phone) + '</div>'
+                            : '';
+                        return '<li><span class="tick">✓</span>' +
+                            '<div class="faculty-main">' +
+                                '<div class="faculty-name">' + esc(f.faculty || f.name) + '</div>' +
+                                phoneHtml +
+                            '</div>' +
+                            '<span class="dept">' + esc(f.department || sameBranchCode) + '</span></li>';
+                    }).join('') + '</ul>';
+            } else {
+                sameSection = '<div style="font-weight:650; font-size:0.86rem; color:var(--ink-800); margin:8px 0 6px 0;">Same Branch — ' + esc(sameBranchCode) + ' (0)</div>' +
+                    '<p class="muted" style="margin:4px 0 10px 0;">No free faculty in same branch.</p>';
+            }
+
+            var otherSection = '';
+            if (otherList.length > 0) {
+                otherSection = '<div style="font-weight:650; font-size:0.86rem; color:var(--ink-800); margin:14px 0 6px 0;">Other Branches (' + otherList.length + ')</div>' +
+                    '<ul class="faculty-list">' + otherList.map(function (f) {
+                        var phoneHtml = f.phone
+                            ? '<div class="faculty-phone"><span class="phone-icon">📞</span> ' + esc(f.phone) + '</div>'
+                            : '';
+                        var deptPrefix = f.department ? '<strong style="color:var(--brand-700); margin-right:6px;">' + esc(f.department) + ' —</strong> ' : '';
+                        return '<li><span class="tick">✓</span>' +
+                            '<div class="faculty-main">' +
+                                '<div class="faculty-name">' + deptPrefix + esc(f.faculty || f.name) + '</div>' +
+                                phoneHtml +
+                            '</div>' +
+                            '<span class="dept">' + esc(f.department || '') + '</span></li>';
+                    }).join('') + '</ul>';
+            }
+
+            freeHtml = sameSection + otherSection;
+        } else {
+            freeHtml = '<ul class="faculty-list">' + freeList.map(function (f) {
                 var phoneHtml = f.phone
                     ? '<div class="faculty-phone"><span class="phone-icon">📞</span> ' + esc(f.phone) + '</div>'
                     : '';
                 return '<li><span class="tick">✓</span>' +
                     '<div class="faculty-main">' +
-                        '<div class="faculty-name">' + esc(f.faculty) + '</div>' +
+                        '<div class="faculty-name">' + esc(f.faculty || f.name) + '</div>' +
                         phoneHtml +
                     '</div>' +
                     '<span class="dept">' + esc(f.department || '') + '</span></li>';
-            }).join('') + '</ul>'
-            : notice('No faculty are free during this period.', 'warn');
+            }).join('') + '</ul>';
+        }
 
         // Busy faculty are shown too, with what is keeping them occupied, so the
         // result can be checked rather than taken on trust.
@@ -913,6 +1005,15 @@
             branchBadge.textContent = state.user.department || 'Branch';
         }
 
+        var dateInput = el('availDate');
+        if (dateInput && !dateInput.value) {
+            var now = new Date();
+            var yyyy = now.getFullYear();
+            var mm = String(now.getMonth() + 1).padStart(2, '0');
+            var dd = String(now.getDate()).padStart(2, '0');
+            dateInput.value = yyyy + '-' + mm + '-' + dd;
+        }
+
         return Promise.all([
             getJson(API.faculty),
             getJson(API.meta)
@@ -924,14 +1025,12 @@
             var facultyList = facultyData.faculty || [];
             var absentSelect = el('availAbsentFaculty');
             if (absentSelect) {
-                if (facultyList.length === 0) {
-                    absentSelect.innerHTML = '<option value="">No faculty has been configured yet</option>';
-                } else {
-                    absentSelect.innerHTML = facultyList.map(function (f) {
-                        return '<option value="' + esc(f.name) + '">' + esc(f.name) +
-                            (f.designation ? ' · ' + esc(f.designation) : '') + '</option>';
-                    }).join('');
-                }
+                var opts = '<option value="">None / Auto from Attendance</option>';
+                opts += facultyList.map(function (f) {
+                    return '<option value="' + esc(f.name) + '">' + esc(f.name) +
+                        (f.designation ? ' · ' + esc(f.designation) : '') + '</option>';
+                }).join('');
+                absentSelect.innerHTML = opts;
             }
 
             var days = metaData.days || ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
@@ -942,12 +1041,41 @@
                 }).join('');
             }
 
+            if (dateInput && daySelect) {
+                var updateDayFromDate = function () {
+                    if (dateInput.value) {
+                        var parts = dateInput.value.split('-');
+                        if (parts.length === 3) {
+                            var dObj = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
+                            var dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+                            var dName = dayNames[dObj.getDay()];
+                            if (days.indexOf(dName) !== -1) {
+                                daySelect.value = dName;
+                            }
+                        }
+                    }
+                };
+                dateInput.removeEventListener('change', updateDayFromDate);
+                dateInput.addEventListener('change', updateDayFromDate);
+                updateDayFromDate();
+            }
+
             var periods = metaData.periods || [1, 2, 3, 4, 5, 6, 7];
             var periodSelect = el('availPeriod');
             if (periodSelect) {
                 periodSelect.innerHTML = periods.map(function (p) {
                     return '<option value="' + esc(p) + '">Period ' + esc(p) + '</option>';
                 }).join('');
+            }
+
+            var classSelect = el('availClassSection');
+            if (classSelect) {
+                var classOpts = '<option value="">All Classes</option>';
+                var classes = metaData.classes || [];
+                classOpts += classes.map(function (c) {
+                    return '<option value="' + esc(c) + '">' + esc(c) + '</option>';
+                }).join('');
+                classSelect.innerHTML = classOpts;
             }
         }).catch(function (err) {
             var resBox = el('availHOSResult');
@@ -959,77 +1087,152 @@
         var resBox = el('availHOSResult');
         if (!resBox) return;
 
+        var dateVal = el('availDate') ? el('availDate').value : '';
         var absent = el('availAbsentFaculty') ? el('availAbsentFaculty').value : '';
         var day = el('availDay') ? el('availDay').value : '';
         var period = el('availPeriod') ? parseInt(el('availPeriod').value, 10) : 1;
+        var classVal = el('availClassSection') ? el('availClassSection').value : '';
 
-        if (!absent) {
-            resBox.innerHTML = notice('No faculty has been configured yet.', 'warn');
-            return;
+        resBox.innerHTML = notice('Calculating faculty availability and substitute candidates…', 'info');
+
+        var query = [];
+        if (dateVal) query.push('date=' + encodeURIComponent(dateVal));
+        if (day) query.push('day=' + encodeURIComponent(day));
+        if (period) query.push('period=' + encodeURIComponent(period));
+        if (classVal) query.push('class=' + encodeURIComponent(classVal));
+        if (absent) query.push('absentFaculty=' + encodeURIComponent(absent));
+
+        var endpoint = '/api/availability/candidates?' + query.join('&');
+
+        getJson(endpoint).then(function (data) {
+            renderHOSAvailabilityResult(resBox, data);
+        }).catch(function (err) {
+            // Fallback to POST /api/availability
+            postJson('/api/availability', {
+                date: dateVal || undefined,
+                absentFaculty: absent || undefined,
+                day: day,
+                period: period,
+                class: classVal || undefined,
+                includeAbsent: true
+            }).then(function (res) {
+                if (!res.ok) {
+                    var msg = (res.body && res.body.error) || ('HTTP ' + res.status);
+                    resBox.innerHTML = notice(msg, 'error');
+                    return;
+                }
+                renderHOSAvailabilityResult(resBox, res.body || {});
+            }).catch(function (postErr) {
+                resBox.innerHTML = notice(err.message || postErr.message || 'Could not calculate availability.', 'error');
+            });
+        });
+    }
+
+    function renderHOSAvailabilityResult(resBox, data) {
+        var sameBranchCode = (data.sameBranch && data.sameBranch.branch) ||
+            data.priorityBranch || data.branch || '';
+
+        var candidateList = data.candidates || data.available || [];
+        var sameCandidates = (data.sameBranch && data.sameBranch.candidates) ||
+            (data.sameBranch && data.sameBranch.available) ||
+            candidateList.filter(function (f) {
+                return sameBranchCode && (f.department || f.branch || '').toUpperCase() === sameBranchCode.toUpperCase();
+            });
+
+        var otherCandidates = (data.otherBranches && data.otherBranches.candidates) ||
+            (data.otherBranches && data.otherBranches.available) ||
+            candidateList.filter(function (f) {
+                return !sameBranchCode || (f.department || f.branch || '').toUpperCase() !== sameBranchCode.toUpperCase();
+            });
+
+        // 1. Substitute Candidates Section
+        var candidatesHtml = '<div style="margin-bottom:20px; padding:14px; background:var(--surface-subtle, #f8fafc); border-radius:var(--radius-sm, 6px); border:1px solid var(--border-color, #e2e8f0);">' +
+            '<h3 style="margin:0 0 10px 0; font-size:1.02rem; color:var(--ink-900, #0f172a);">Substitute Candidates (FREE Only)</h3>';
+
+        // Same Branch Candidates
+        candidatesHtml += '<div style="font-weight:650; font-size:0.88rem; color:var(--ink-800); margin:8px 0 6px 0;">Same Branch' + (sameBranchCode ? ' — ' + esc(sameBranchCode) : '') + ' (' + sameCandidates.length + ')</div>';
+        if (sameCandidates.length > 0) {
+            candidatesHtml += '<ol style="margin:0 0 12px 18px; padding:0;">' + sameCandidates.map(function (c) {
+                return '<li style="margin-bottom:4px; font-size:0.9rem;"><strong>' + esc(c.facultyName || c.name || c.faculty) + '</strong>' +
+                    (c.phone ? ' <span class="muted" style="font-size:0.82rem;">📞 ' + esc(c.phone) + '</span>' : '') +
+                    ' <span class="badge badge-free" style="margin-left:6px;">FREE</span></li>';
+            }).join('') + '</ol>';
+        } else {
+            candidatesHtml += '<p class="muted" style="margin:0 0 10px 0; font-size:0.86rem;">No free faculty in same branch.</p>';
         }
 
-        resBox.innerHTML = notice('Calculating faculty availability…', 'info');
+        // Other Branches Candidates
+        candidatesHtml += '<div style="font-weight:650; font-size:0.88rem; color:var(--ink-800); margin:10px 0 6px 0;">Other Branches (' + otherCandidates.length + ')</div>';
+        if (otherCandidates.length > 0) {
+            candidatesHtml += '<ol style="margin:0 0 6px 18px; padding:0;">' + otherCandidates.map(function (c) {
+                var dept = c.branch || c.department || '';
+                return '<li style="margin-bottom:4px; font-size:0.9rem;"><strong>' + esc(c.facultyName || c.name || c.faculty) + '</strong>' +
+                    (dept ? ' <span class="muted" style="font-size:0.82rem;">(' + esc(dept) + ')</span>' : '') +
+                    (c.phone ? ' <span class="muted" style="font-size:0.82rem;">📞 ' + esc(c.phone) + '</span>' : '') +
+                    ' <span class="badge badge-free" style="margin-left:6px;">FREE</span></li>';
+            }).join('') + '</ol>';
+        } else {
+            candidatesHtml += '<p class="muted" style="margin:0; font-size:0.86rem;">No free faculty in other branches.</p>';
+        }
+        candidatesHtml += '</div>';
 
-        postJson('/api/availability', {
-            absentFaculty: absent,
-            day: day,
-            period: period
-        }).then(function (res) {
-            if (!res.ok) {
-                var err = (res.body && res.body.error) || ('HTTP ' + res.status);
-                resBox.innerHTML = notice(err, 'error');
-                return;
-            }
-            var data = res.body || {};
-            var freeList = data.available || [];
-            var busyList = data.busy || [];
+        // 2. Full Faculty Availability Status Table (FREE, BUSY [TEACHING/INVIGILATION], ABSENT)
+        var facultyList = data.faculty || data.allFaculty || [];
+        var tableHtml = '<div style="margin-top:16px;">' +
+            '<h3 style="margin:0 0 10px 0; font-size:1.02rem; color:var(--ink-900, #0f172a);">Faculty Availability Status</h3>' +
+            '<div class="table-scroll">' +
+            '<table class="table" style="width:100%; border-collapse:collapse; font-size:0.88rem;">' +
+            '<thead>' +
+                '<tr style="border-bottom:2px solid var(--border-color, #e2e8f0); text-align:left;">' +
+                    '<th style="padding:8px 10px;">Faculty</th>' +
+                    '<th style="padding:8px 10px;">Status</th>' +
+                    '<th style="padding:8px 10px;">Reason</th>' +
+                    '<th style="padding:8px 10px;">Branch</th>' +
+                '</tr>' +
+            '</thead>' +
+            '<tbody>';
 
-            var absentHtml = data.absentFaculty
-                ? '<div class="notice notice-warn" style="margin-bottom:14px;">' +
-                    '<strong>Absent:</strong> ' + esc(data.absentFaculty.name) +
-                    '<span class="muted" style="margin-left:8px;">(Excluded from available cover)</span>' +
-                  '</div>'
-                : '';
+        if (facultyList.length === 0) {
+            tableHtml += '<tr><td colspan="4" class="muted" style="padding:12px; text-align:center;">No faculty records found.</td></tr>';
+        } else {
+            facultyList.forEach(function (f) {
+                var status = String(f.status || '').toUpperCase();
+                var badgeClass = 'badge-free';
+                var badgeStyle = '';
+                if (status === 'BUSY') {
+                    badgeClass = 'badge-busy';
+                } else if (status === 'ABSENT') {
+                    badgeClass = 'badge';
+                    badgeStyle = 'background:#fee2e2; color:#991b1b;';
+                }
 
-            var freeHtml = freeList.length
-                ? '<ul class="faculty-list">' + freeList.map(function (f) {
-                    return '<li><span class="tick">✓</span>' +
-                        '<div class="faculty-main">' +
-                            '<div class="faculty-name">' + esc(f.faculty || f.name) + '</div>' +
-                            (f.phone ? '<div class="faculty-phone"><span class="phone-icon">📞</span> ' + esc(f.phone) + '</div>' : '') +
-                        '</div>' +
-                        '<span class="badge badge-free">FREE</span>' +
-                    '</li>';
-                }).join('') + '</ul>'
-                : '<p class="muted">No faculty are free during this period.</p>';
+                var reason = f.reason || '—';
+                var dept = f.branch || f.department || '—';
 
-            var busyHtml = busyList.length
-                ? '<ul class="faculty-list busy-list">' + busyList.map(function (f) {
-                    var reason = [f.subject, f.className].filter(Boolean).join(' — ');
-                    return '<li><span class="cross">✗</span>' +
-                        '<div class="faculty-main">' +
-                            '<div class="faculty-name">' + esc(f.faculty || f.name) + '</div>' +
-                            '<div class="busy-reason">Busy: ' + esc(reason || 'teaching') + (f.room ? ' (' + esc(f.room) + ')' : '') + '</div>' +
-                        '</div>' +
-                        '<span class="badge badge-busy">BUSY</span>' +
-                    '</li>';
-                }).join('') + '</ul>'
-                : '<p class="muted">No faculty are busy during this period.</p>';
+                tableHtml += '<tr style="border-bottom:1px solid var(--border-color, #f1f5f9);">' +
+                    '<td style="padding:8px 10px; font-weight:550;">' + esc(f.facultyName || f.name || f.faculty) + '</td>' +
+                    '<td style="padding:8px 10px;"><span class="badge ' + badgeClass + '" style="' + badgeStyle + '">' + esc(status) + '</span></td>' +
+                    '<td style="padding:8px 10px; color:var(--ink-700);">' + esc(reason) + '</td>' +
+                    '<td style="padding:8px 10px; color:var(--ink-600);">' + esc(dept) + '</td>' +
+                '</tr>';
+            });
+        }
 
-            var emptyMsg = data.emptyState ? ('<div style="margin-bottom:12px;">' + notice(data.emptyState, 'info') + '</div>') : '';
+        tableHtml += '</tbody></table></div></div>';
 
-            resBox.innerHTML =
-                absentHtml +
-                emptyMsg +
-                '<div class="section-label">AVAILABLE FACULTY (' + freeList.length + ')</div>' +
-                freeHtml +
-                '<div class="section-label" style="margin-top:16px;">BUSY FACULTY (' + busyList.length + ')</div>' +
-                busyHtml +
-                '<div class="readonly-banner">READ ONLY — Availability Result</div>' +
-                '<p class="readonly-note">This screen reports availability only. The system does not automatically assign or alter the timetable.</p>';
-        }).catch(function (err) {
-            resBox.innerHTML = notice(err.message || 'Could not calculate availability.', 'error');
-        });
+        var absentNotice = data.absentFaculty
+            ? '<div class="notice notice-warn" style="margin-bottom:14px;">' +
+                '<strong>Absent:</strong> ' + esc(data.absentFaculty.name) +
+                '<span class="muted" style="margin-left:8px;">(Excluded from substitute cover)</span>' +
+              '</div>'
+            : '';
+
+        resBox.innerHTML =
+            absentNotice +
+            candidatesHtml +
+            tableHtml +
+            '<div class="readonly-banner" style="margin-top:20px;">READ ONLY — Availability & Substitution Preparation</div>' +
+            '<p class="readonly-note">This screen reports candidate rankings and availability. Automatic substitute assignment is disabled in this phase.</p>';
     }
 
     // ---------------------------------------------------------- faculty
@@ -1063,9 +1266,10 @@
             }
             if (!data.faculty.length) {
                 el('facBody').innerHTML =
-                    '<tr><td colspan="13" class="muted">No faculty match this filter.</td></tr>';
+                    '<tr><td colspan="14" class="muted">No faculty match this filter.</td></tr>';
                 return;
             }
+            var isFacultyUser = state.user && state.user.role === 'faculty';
             el('facBody').innerHTML = data.faculty.map(function (f) {
                 var pct = f.totalPeriods ? Math.round((f.busyPeriods / f.totalPeriods) * 100) : 0;
 
@@ -1087,6 +1291,30 @@
                 var statusBadge = '<span class="badge ' + (f.status === 'active' ? 'badge-free' : 'badge-busy') + '">' +
                     esc(statusLabel(f.status)) + '</span>';
 
+                var actionsHtml = '<span class="muted">—</span>';
+                if (!isFacultyUser) {
+                    var editBtn = '<button type="button" class="btn btn-secondary btn-sm btn-fac-edit" ' +
+                        'data-id="' + esc(f.id) + '" ' +
+                        'data-name="' + esc(f.name) + '" ' +
+                        'data-branch="' + esc(f.department) + '" ' +
+                        'data-phone="' + esc(f.phone || '') + '" ' +
+                        'data-designation="' + esc(f.designation || 'Faculty') + '" ' +
+                        'data-subjects="' + esc((f.subjects || []).join(', ')) + '" ' +
+                        'style="padding: 3px 8px; font-size: 0.8rem;">Edit</button>';
+
+                    var statusBtn = f.status === 'inactive'
+                        ? '<button type="button" class="btn btn-primary btn-sm btn-fac-activate" ' +
+                            'data-id="' + esc(f.id) + '" ' +
+                            'data-name="' + esc(f.name) + '" ' +
+                            'style="padding: 3px 8px; font-size: 0.8rem;">Reactivate</button>'
+                        : '<button type="button" class="btn btn-danger btn-sm btn-fac-deactivate" ' +
+                            'data-id="' + esc(f.id) + '" ' +
+                            'data-name="' + esc(f.name) + '" ' +
+                            'style="padding: 3px 8px; font-size: 0.8rem;">Deactivate</button>';
+
+                    actionsHtml = '<div style="display:flex; gap:6px; align-items:center;">' + editBtn + statusBtn + '</div>';
+                }
+
                 return '<tr>' +
                     '<td class="mono">' + esc(f.id) + '</td>' +
                     '<td><strong>' + esc(f.name) + '</strong></td>' +
@@ -1107,6 +1335,7 @@
                     '<td class="list" title="' + esc(f.classes.join(', ')) + '">' +
                         esc(f.classes.join(', ') || '—') + '</td>' +
                     '<td>' + statusBadge + '</td>' +
+                    '<td style="white-space:nowrap;">' + actionsHtml + '</td>' +
                     '</tr>';
             }).join('');
         });
@@ -1260,6 +1489,1361 @@
                 var previous = select.value;
                 fillSelect(select, [{ value: '', label: pair[1] }].concat(options), previous);
             });
+        });
+    }
+
+    // -------------------------------------------------- faculty requests (B7.1)
+    function updatePendingRequestsBadge() {
+        if (!state.user || (state.user.role !== 'hos' && state.user.role !== 'coordinator' && state.user.role !== 'admin')) return;
+        getJson(API.facultyRequests).then(function (data) {
+            var pending = (data.requests || []).filter(function (r) { return r.status === 'PENDING'; });
+            var badge = el('pendingRequestsCount');
+            if (badge) {
+                if (pending.length > 0) {
+                    badge.textContent = pending.length;
+                    badge.style.display = 'inline-block';
+                } else {
+                    badge.style.display = 'none';
+                }
+            }
+        }).catch(function () {});
+    }
+
+    function loadFacultyRequests() {
+        var alertBox = el('requestsAlertBox');
+        if (alertBox) alertBox.style.display = 'none';
+        var tableBody = el('requestsTableBody');
+        var emptyNotice = el('requestsEmptyNotice');
+        if (tableBody) tableBody.innerHTML = '<tr><td colspan="8" class="muted">Loading requests…</td></tr>';
+
+        return getJson(API.facultyRequests).then(function (data) {
+            var requests = data.requests || [];
+            renderRequestsTable(requests);
+            updatePendingRequestsBadge();
+        }).catch(function (err) {
+            if (tableBody) tableBody.innerHTML = '<tr><td colspan="8" class="notice notice-error">Could not load requests: ' + esc(err.message) + '</td></tr>';
+        });
+    }
+
+    function renderRequestsTable(requests) {
+        var tableBody = el('requestsTableBody');
+        var emptyNotice = el('requestsEmptyNotice');
+        if (!tableBody) return;
+
+        if (!requests || requests.length === 0) {
+            tableBody.innerHTML = '';
+            if (emptyNotice) emptyNotice.style.display = 'block';
+            return;
+        }
+
+        if (emptyNotice) emptyNotice.style.display = 'none';
+        tableBody.innerHTML = requests.map(function (req) {
+            var statusBadge = req.status === 'PENDING'
+                ? '<span class="badge badge-warning">PENDING</span>'
+                : (req.status === 'APPROVED'
+                    ? '<span class="badge badge-success">APPROVED</span>'
+                    : '<span class="badge badge-danger">REJECTED</span>');
+
+            var actionsHtml = '<span class="muted">—</span>';
+            if (req.status === 'PENDING') {
+                actionsHtml = '<div style="display:flex; gap:6px; align-items:center;">' +
+                    '<button type="button" class="btn btn-primary btn-sm btn-req-approve" data-id="' + esc(req.id) + '" data-name="' + esc(req.name) + '" style="padding:3px 8px; font-size:0.8rem;">Approve</button>' +
+                    '<button type="button" class="btn btn-danger btn-sm btn-req-reject" data-id="' + esc(req.id) + '" data-name="' + esc(req.name) + '" style="padding:3px 8px; font-size:0.8rem;">Reject</button>' +
+                    '</div>';
+            } else if (req.status === 'REJECTED' && req.rejectionReason) {
+                actionsHtml = '<span class="muted" style="font-size:0.8rem;" title="' + esc(req.rejectionReason) + '">Reason: ' + esc(req.rejectionReason) + '</span>';
+            }
+
+            var phoneCell = req.phone
+                ? '<a href="tel:' + esc(req.phone.replace(/\s+/g, '')) + '" class="phone-link"><span class="phone-icon">📞</span> ' + esc(req.phone) + '</a>'
+                : '<span class="muted">—</span>';
+
+            var requestedAtStr = req.createdAt ? new Date(req.createdAt).toLocaleString() : '—';
+
+            return '<tr>' +
+                '<td><strong>' + esc(req.name) + '</strong></td>' +
+                '<td class="mono">' + esc(req.username) + '</td>' +
+                '<td>' + phoneCell + '</td>' +
+                '<td>' + esc(req.designation || 'Faculty') + '</td>' +
+                '<td class="list" title="' + esc((req.subjects || []).join(', ')) + '">' + esc((req.subjects || []).join(', ') || '—') + '</td>' +
+                '<td style="font-size:0.82rem; color:var(--ink-600);">' + esc(requestedAtStr) + '</td>' +
+                '<td>' + statusBadge + '</td>' +
+                '<td style="white-space:nowrap;">' + actionsHtml + '</td>' +
+                '</tr>';
+        }).join('');
+    }
+
+    function approveFacultyRequest(id, facultyName) {
+        if (!confirm('Approve registration request for "' + facultyName + '"?\n\nThis will create an active faculty account and enable login.')) {
+            return;
+        }
+
+        var alertBox = el('requestsAlertBox');
+        fetch(API.facultyRequests + '/' + encodeURIComponent(id) + '/approve', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+        }).then(function (res) {
+            return res.json().catch(function () { return {}; }).then(function (body) {
+                return { ok: res.ok, status: res.status, body: body };
+            });
+        }).then(function (result) {
+            if (alertBox) {
+                alertBox.style.display = 'block';
+                if (result.ok) {
+                    alertBox.innerHTML = '<div class="notice notice-success"><strong>✓ Request Approved!</strong> Faculty account created for <strong>' + esc(result.body.user ? result.body.user.name : facultyName) + '</strong>. They can now log in.</div>';
+                } else {
+                    alertBox.innerHTML = '<div class="notice notice-danger"><strong>Approval Failed:</strong> ' + esc(result.body.error || 'Failed to approve request.') + '</div>';
+                }
+            }
+            loadFacultyRequests();
+            loadFacultyTable();
+            loadDashboard();
+            refreshDepartmentFilters();
+        }).catch(function (err) {
+            if (alertBox) {
+                alertBox.style.display = 'block';
+                alertBox.innerHTML = '<div class="notice notice-danger">Network error: ' + esc(err.message) + '</div>';
+            }
+        });
+    }
+
+    function openRejectModal(id, facultyName) {
+        if (el('rejectTargetId')) el('rejectTargetId').value = id;
+        if (el('rejectReasonInput')) el('rejectReasonInput').value = '';
+        var modal = el('rejectRequestModal');
+        if (modal) modal.style.display = 'flex';
+    }
+
+    function closeRejectModal() {
+        var modal = el('rejectRequestModal');
+        if (modal) modal.style.display = 'none';
+        if (el('rejectTargetId')) el('rejectTargetId').value = '';
+        if (el('rejectReasonInput')) el('rejectReasonInput').value = '';
+    }
+
+    function confirmRejectFacultyRequest() {
+        var targetId = el('rejectTargetId') ? el('rejectTargetId').value : '';
+        if (!targetId) return;
+        var reason = el('rejectReasonInput') ? el('rejectReasonInput').value.trim() : '';
+        var alertBox = el('requestsAlertBox');
+
+        var confirmBtn = el('btnConfirmReject');
+        if (confirmBtn) confirmBtn.disabled = true;
+
+        fetch(API.facultyRequests + '/' + encodeURIComponent(targetId) + '/reject', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ reason: reason })
+        }).then(function (res) {
+            return res.json().catch(function () { return {}; }).then(function (body) {
+                return { ok: res.ok, status: res.status, body: body };
+            });
+        }).then(function (result) {
+            if (confirmBtn) confirmBtn.disabled = false;
+            closeRejectModal();
+            if (alertBox) {
+                alertBox.style.display = 'block';
+                if (result.ok) {
+                    alertBox.innerHTML = '<div class="notice notice-info">Faculty registration request rejected. No user account was created.</div>';
+                } else {
+                    alertBox.innerHTML = '<div class="notice notice-danger"><strong>Rejection Failed:</strong> ' + esc(result.body.error || 'Failed to reject request.') + '</div>';
+                }
+            }
+            loadFacultyRequests();
+            updatePendingRequestsBadge();
+        }).catch(function (err) {
+            if (confirmBtn) confirmBtn.disabled = false;
+            closeRejectModal();
+            if (alertBox) {
+                alertBox.style.display = 'block';
+                alertBox.innerHTML = '<div class="notice notice-danger">Network error: ' + esc(err.message) + '</div>';
+            }
+        });
+    }
+
+    // -------------------------------------------------- faculty attendance (B7.2)
+    function getTodayDateString() {
+        var d = new Date();
+        var y = d.getFullYear();
+        var m = String(d.getMonth() + 1).padStart(2, '0');
+        var day = String(d.getDate()).padStart(2, '0');
+        return y + '-' + m + '-' + day;
+    }
+
+    function loadHOSAttendance(dateParam) {
+        var dateInput = el('attDateInput');
+        var targetDate = dateParam || (dateInput && dateInput.value) || getTodayDateString();
+        if (dateInput && !dateInput.value) dateInput.value = targetDate;
+
+        var branchBadge = el('attBranchBadge');
+        if (branchBadge && state.user) {
+            branchBadge.textContent = state.user.department || 'Branch';
+        }
+
+        var alertBox = el('attendanceAlertBox');
+        if (alertBox) alertBox.style.display = 'none';
+
+        var tableBody = el('attendanceTableBody');
+        var emptyNotice = el('attendanceEmptyNotice');
+        var dateDisplay = el('attDateDisplay');
+
+        if (tableBody) tableBody.innerHTML = '<tr><td colspan="6" class="muted">Loading attendance for ' + esc(targetDate) + '…</td></tr>';
+
+        return getJson(API.attendance + '?date=' + encodeURIComponent(targetDate)).then(function (data) {
+            if (dateDisplay) {
+                dateDisplay.textContent = (data.dayOfWeek ? data.dayOfWeek + ', ' : '') + data.date;
+            }
+            renderHOSAttendanceTable(data.faculty || [], targetDate);
+        }).catch(function (err) {
+            if (tableBody) {
+                tableBody.innerHTML = '<tr><td colspan="6" class="notice notice-error">Could not load attendance: ' + esc(err.message) + '</td></tr>';
+            }
+        });
+    }
+
+    function renderHOSAttendanceTable(facultyList, targetDate) {
+        var tableBody = el('attendanceTableBody');
+        var emptyNotice = el('attendanceEmptyNotice');
+        if (!tableBody) return;
+
+        if (!facultyList || facultyList.length === 0) {
+            tableBody.innerHTML = '';
+            if (emptyNotice) emptyNotice.style.display = 'block';
+            return;
+        }
+
+        if (emptyNotice) emptyNotice.style.display = 'none';
+
+        tableBody.innerHTML = facultyList.map(function (f) {
+            var isAbsent = f.status === 'ABSENT';
+            var statusBadge = isAbsent
+                ? '<span class="badge badge-danger">ABSENT</span>'
+                : '<span class="badge badge-success">PRESENT</span>';
+
+            var actionBtn = isAbsent
+                ? '<button type="button" class="btn btn-secondary btn-sm btn-mark-present" data-id="' + esc(f.id || f.facultyId) + '" data-name="' + esc(f.name) + '" data-att-id="' + esc(f.attendanceId || '') + '">Mark Present</button>'
+                : '<button type="button" class="btn btn-danger btn-sm btn-mark-absent" data-id="' + esc(f.id || f.facultyId) + '" data-name="' + esc(f.name) + '">Mark Absent</button>';
+
+            return '<tr>' +
+                '<td><strong>' + esc(f.name) + '</strong></td>' +
+                '<td>' + esc(f.designation || 'Faculty') + '</td>' +
+                '<td>' + esc(f.department || '') + '</td>' +
+                '<td>' + esc(f.phone || '—') + '</td>' +
+                '<td>' + statusBadge + '</td>' +
+                '<td>' + actionBtn + '</td>' +
+            '</tr>';
+        }).join('');
+
+        // Attach listeners to Mark Absent buttons
+        Array.prototype.forEach.call(tableBody.querySelectorAll('.btn-mark-absent'), function (btn) {
+            btn.addEventListener('click', function () {
+                var facId = btn.getAttribute('data-id');
+                var facName = btn.getAttribute('data-name');
+                btn.disabled = true;
+                postAttendanceStatus(facId, facName, targetDate, 'ABSENT');
+            });
+        });
+
+        // Attach listeners to Mark Present buttons
+        Array.prototype.forEach.call(tableBody.querySelectorAll('.btn-mark-present'), function (btn) {
+            btn.addEventListener('click', function () {
+                var facId = btn.getAttribute('data-id');
+                var facName = btn.getAttribute('data-name');
+                var attId = btn.getAttribute('data-att-id');
+                btn.disabled = true;
+                if (attId) {
+                    deleteAttendanceRecord(attId, facName, targetDate);
+                } else {
+                    postAttendanceStatus(facId, facName, targetDate, 'PRESENT');
+                }
+            });
+        });
+    }
+
+    function postAttendanceStatus(facultyId, facultyName, date, status) {
+        var alertBox = el('attendanceAlertBox');
+        fetch(API.attendance, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ facultyId: facultyId, date: date, status: status })
+        }).then(function (res) {
+            return res.json().catch(function () { return {}; }).then(function (body) {
+                return { ok: res.ok, status: res.status, body: body };
+            });
+        }).then(function (res) {
+            if (alertBox) {
+                alertBox.style.display = 'block';
+                if (res.ok) {
+                    alertBox.innerHTML = '<div class="notice notice-success">Marked <strong>' + esc(facultyName) + '</strong> as <strong>' + esc(status) + '</strong> for ' + esc(date) + '.</div>';
+                } else {
+                    alertBox.innerHTML = '<div class="notice notice-danger">Failed to mark attendance: ' + esc(res.body.error || 'Unknown error') + '</div>';
+                }
+            }
+            loadHOSAttendance(date);
+        }).catch(function (err) {
+            if (alertBox) {
+                alertBox.style.display = 'block';
+                alertBox.innerHTML = '<div class="notice notice-danger">Network error: ' + esc(err.message) + '</div>';
+            }
+            loadHOSAttendance(date);
+        });
+    }
+
+    function deleteAttendanceRecord(attendanceId, facultyName, date) {
+        var alertBox = el('attendanceAlertBox');
+        fetch(API.attendance + '/' + encodeURIComponent(attendanceId), {
+            method: 'DELETE'
+        }).then(function (res) {
+            return res.json().catch(function () { return {}; }).then(function (body) {
+                return { ok: res.ok, status: res.status, body: body };
+            });
+        }).then(function (res) {
+            if (alertBox) {
+                alertBox.style.display = 'block';
+                if (res.ok) {
+                    alertBox.innerHTML = '<div class="notice notice-success">Marked <strong>' + esc(facultyName) + '</strong> as <strong>PRESENT</strong> for ' + esc(date) + '.</div>';
+                } else {
+                    alertBox.innerHTML = '<div class="notice notice-danger">Failed to update attendance: ' + esc(res.body.error || 'Unknown error') + '</div>';
+                }
+            }
+            loadHOSAttendance(date);
+        }).catch(function (err) {
+            if (alertBox) {
+                alertBox.style.display = 'block';
+                alertBox.innerHTML = '<div class="notice notice-danger">Network error: ' + esc(err.message) + '</div>';
+            }
+            loadHOSAttendance(date);
+        });
+    }
+
+    function loadMyAttendance() {
+        var tableBody = el('myAttendanceTableBody');
+        var emptyNotice = el('myAttendanceEmptyNotice');
+        if (tableBody) tableBody.innerHTML = '<tr><td colspan="4" class="muted">Loading your attendance records…</td></tr>';
+
+        return getJson(API.attendance + '/my').then(function (data) {
+            var records = data.records || [];
+            if (!records.length) {
+                if (tableBody) tableBody.innerHTML = '';
+                if (emptyNotice) emptyNotice.style.display = 'block';
+                return;
+            }
+            if (emptyNotice) emptyNotice.style.display = 'none';
+
+            tableBody.innerHTML = records.map(function (r) {
+                var badge = r.status === 'ABSENT'
+                    ? '<span class="badge badge-danger">ABSENT</span>'
+                    : '<span class="badge badge-success">PRESENT</span>';
+                return '<tr>' +
+                    '<td><strong>' + esc(r.date) + '</strong></td>' +
+                    '<td>' + esc(r.dayOfWeek || '—') + '</td>' +
+                    '<td>' + badge + '</td>' +
+                    '<td>' + esc(r.markedBy || 'HOS') + '</td>' +
+                '</tr>';
+            }).join('');
+        }).catch(function (err) {
+            if (tableBody) {
+                tableBody.innerHTML = '<tr><td colspan="4" class="notice notice-error">Could not load attendance: ' + esc(err.message) + '</td></tr>';
+            }
+        });
+    }
+
+    // -------------------------------------------------- exam invigilation (B7.3)
+    var activeInvigPeriods = [1, 2, 3, 4, 5, 6, 7];
+
+    function fetchConfiguredPeriods() {
+        return getJson(API.invigilation + '/periods').then(function (data) {
+            if (data && Array.isArray(data.periods) && data.periods.length > 0) {
+                activeInvigPeriods = data.periods;
+            }
+            return activeInvigPeriods;
+        }).catch(function () {
+            return activeInvigPeriods;
+        });
+    }
+
+    function loadHOSInvigilation(filterDate) {
+        if (el('invigBranchBadge')) {
+            el('invigBranchBadge').textContent = (state.user && state.user.department) || 'Branch';
+        }
+        loadHOSInvigFacultyDropdown();
+        loadHOSInvigPeriodsCheckboxes();
+        loadActiveInvigTable(filterDate);
+    }
+
+    function loadHOSInvigFacultyDropdown() {
+        var sel = el('directInvigFaculty');
+        if (!sel) return;
+        var myDept = state.user && state.user.department ? state.user.department.toUpperCase() : '';
+        getJson(API.faculty).then(function (roster) {
+            var branchFaculty = (roster || []).filter(function (f) {
+                return !myDept || (f.department && f.department.toUpperCase() === myDept);
+            });
+            sel.innerHTML = '<option value="">Select faculty…</option>' + branchFaculty.map(function (f) {
+                return '<option value="' + esc(f.id || f.name) + '">' + esc(f.name) + (f.designation ? ' (' + esc(f.designation) + ')' : '') + '</option>';
+            }).join('');
+        }).catch(function () {});
+    }
+
+    function loadHOSInvigPeriodsCheckboxes() {
+        var wrap = el('directInvigPeriodsWrap');
+        if (!wrap) return;
+        fetchConfiguredPeriods().then(function (periods) {
+            wrap.innerHTML = periods.map(function (p) {
+                return '<label style="display:inline-flex; align-items:center; gap:5px; font-size:0.88rem; cursor:pointer; background:var(--surface); padding:4px 10px; border:1px solid var(--border); border-radius:var(--radius-sm);">' +
+                    '<input type="checkbox" name="directInvigPeriod" value="' + p + '" /> P' + p +
+                '</label>';
+            }).join('');
+        });
+    }
+
+    function loadActiveInvigTable(filterDate) {
+        var tableBody = el('activeInvigTableBody');
+        var emptyNotice = el('activeInvigEmptyNotice');
+        if (tableBody) tableBody.innerHTML = '<tr><td colspan="7" class="muted">Loading scheduled invigilations…</td></tr>';
+
+        var url = API.invigilation;
+        if (filterDate) {
+            url += '?date=' + encodeURIComponent(filterDate);
+        }
+
+        return getJson(url).then(function (data) {
+            var list = data.assignments || [];
+            if (!list.length) {
+                if (tableBody) tableBody.innerHTML = '';
+                if (emptyNotice) emptyNotice.style.display = 'block';
+                return;
+            }
+            if (emptyNotice) emptyNotice.style.display = 'none';
+
+            tableBody.innerHTML = list.map(function (a) {
+                var srcBadge = a.source === 'DIRECT'
+                    ? '<span class="badge badge-primary">DIRECT</span>'
+                    : '<span class="badge badge-info">REQUEST</span>';
+                return '<tr>' +
+                    '<td><strong>' + esc(a.facultyName) + '</strong></td>' +
+                    '<td>' + esc(a.examDate) + '</td>' +
+                    '<td>' + esc(a.dayOfWeek || '—') + '</td>' +
+                    '<td><span class="badge badge-warning">P' + esc(a.period) + '</span></td>' +
+                    '<td>' + srcBadge + '</td>' +
+                    '<td>' + esc(a.notes || '—') + '</td>' +
+                    '<td><button type="button" class="btn btn-danger btn-sm btn-cancel-invig" data-id="' + esc(a.id) + '">Cancel</button></td>' +
+                '</tr>';
+            }).join('');
+
+            Array.prototype.forEach.call(tableBody.querySelectorAll('.btn-cancel-invig'), function (btn) {
+                btn.addEventListener('click', function () {
+                    var id = btn.getAttribute('data-id');
+                    if (window.confirm('Are you sure you want to cancel this invigilation assignment?')) {
+                        deleteActiveInvig(id);
+                    }
+                });
+            });
+        }).catch(function (err) {
+            if (tableBody) {
+                tableBody.innerHTML = '<tr><td colspan="7" class="notice notice-error">Could not load invigilations: ' + esc(err.message) + '</td></tr>';
+            }
+        });
+    }
+
+    function deleteActiveInvig(id) {
+        fetch(API.invigilation + '/' + encodeURIComponent(id), {
+            method: 'DELETE',
+            headers: { 'Content-Type': 'application/json' }
+        }).then(function (res) {
+            return res.json().then(function (body) {
+                if (!res.ok) throw new Error(body.error || 'Failed to cancel invigilation');
+                loadActiveInvigTable(el('filterInvigDate') ? el('filterInvigDate').value : null);
+            });
+        }).catch(function (err) {
+            window.alert('Error: ' + err.message);
+        });
+    }
+
+    function handleDirectInvigSubmit(e) {
+        e.preventDefault();
+        var alertBox = el('directInvigAlert');
+        var facultyId = el('directInvigFaculty') ? el('directInvigFaculty').value : '';
+        var date = el('directInvigDate') ? el('directInvigDate').value : '';
+        var notes = el('directInvigNotes') ? el('directInvigNotes').value : '';
+
+        var checkedPeriods = [];
+        var checkboxes = document.querySelectorAll('input[name="directInvigPeriod"]:checked');
+        for (var i = 0; i < checkboxes.length; i++) {
+            checkedPeriods.push(parseInt(checkboxes[i].value, 10));
+        }
+
+        if (!facultyId) {
+            if (alertBox) {
+                alertBox.style.display = 'block';
+                alertBox.innerHTML = '<div class="notice notice-danger">Please select a faculty member.</div>';
+            }
+            return;
+        }
+        if (!date) {
+            if (alertBox) {
+                alertBox.style.display = 'block';
+                alertBox.innerHTML = '<div class="notice notice-danger">Please select an exam date.</div>';
+            }
+            return;
+        }
+        if (!checkedPeriods.length) {
+            if (alertBox) {
+                alertBox.style.display = 'block';
+                alertBox.innerHTML = '<div class="notice notice-danger">Please select at least one period.</div>';
+            }
+            return;
+        }
+
+        var payload = {
+            facultyId: facultyId,
+            date: date,
+            periods: checkedPeriods,
+            notes: notes
+        };
+
+        fetch(API.invigilation, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        }).then(function (res) {
+            return res.json().then(function (body) {
+                if (!res.ok) {
+                    var msg = body.error || 'Failed to assign invigilation.';
+                    if (alertBox) {
+                        alertBox.style.display = 'block';
+                        alertBox.innerHTML = '<div class="notice notice-danger">' + esc(msg) + '</div>';
+                    }
+                    return;
+                }
+                if (alertBox) {
+                    alertBox.style.display = 'block';
+                    alertBox.innerHTML = '<div class="notice notice-success">Invigilation duty assigned successfully!</div>';
+                    setTimeout(function () { alertBox.style.display = 'none'; }, 4000);
+                }
+                el('directInvigForm').reset();
+                loadHOSInvigFacultyDropdown();
+                loadHOSInvigPeriodsCheckboxes();
+                loadActiveInvigTable();
+            });
+        }).catch(function (err) {
+            if (alertBox) {
+                alertBox.style.display = 'block';
+                alertBox.innerHTML = '<div class="notice notice-danger">' + esc(err.message) + '</div>';
+            }
+        });
+    }
+
+    function loadHOSInvigRequests(statusParam) {
+        var tableBody = el('invigRequestsTableBody');
+        var emptyNotice = el('invigRequestsEmptyNotice');
+        if (tableBody) tableBody.innerHTML = '<tr><td colspan="8" class="muted">Loading invigilation requests…</td></tr>';
+
+        var status = statusParam !== undefined ? statusParam : (el('filterInvigReqStatus') ? el('filterInvigReqStatus').value : 'PENDING');
+        var url = API.invigilation + '/requests' + (status ? '?status=' + encodeURIComponent(status) : '');
+
+        return getJson(url).then(function (data) {
+            var list = data.requests || [];
+            if (!list.length) {
+                if (tableBody) tableBody.innerHTML = '';
+                if (emptyNotice) emptyNotice.style.display = 'block';
+                return;
+            }
+            if (emptyNotice) emptyNotice.style.display = 'none';
+
+            tableBody.innerHTML = list.map(function (r) {
+                var statusBadge = r.status === 'PENDING'
+                    ? '<span class="badge badge-warning">PENDING</span>'
+                    : (r.status === 'APPROVED'
+                        ? '<span class="badge badge-success">APPROVED</span>'
+                        : '<span class="badge badge-danger">REJECTED</span>');
+
+                var actions = '';
+                if (r.status === 'PENDING') {
+                    actions = '<div style="display:flex; gap:6px;">' +
+                        '<button type="button" class="btn btn-primary btn-sm btn-approve-invig" data-id="' + esc(r.id) + '">Approve</button>' +
+                        '<button type="button" class="btn btn-secondary btn-sm btn-reject-invig" data-id="' + esc(r.id) + '">Reject</button>' +
+                    '</div>';
+                } else if (r.status === 'REJECTED' && r.rejectionReason) {
+                    actions = '<span class="muted" style="font-size:0.8rem;">Reason: ' + esc(r.rejectionReason) + '</span>';
+                } else {
+                    actions = '<span class="muted" style="font-size:0.8rem;">Reviewed by ' + esc(r.reviewedBy || 'HOS') + '</span>';
+                }
+
+                var periodsDisplay = Array.isArray(r.periods) ? r.periods.map(function (p) { return 'P' + p; }).join(', ') : '—';
+                var dateStr = r.createdAt ? new Date(r.createdAt).toLocaleDateString() : '—';
+
+                return '<tr>' +
+                    '<td><strong>' + esc(r.facultyName) + '</strong></td>' +
+                    '<td>' + esc(r.examDate) + '</td>' +
+                    '<td>' + esc(r.dayOfWeek || '—') + '</td>' +
+                    '<td>' + esc(periodsDisplay) + '</td>' +
+                    '<td>' + esc(r.reason || '—') + '</td>' +
+                    '<td>' + statusBadge + '</td>' +
+                    '<td>' + esc(dateStr) + '</td>' +
+                    '<td>' + actions + '</td>' +
+                '</tr>';
+            }).join('');
+
+            Array.prototype.forEach.call(tableBody.querySelectorAll('.btn-approve-invig'), function (btn) {
+                btn.addEventListener('click', function () {
+                    approveInvigRequest(btn.getAttribute('data-id'));
+                });
+            });
+
+            Array.prototype.forEach.call(tableBody.querySelectorAll('.btn-reject-invig'), function (btn) {
+                btn.addEventListener('click', function () {
+                    openRejectInvigModal(btn.getAttribute('data-id'));
+                });
+            });
+        }).catch(function (err) {
+            if (tableBody) {
+                tableBody.innerHTML = '<tr><td colspan="8" class="notice notice-error">Could not load requests: ' + esc(err.message) + '</td></tr>';
+            }
+        });
+    }
+
+    function approveInvigRequest(id) {
+        var alertBox = el('invigReqReviewAlert');
+        fetch(API.invigilation + '/requests/' + encodeURIComponent(id) + '/approve', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+        }).then(function (res) {
+            return res.json().then(function (body) {
+                if (!res.ok) {
+                    if (alertBox) {
+                        alertBox.style.display = 'block';
+                        alertBox.innerHTML = '<div class="notice notice-danger">' + esc(body.error || 'Failed to approve request') + '</div>';
+                    }
+                    return;
+                }
+                if (alertBox) {
+                    alertBox.style.display = 'block';
+                    alertBox.innerHTML = '<div class="notice notice-success">Request approved and invigilation assigned!</div>';
+                    setTimeout(function () { alertBox.style.display = 'none'; }, 4000);
+                }
+                loadHOSInvigRequests();
+                updatePendingInvigRequestsBadge();
+            });
+        }).catch(function (err) {
+            if (alertBox) {
+                alertBox.style.display = 'block';
+                alertBox.innerHTML = '<div class="notice notice-danger">' + esc(err.message) + '</div>';
+            }
+        });
+    }
+
+    function openRejectInvigModal(id) {
+        var modal = el('rejectInvigModal');
+        var targetInput = el('rejectInvigTargetId');
+        var reasonInput = el('rejectInvigReasonInput');
+        if (targetInput) targetInput.value = id;
+        if (reasonInput) reasonInput.value = '';
+        if (modal) modal.style.display = 'flex';
+    }
+
+    function closeRejectInvigModal() {
+        var modal = el('rejectInvigModal');
+        if (modal) modal.style.display = 'none';
+    }
+
+    function confirmRejectInvig() {
+        var id = el('rejectInvigTargetId') ? el('rejectInvigTargetId').value : '';
+        var reason = el('rejectInvigReasonInput') ? el('rejectInvigReasonInput').value : '';
+        if (!id) return;
+
+        var alertBox = el('invigReqReviewAlert');
+        fetch(API.invigilation + '/requests/' + encodeURIComponent(id) + '/reject', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ rejectionReason: reason })
+        }).then(function (res) {
+            return res.json().then(function (body) {
+                closeRejectInvigModal();
+                if (!res.ok) {
+                    if (alertBox) {
+                        alertBox.style.display = 'block';
+                        alertBox.innerHTML = '<div class="notice notice-danger">' + esc(body.error || 'Failed to reject request') + '</div>';
+                    }
+                    return;
+                }
+                if (alertBox) {
+                    alertBox.style.display = 'block';
+                    alertBox.innerHTML = '<div class="notice notice-info">Invigilation request rejected.</div>';
+                    setTimeout(function () { alertBox.style.display = 'none'; }, 4000);
+                }
+                loadHOSInvigRequests();
+                updatePendingInvigRequestsBadge();
+            });
+        }).catch(function (err) {
+            closeRejectInvigModal();
+            if (alertBox) {
+                alertBox.style.display = 'block';
+                alertBox.innerHTML = '<div class="notice notice-danger">' + esc(err.message) + '</div>';
+            }
+        });
+    }
+
+    function updatePendingInvigRequestsBadge() {
+        var badge = el('pendingInvigRequestsCount');
+        if (!badge) return;
+        getJson(API.invigilation + '/requests?status=PENDING').then(function (data) {
+            var count = (data && data.requests) ? data.requests.length : 0;
+            if (count > 0) {
+                badge.textContent = count;
+                badge.style.display = 'inline-block';
+            } else {
+                badge.style.display = 'none';
+            }
+        }).catch(function () {
+            badge.style.display = 'none';
+        });
+    }
+
+    function loadMyInvigilation() {
+        var myInvigTableBody = el('myInvigTableBody');
+        var myInvigEmptyNotice = el('myInvigEmptyNotice');
+        var myReqTableBody = el('myInvigRequestsTableBody');
+        var myReqEmptyNotice = el('myInvigRequestsEmptyNotice');
+
+        if (myInvigTableBody) myInvigTableBody.innerHTML = '<tr><td colspan="6" class="muted">Loading your invigilation duties…</td></tr>';
+        if (myReqTableBody) myReqTableBody.innerHTML = '<tr><td colspan="6" class="muted">Loading your requests…</td></tr>';
+
+        return getJson(API.invigilation + '/my').then(function (data) {
+            // Render active assignments
+            var assignments = data.assignments || [];
+            if (!assignments.length) {
+                if (myInvigTableBody) myInvigTableBody.innerHTML = '';
+                if (myInvigEmptyNotice) myInvigEmptyNotice.style.display = 'block';
+            } else {
+                if (myInvigEmptyNotice) myInvigEmptyNotice.style.display = 'none';
+                myInvigTableBody.innerHTML = assignments.map(function (a) {
+                    var srcBadge = a.source === 'DIRECT'
+                        ? '<span class="badge badge-primary">DIRECT</span>'
+                        : '<span class="badge badge-info">REQUEST</span>';
+                    return '<tr>' +
+                        '<td><strong>' + esc(a.examDate) + '</strong></td>' +
+                        '<td>' + esc(a.dayOfWeek || '—') + '</td>' +
+                        '<td><span class="badge badge-warning">P' + esc(a.period) + '</span></td>' +
+                        '<td>' + srcBadge + '</td>' +
+                        '<td>' + esc(a.notes || '—') + '</td>' +
+                        '<td>' + esc(a.assignedBy || 'HOS') + '</td>' +
+                    '</tr>';
+                }).join('');
+            }
+
+            // Render requests
+            var requests = data.requests || [];
+            if (!requests.length) {
+                if (myReqTableBody) myReqTableBody.innerHTML = '';
+                if (myReqEmptyNotice) myReqEmptyNotice.style.display = 'block';
+            } else {
+                if (myReqEmptyNotice) myReqEmptyNotice.style.display = 'none';
+                myReqTableBody.innerHTML = requests.map(function (r) {
+                    var statusBadge = r.status === 'PENDING'
+                        ? '<span class="badge badge-warning">PENDING</span>'
+                        : (r.status === 'APPROVED'
+                            ? '<span class="badge badge-success">APPROVED</span>'
+                            : '<span class="badge badge-danger">REJECTED</span>');
+
+                    var reviewNotes = r.status === 'REJECTED'
+                        ? (r.rejectionReason ? 'Reason: ' + esc(r.rejectionReason) : 'Rejected by HOS')
+                        : (r.status === 'APPROVED' ? 'Approved by ' + esc(r.reviewedBy || 'HOS') : 'Awaiting review');
+
+                    var periodsDisplay = Array.isArray(r.periods) ? r.periods.map(function (p) { return 'P' + p; }).join(', ') : '—';
+
+                    return '<tr>' +
+                        '<td><strong>' + esc(r.examDate) + '</strong></td>' +
+                        '<td>' + esc(r.dayOfWeek || '—') + '</td>' +
+                        '<td>' + esc(periodsDisplay) + '</td>' +
+                        '<td>' + esc(r.reason || '—') + '</td>' +
+                        '<td>' + statusBadge + '</td>' +
+                        '<td><span class="muted" style="font-size:0.85rem;">' + reviewNotes + '</span></td>' +
+                    '</tr>';
+                }).join('');
+            }
+        }).catch(function (err) {
+            if (myInvigTableBody) {
+                myInvigTableBody.innerHTML = '<tr><td colspan="6" class="notice notice-error">Could not load invigilations: ' + esc(err.message) + '</td></tr>';
+            }
+            if (myReqTableBody) {
+                myReqTableBody.innerHTML = '<tr><td colspan="6" class="notice notice-error">Could not load requests: ' + esc(err.message) + '</td></tr>';
+            }
+        });
+    }
+
+    function loadRequestInvigilationForm() {
+        var wrap = el('facultyInvigPeriodsWrap');
+        if (!wrap) return;
+        fetchConfiguredPeriods().then(function (periods) {
+            wrap.innerHTML = periods.map(function (p) {
+                return '<label style="display:inline-flex; align-items:center; gap:5px; font-size:0.88rem; cursor:pointer; background:var(--surface); padding:4px 10px; border:1px solid var(--border); border-radius:var(--radius-sm);">' +
+                    '<input type="checkbox" name="facultyInvigPeriod" value="' + p + '" /> P' + p +
+                '</label>';
+            }).join('');
+        });
+    }
+
+    function handleFacultyInvigRequestSubmit(e) {
+        e.preventDefault();
+        var alertBox = el('facultyInvigAlert');
+        var date = el('facultyInvigDate') ? el('facultyInvigDate').value : '';
+        var reason = el('facultyInvigReason') ? el('facultyInvigReason').value : '';
+
+        var checkedPeriods = [];
+        var checkboxes = document.querySelectorAll('input[name="facultyInvigPeriod"]:checked');
+        for (var i = 0; i < checkboxes.length; i++) {
+            checkedPeriods.push(parseInt(checkboxes[i].value, 10));
+        }
+
+        if (!date) {
+            if (alertBox) {
+                alertBox.style.display = 'block';
+                alertBox.innerHTML = '<div class="notice notice-danger">Please select an exam date.</div>';
+            }
+            return;
+        }
+        if (!checkedPeriods.length) {
+            if (alertBox) {
+                alertBox.style.display = 'block';
+                alertBox.innerHTML = '<div class="notice notice-danger">Please select at least one period.</div>';
+            }
+            return;
+        }
+
+        var payload = {
+            date: date,
+            periods: checkedPeriods,
+            reason: reason
+        };
+
+        fetch(API.invigilation + '/requests', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        }).then(function (res) {
+            return res.json().then(function (body) {
+                if (!res.ok) {
+                    if (alertBox) {
+                        alertBox.style.display = 'block';
+                        alertBox.innerHTML = '<div class="notice notice-danger">' + esc(body.error || 'Failed to submit request.') + '</div>';
+                    }
+                    return;
+                }
+                if (alertBox) {
+                    alertBox.style.display = 'block';
+                    alertBox.innerHTML = '<div class="notice notice-success">Invigilation request submitted successfully! Your HOS will review it.</div>';
+                    setTimeout(function () { alertBox.style.display = 'none'; }, 4000);
+                }
+                el('facultyInvigRequestForm').reset();
+                loadRequestInvigilationForm();
+            });
+        }).catch(function (err) {
+            if (alertBox) {
+                alertBox.style.display = 'block';
+                alertBox.innerHTML = '<div class="notice notice-danger">' + esc(err.message) + '</div>';
+            }
+        });
+    }
+
+    // -------------------------------------------------- faculty substitutions (Phase B7.5)
+    var currentSubTab = 'request';
+    var selectedVacantSlot = null;
+
+    function updatePendingSubstitutionsBadge() {
+        if (!state.user || state.user.role !== 'faculty') return;
+        getJson(API.substitutions + '/incoming').then(function (data) {
+            var count = (data && data.requests && data.requests.length) || 0;
+            var badge = el('pendingSubstitutionsCount');
+            var tabBadge = el('tabIncomingCount');
+            if (badge) {
+                badge.textContent = count;
+                badge.style.display = count > 0 ? 'inline-block' : 'none';
+            }
+            if (tabBadge) {
+                tabBadge.textContent = count;
+                tabBadge.style.display = count > 0 ? 'inline-block' : 'none';
+            }
+        }).catch(function () {});
+    }
+
+    function switchSubTab(tabName) {
+        currentSubTab = tabName;
+        var tabReq = el('subTabRequest');
+        var tabInc = el('subTabIncoming');
+        var tabHist = el('subTabHistory');
+
+        if (tabReq) tabReq.style.display = tabName === 'request' ? 'block' : 'none';
+        if (tabInc) tabInc.style.display = tabName === 'incoming' ? 'block' : 'none';
+        if (tabHist) tabHist.style.display = tabName === 'history' ? 'block' : 'none';
+
+        var btnReq = el('tabBtnSubRequest');
+        var btnInc = el('tabBtnSubIncoming');
+        var btnHist = el('tabBtnSubHistory');
+
+        if (btnReq) {
+            btnReq.className = 'btn btn-sm sub-tab-btn ' + (tabName === 'request' ? 'btn-primary' : 'btn-secondary');
+        }
+        if (btnInc) {
+            btnInc.className = 'btn btn-sm sub-tab-btn ' + (tabName === 'incoming' ? 'btn-primary' : 'btn-secondary');
+        }
+        if (btnHist) {
+            btnHist.className = 'btn btn-sm sub-tab-btn ' + (tabName === 'history' ? 'btn-primary' : 'btn-secondary');
+        }
+
+        if (tabName === 'incoming') {
+            loadIncomingSubstitutions();
+        } else if (tabName === 'history') {
+            loadMySubstitutions();
+        }
+    }
+
+    function loadFacultySubstitutionsView() {
+        var dateInput = el('subRequestDate');
+        if (dateInput && !dateInput.value) {
+            var now = new Date();
+            var yyyy = now.getFullYear();
+            var mm = String(now.getMonth() + 1).padStart(2, '0');
+            var dd = String(now.getDate()).padStart(2, '0');
+            dateInput.value = yyyy + '-' + mm + '-' + dd;
+        }
+        switchSubTab('request');
+        updatePendingSubstitutionsBadge();
+    }
+
+    function handleFindVacantPeriods() {
+        var dateInput = el('subRequestDate');
+        var alertBox = el('vacantPeriodsAlert');
+        var tableBody = el('vacantPeriodsTableBody');
+        var candidatesCard = el('subCandidatesCard');
+
+        if (candidatesCard) candidatesCard.style.display = 'none';
+        selectedVacantSlot = null;
+
+        var date = dateInput ? dateInput.value : '';
+        if (!date) {
+            if (alertBox) {
+                alertBox.style.display = 'block';
+                alertBox.innerHTML = '<div class="notice notice-danger">Please enter a date to find your vacant periods.</div>';
+            }
+            return;
+        }
+
+        if (alertBox) alertBox.style.display = 'none';
+        if (tableBody) tableBody.innerHTML = '<tr><td colspan="7" class="muted">Checking schedule and absence status…</td></tr>';
+
+        getJson(API.substitutions + '/vacant-periods?date=' + encodeURIComponent(date)).then(function (data) {
+            var list = (data && data.vacantPeriods) || [];
+            if (!list.length) {
+                if (tableBody) {
+                    tableBody.innerHTML = '<tr><td colspan="7" class="muted">No vacant teaching periods found for ' + esc(date) + '. You are either not marked absent or have no classes on this day.</td></tr>';
+                }
+                return;
+            }
+
+            tableBody.innerHTML = list.map(function (p) {
+                return '<tr>' +
+                    '<td><strong>' + esc(p.date) + '</strong></td>' +
+                    '<td>' + esc(p.dayOfWeek || '—') + '</td>' +
+                    '<td><span class="badge badge-warning">P' + esc(p.period) + '</span></td>' +
+                    '<td>' + esc(p.className || '—') + '</td>' +
+                    '<td>' + esc(p.subject || '—') + '</td>' +
+                    '<td>' + esc(p.room || '—') + '</td>' +
+                    '<td><button type="button" class="btn btn-primary btn-sm btn-select-vacant" ' +
+                        'data-date="' + esc(p.date) + '" ' +
+                        'data-day="' + esc(p.dayOfWeek || '') + '" ' +
+                        'data-period="' + esc(p.period) + '" ' +
+                        'data-class="' + esc(p.className || '') + '" ' +
+                        'data-subject="' + esc(p.subject || '') + '" ' +
+                        'data-room="' + esc(p.room || '') + '">Select Slot</button></td>' +
+                '</tr>';
+            }).join('');
+
+            Array.prototype.forEach.call(tableBody.querySelectorAll('.btn-select-vacant'), function (btn) {
+                btn.addEventListener('click', function () {
+                    handleSelectVacantSlot({
+                        date: btn.getAttribute('data-date'),
+                        dayOfWeek: btn.getAttribute('data-day'),
+                        period: parseInt(btn.getAttribute('data-period'), 10),
+                        className: btn.getAttribute('data-class'),
+                        subject: btn.getAttribute('data-subject'),
+                        room: btn.getAttribute('data-room')
+                    });
+                });
+            });
+        }).catch(function (err) {
+            if (tableBody) {
+                tableBody.innerHTML = '<tr><td colspan="7" class="notice notice-error">' + esc(err.message || 'Failed to check vacant periods.') + '</td></tr>';
+            }
+        });
+    }
+
+    function handleSelectVacantSlot(slot) {
+        selectedVacantSlot = slot;
+        var card = el('subCandidatesCard');
+        var badge = el('subSelectedSlotBadge');
+        var subtitle = el('subCandidatesSubtitle');
+        var tableBody = el('subCandidatesTableBody');
+        var emptyNotice = el('subCandidatesEmptyNotice');
+        var alertBox = el('subCandidatesAlert');
+
+        if (alertBox) alertBox.style.display = 'none';
+        if (card) card.style.display = 'block';
+        if (badge) badge.textContent = 'P' + slot.period + ' · ' + (slot.className || 'Class') + ' (' + slot.date + ')';
+        if (subtitle) subtitle.textContent = 'Available FREE colleagues for ' + (slot.dayOfWeek || '') + ' Period ' + slot.period + ' (' + (slot.subject || 'Teaching') + ')';
+
+        if (tableBody) tableBody.innerHTML = '<tr><td colspan="5" class="muted">Scanning colleague availability across branches…</td></tr>';
+        if (emptyNotice) emptyNotice.style.display = 'none';
+
+        var url = API.substitutions + '/candidates?date=' + encodeURIComponent(slot.date) +
+            '&period=' + encodeURIComponent(slot.period) +
+            (slot.className ? '&className=' + encodeURIComponent(slot.className) : '');
+
+        getJson(url).then(function (data) {
+            var candidates = (data && data.candidates) || [];
+            if (!candidates.length) {
+                if (tableBody) tableBody.innerHTML = '';
+                if (emptyNotice) emptyNotice.style.display = 'block';
+                return;
+            }
+            if (emptyNotice) emptyNotice.style.display = 'none';
+
+            tableBody.innerHTML = candidates.map(function (c) {
+                var priorityBadge = c.isSameBranch
+                    ? '<span class="badge badge-primary">Same Branch (' + esc(c.branch || c.department) + ')</span>'
+                    : '<span class="badge badge-neutral">Other Branch (' + esc(c.branch || c.department) + ')</span>';
+
+                return '<tr>' +
+                    '<td><strong>' + esc(c.name || c.facultyName) + '</strong></td>' +
+                    '<td>' + esc(c.branch || c.department || '—') + '</td>' +
+                    '<td>' + priorityBadge + '</td>' +
+                    '<td><span class="badge badge-success">FREE</span></td>' +
+                    '<td><button type="button" class="btn btn-primary btn-sm btn-choose-sub" ' +
+                        'data-id="' + esc(c.id || c.facultyId) + '" ' +
+                        'data-name="' + esc(c.name || c.facultyName) + '">Send Request</button></td>' +
+                '</tr>';
+            }).join('');
+
+            Array.prototype.forEach.call(tableBody.querySelectorAll('.btn-choose-sub'), function (btn) {
+                btn.addEventListener('click', function () {
+                    var subId = btn.getAttribute('data-id');
+                    var subName = btn.getAttribute('data-name');
+                    handleSendSubRequest(slot, { id: subId, name: subName });
+                });
+            });
+        }).catch(function (err) {
+            if (tableBody) {
+                tableBody.innerHTML = '<tr><td colspan="5" class="notice notice-error">' + esc(err.message || 'Failed to load candidates.') + '</td></tr>';
+            }
+        });
+    }
+
+    function handleSendSubRequest(slot, candidate) {
+        var alertBox = el('subCandidatesAlert');
+        fetch(API.substitutions + '/requests', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                date: slot.date,
+                period: slot.period,
+                className: slot.className,
+                subject: slot.subject,
+                substituteFacultyId: candidate.id,
+                substituteFacultyName: candidate.name
+            })
+        }).then(function (res) {
+            return res.json().then(function (body) {
+                if (!res.ok) {
+                    if (alertBox) {
+                        alertBox.style.display = 'block';
+                        alertBox.innerHTML = '<div class="notice notice-danger">' + esc(body.error || 'Failed to send substitution request.') + '</div>';
+                    }
+                    return;
+                }
+                alert('Substitution request sent to ' + candidate.name + ' for Period ' + slot.period + ' on ' + slot.date + '!');
+                var card = el('subCandidatesCard');
+                if (card) card.style.display = 'none';
+                switchSubTab('history');
+            });
+        }).catch(function (err) {
+            if (alertBox) {
+                alertBox.style.display = 'block';
+                alertBox.innerHTML = '<div class="notice notice-danger">' + esc(err.message) + '</div>';
+            }
+        });
+    }
+
+    function loadIncomingSubstitutions() {
+        var tableBody = el('incomingSubsTableBody');
+        var emptyNotice = el('incomingSubsEmptyNotice');
+        var alertBox = el('incomingSubsAlert');
+
+        if (tableBody) tableBody.innerHTML = '<tr><td colspan="8" class="muted">Loading incoming substitution requests…</td></tr>';
+        if (emptyNotice) emptyNotice.style.display = 'none';
+        if (alertBox) alertBox.style.display = 'none';
+
+        getJson(API.substitutions + '/incoming').then(function (data) {
+            var list = (data && data.requests) || [];
+            if (!list.length) {
+                if (tableBody) tableBody.innerHTML = '';
+                if (emptyNotice) emptyNotice.style.display = 'block';
+                return;
+            }
+            if (emptyNotice) emptyNotice.style.display = 'none';
+
+            tableBody.innerHTML = list.map(function (r) {
+                return '<tr>' +
+                    '<td><strong>' + esc(r.date) + '</strong></td>' +
+                    '<td>' + esc(r.dayOfWeek || '—') + '</td>' +
+                    '<td><span class="badge badge-warning">P' + esc(r.period) + '</span></td>' +
+                    '<td>' + esc(r.className || '—') + '</td>' +
+                    '<td>' + esc(r.subject || '—') + '</td>' +
+                    '<td><strong>' + esc(r.originalFacultyName) + '</strong></td>' +
+                    '<td>' + esc(r.originalFacultyBranch || '—') + '</td>' +
+                    '<td><div style="display:flex; gap:6px;">' +
+                        '<button type="button" class="btn btn-success btn-sm btn-accept-sub" data-id="' + esc(r.id) + '">Accept</button>' +
+                        '<button type="button" class="btn btn-danger btn-sm btn-open-reject-sub" data-id="' + esc(r.id) + '">Decline</button>' +
+                    '</div></td>' +
+                '</tr>';
+            }).join('');
+
+            Array.prototype.forEach.call(tableBody.querySelectorAll('.btn-accept-sub'), function (btn) {
+                btn.addEventListener('click', function () {
+                    handleAcceptSub(btn.getAttribute('data-id'));
+                });
+            });
+
+            Array.prototype.forEach.call(tableBody.querySelectorAll('.btn-open-reject-sub'), function (btn) {
+                btn.addEventListener('click', function () {
+                    openRejectSubModal(btn.getAttribute('data-id'));
+                });
+            });
+        }).catch(function (err) {
+            if (tableBody) {
+                tableBody.innerHTML = '<tr><td colspan="8" class="notice notice-error">' + esc(err.message || 'Failed to load incoming requests.') + '</td></tr>';
+            }
+        });
+    }
+
+    function handleAcceptSub(id) {
+        var alertBox = el('incomingSubsAlert');
+        fetch(API.substitutions + '/' + encodeURIComponent(id) + '/accept', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+        }).then(function (res) {
+            return res.json().then(function (body) {
+                if (!res.ok) {
+                    if (alertBox) {
+                        alertBox.style.display = 'block';
+                        alertBox.innerHTML = '<div class="notice notice-danger"><strong>Cannot Accept:</strong> ' + esc(body.error || 'Failed to accept substitution') + '</div>';
+                    }
+                    return;
+                }
+                if (alertBox) {
+                    alertBox.style.display = 'block';
+                    alertBox.innerHTML = '<div class="notice notice-success">Substitution accepted! The class has been added to your schedule.</div>';
+                    setTimeout(function () { alertBox.style.display = 'none'; }, 4000);
+                }
+                loadIncomingSubstitutions();
+                updatePendingSubstitutionsBadge();
+            });
+        }).catch(function (err) {
+            if (alertBox) {
+                alertBox.style.display = 'block';
+                alertBox.innerHTML = '<div class="notice notice-danger">' + esc(err.message) + '</div>';
+            }
+        });
+    }
+
+    function openRejectSubModal(id) {
+        var modal = el('rejectSubModal');
+        var targetInput = el('rejectSubTargetId');
+        var reasonInput = el('rejectSubReasonInput');
+        if (targetInput) targetInput.value = id;
+        if (reasonInput) reasonInput.value = '';
+        if (modal) modal.style.display = 'flex';
+    }
+
+    function closeRejectSubModal() {
+        var modal = el('rejectSubModal');
+        if (modal) modal.style.display = 'none';
+    }
+
+    function confirmRejectSub() {
+        var targetId = el('rejectSubTargetId') ? el('rejectSubTargetId').value : '';
+        var reason = el('rejectSubReasonInput') ? el('rejectSubReasonInput').value : '';
+        var alertBox = el('incomingSubsAlert');
+        if (!targetId) return;
+
+        fetch(API.substitutions + '/' + encodeURIComponent(targetId) + '/reject', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ reason: reason })
+        }).then(function (res) {
+            return res.json().then(function (body) {
+                closeRejectSubModal();
+                if (!res.ok) {
+                    if (alertBox) {
+                        alertBox.style.display = 'block';
+                        alertBox.innerHTML = '<div class="notice notice-danger">' + esc(body.error || 'Failed to reject substitution') + '</div>';
+                    }
+                    return;
+                }
+                if (alertBox) {
+                    alertBox.style.display = 'block';
+                    alertBox.innerHTML = '<div class="notice notice-neutral">Substitution request declined.</div>';
+                    setTimeout(function () { alertBox.style.display = 'none'; }, 4000);
+                }
+                loadIncomingSubstitutions();
+                updatePendingSubstitutionsBadge();
+            });
+        }).catch(function (err) {
+            closeRejectSubModal();
+            if (alertBox) {
+                alertBox.style.display = 'block';
+                alertBox.innerHTML = '<div class="notice notice-danger">' + esc(err.message) + '</div>';
+            }
+        });
+    }
+
+    function loadMySubstitutions() {
+        var tableBody = el('mySubsTableBody');
+        var emptyNotice = el('mySubsEmptyNotice');
+        var alertBox = el('mySubsAlert');
+
+        if (tableBody) tableBody.innerHTML = '<tr><td colspan="9" class="muted">Loading your substitution history…</td></tr>';
+        if (emptyNotice) emptyNotice.style.display = 'none';
+        if (alertBox) alertBox.style.display = 'none';
+
+        getJson(API.substitutions + '/my').then(function (data) {
+            var list = (data && data.outgoingRequests) || [];
+            if (!list.length) {
+                if (tableBody) tableBody.innerHTML = '';
+                if (emptyNotice) emptyNotice.style.display = 'block';
+                return;
+            }
+            if (emptyNotice) emptyNotice.style.display = 'none';
+
+            tableBody.innerHTML = list.map(function (s) {
+                var statusBadge = s.status === 'ACCEPTED'
+                    ? '<span class="badge badge-success">ACCEPTED</span>'
+                    : (s.status === 'REJECTED'
+                        ? '<span class="badge badge-danger">REJECTED</span>'
+                        : (s.status === 'CANCELLED'
+                            ? '<span class="badge badge-neutral">CANCELLED</span>'
+                            : '<span class="badge badge-warning">PENDING</span>'));
+
+                var notes = s.status === 'REJECTED'
+                    ? (s.rejectionReason ? 'Reason: ' + esc(s.rejectionReason) : 'Declined by substitute')
+                    : (s.status === 'ACCEPTED' ? 'Accepted by substitute' : (s.status === 'CANCELLED' ? 'Cancelled by you' : 'Awaiting response'));
+
+                var actionBtn = s.status === 'PENDING'
+                    ? '<button type="button" class="btn btn-secondary btn-sm btn-cancel-sub" data-id="' + esc(s.id) + '">Cancel</button>'
+                    : '—';
+
+                return '<tr>' +
+                    '<td><strong>' + esc(s.date) + '</strong></td>' +
+                    '<td>' + esc(s.dayOfWeek || '—') + '</td>' +
+                    '<td><span class="badge badge-warning">P' + esc(s.period) + '</span></td>' +
+                    '<td>' + esc(s.className || '—') + '</td>' +
+                    '<td>' + esc(s.subject || '—') + '</td>' +
+                    '<td><strong>' + esc(s.substituteFacultyName) + '</strong> (' + esc(s.substituteFacultyBranch || '') + ')</td>' +
+                    '<td>' + statusBadge + '</td>' +
+                    '<td><span class="muted" style="font-size:0.85rem;">' + notes + '</span></td>' +
+                    '<td>' + actionBtn + '</td>' +
+                '</tr>';
+            }).join('');
+
+            Array.prototype.forEach.call(tableBody.querySelectorAll('.btn-cancel-sub'), function (btn) {
+                btn.addEventListener('click', function () {
+                    handleCancelSub(btn.getAttribute('data-id'));
+                });
+            });
+        }).catch(function (err) {
+            if (tableBody) {
+                tableBody.innerHTML = '<tr><td colspan="9" class="notice notice-error">' + esc(err.message || 'Failed to load substitutions.') + '</td></tr>';
+            }
+        });
+    }
+
+    function handleCancelSub(id) {
+        if (!confirm('Cancel this pending substitution request?')) return;
+        var alertBox = el('mySubsAlert');
+        fetch(API.substitutions + '/' + encodeURIComponent(id), {
+            method: 'DELETE'
+        }).then(function (res) {
+            return res.json().then(function (body) {
+                if (!res.ok) {
+                    if (alertBox) {
+                        alertBox.style.display = 'block';
+                        alertBox.innerHTML = '<div class="notice notice-danger">' + esc(body.error || 'Failed to cancel request') + '</div>';
+                    }
+                    return;
+                }
+                loadMySubstitutions();
+            });
+        }).catch(function (err) {
+            if (alertBox) {
+                alertBox.style.display = 'block';
+                alertBox.innerHTML = '<div class="notice notice-danger">' + esc(err.message) + '</div>';
+            }
+        });
+    }
+
+    function loadHOSSubstitutionsView(filterDate, filterStatus) {
+        if (el('hosSubBranchBadge')) {
+            el('hosSubBranchBadge').textContent = (state.user && state.user.department) || 'Branch';
+        }
+        var tableBody = el('hosSubTableBody');
+        var emptyNotice = el('hosSubEmptyNotice');
+        var alertBox = el('hosSubAlert');
+
+        if (tableBody) tableBody.innerHTML = '<tr><td colspan="9" class="muted">Loading branch substitutions overview…</td></tr>';
+        if (emptyNotice) emptyNotice.style.display = 'none';
+        if (alertBox) alertBox.style.display = 'none';
+
+        var url = API.substitutions;
+        var params = [];
+        if (filterDate) params.push('date=' + encodeURIComponent(filterDate));
+        if (filterStatus) params.push('status=' + encodeURIComponent(filterStatus));
+        if (params.length) url += '?' + params.join('&');
+
+        getJson(url).then(function (data) {
+            var list = (data && data.substitutions) || [];
+            if (!list.length) {
+                if (tableBody) tableBody.innerHTML = '';
+                if (emptyNotice) emptyNotice.style.display = 'block';
+                return;
+            }
+            if (emptyNotice) emptyNotice.style.display = 'none';
+
+            tableBody.innerHTML = list.map(function (s) {
+                var statusBadge = s.status === 'ACCEPTED'
+                    ? '<span class="badge badge-success">ACCEPTED</span>'
+                    : (s.status === 'REJECTED'
+                        ? '<span class="badge badge-danger">REJECTED</span>'
+                        : (s.status === 'CANCELLED'
+                            ? '<span class="badge badge-neutral">CANCELLED</span>'
+                            : '<span class="badge badge-warning">PENDING</span>'));
+
+                var createdAt = s.createdAt ? new Date(s.createdAt).toLocaleString() : '—';
+
+                return '<tr>' +
+                    '<td><strong>' + esc(s.date) + '</strong></td>' +
+                    '<td>' + esc(s.dayOfWeek || '—') + '</td>' +
+                    '<td><span class="badge badge-warning">P' + esc(s.period) + '</span></td>' +
+                    '<td>' + esc(s.className || '—') + '</td>' +
+                    '<td>' + esc(s.subject || '—') + '</td>' +
+                    '<td><strong>' + esc(s.originalFacultyName) + '</strong> (' + esc(s.originalFacultyBranch || '') + ')</td>' +
+                    '<td><strong>' + esc(s.substituteFacultyName) + '</strong> (' + esc(s.substituteFacultyBranch || '') + ')</td>' +
+                    '<td>' + statusBadge + '</td>' +
+                    '<td><span class="muted" style="font-size:0.82rem;">' + esc(createdAt) + '</span></td>' +
+                '</tr>';
+            }).join('');
+        }).catch(function (err) {
+            if (tableBody) {
+                tableBody.innerHTML = '<tr><td colspan="9" class="notice notice-error">' + esc(err.message || 'Failed to load branch substitutions.') + '</td></tr>';
+            }
         });
     }
 
@@ -1806,8 +3390,57 @@
 
     /** The Master Timetable's current view, as a /api/timetable query string. */
     function ttQuery() {
+        var sem = (el('ttSemester') && el('ttSemester').value) || '';
+        var sec = (el('ttSection') && el('ttSection').value) || '';
+        var year = (el('ttAcademicYear') && el('ttAcademicYear').value) || '';
+        if (sem && sec) {
+            return '?semester=' + encodeURIComponent(sem) + '&section=' + encodeURIComponent(sec) + (year ? '&academicYear=' + encodeURIComponent(year) : '');
+        }
         var value = (el('ttView') && el('ttView').value) || '';
         return value.indexOf('class:') === 0 ? '?class=' + encodeURIComponent(value.slice(6)) : '';
+    }
+
+    function loadTimetableScopes() {
+        return getJson('/api/timetable/scopes').then(function (data) {
+            state.timetableScopes = data;
+            var semEl = el('ttSemester');
+            var secEl = el('ttSection');
+            var yearEl = el('ttAcademicYear');
+
+            if (yearEl && data.academicYears && data.academicYears.length) {
+                fillSelect(yearEl, data.academicYears.map(function (y) {
+                    return { value: y, label: y };
+                }), data.academicYears[0]);
+            }
+
+            if (semEl && data.semesters && data.semesters.length) {
+                fillSelect(semEl, data.semesters.map(function (s) {
+                    return { value: s, label: s };
+                }), data.semesters[0]);
+            }
+
+            if (secEl && data.sections && data.sections.length) {
+                fillSelect(secEl, data.sections.map(function (sec) {
+                    return { value: sec, label: 'Section ' + sec };
+                }), data.sections[0]);
+            }
+
+            var uploadSem = el('hosUploadSemester');
+            var uploadSec = el('hosUploadSection');
+            if (uploadSem && data.semesters) {
+                fillSelect(uploadSem, [{ value: '', label: '— Auto Detect —' }].concat(data.semesters.map(function (s) {
+                    return { value: s, label: s };
+                })), '');
+            }
+            if (uploadSec && data.sections) {
+                fillSelect(uploadSec, [{ value: '', label: '— Auto Detect —' }].concat(data.sections.map(function (sec) {
+                    return { value: sec, label: 'Section ' + sec };
+                })), '');
+            }
+
+            describeTimetableClass();
+            return loadGrid(ttQuery(), 'ttHead', 'ttBody', jumpToAvailability);
+        }).catch(function () {});
     }
 
     /**
@@ -1833,6 +3466,7 @@
             };
         }), keep ? ('class:' + keep) : '');
         describeTimetableClass();
+        loadTimetableScopes();
         return loadGrid(ttQuery(), 'ttHead', 'ttBody', jumpToAvailability);
     }
 
@@ -1840,7 +3474,23 @@
     function describeTimetableClass() {
         var box = el('ttMeta');
         if (!box) return;
-        var code = (el('ttView').value || '').replace(/^class:/, '');
+
+        var sem = (el('ttSemester') && el('ttSemester').value) || '';
+        var sec = (el('ttSection') && el('ttSection').value) || '';
+        var year = (el('ttAcademicYear') && el('ttAcademicYear').value) || '';
+        var branch = (state.user && state.user.department) || '';
+
+        if (sem && sec) {
+            box.textContent = [
+                branch ? 'Branch: ' + branch : null,
+                year ? 'Academic Year ' + year : null,
+                sem,
+                'Section ' + sec
+            ].filter(Boolean).join(' · ');
+            return;
+        }
+
+        var code = (el('ttView') && el('ttView').value || '').replace(/^class:/, '');
         var info = state.classMeta[code];
         if (!info) { box.textContent = ''; return; }
         box.textContent = [
@@ -1889,7 +3539,162 @@
         if (target) target.click();
     }
 
+    function initFacultyManagementEvents() {
+        var facBody = el('facBody');
+        if (facBody && !facBody.__boundFacultyEvents) {
+            facBody.__boundFacultyEvents = true;
+            facBody.addEventListener('click', function (e) {
+                var target = e.target;
+                if (!target) return;
+
+                // Edit button
+                var editBtn = target.closest('.btn-fac-edit');
+                if (editBtn) {
+                    var id = editBtn.getAttribute('data-id');
+                    var name = editBtn.getAttribute('data-name') || '';
+                    var branch = editBtn.getAttribute('data-branch') || '';
+                    var phone = editBtn.getAttribute('data-phone') || '';
+                    var designation = editBtn.getAttribute('data-designation') || 'Faculty';
+                    var subjects = editBtn.getAttribute('data-subjects') || '';
+
+                    if (el('editFacId')) el('editFacId').value = id;
+                    if (el('editFacIdDisplay')) el('editFacIdDisplay').textContent = id;
+                    if (el('editFacBranchDisplay')) el('editFacBranchDisplay').textContent = branch;
+                    if (el('editFacName')) el('editFacName').value = name;
+                    if (el('editFacPhone')) el('editFacPhone').value = phone;
+                    if (el('editFacDesignation')) el('editFacDesignation').value = designation;
+                    if (el('editFacSubjects')) el('editFacSubjects').value = subjects;
+                    if (el('editFacNote')) el('editFacNote').style.display = 'none';
+
+                    if (el('editFacultyModal')) el('editFacultyModal').style.display = 'flex';
+                    return;
+                }
+
+                // Deactivate button
+                var deactBtn = target.closest('.btn-fac-deactivate');
+                if (deactBtn) {
+                    var dId = deactBtn.getAttribute('data-id');
+                    var dName = deactBtn.getAttribute('data-name') || dId;
+                    if (!confirm('Are you sure you want to deactivate ' + dName + '?\n\nThis will prevent them from logging in and exclude them from substitution availability. All existing timetable entries are preserved.')) {
+                        return;
+                    }
+                    fetch('/api/faculty/' + encodeURIComponent(dId) + '/deactivate', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' }
+                    })
+                    .then(function (res) {
+                        return res.json().then(function (data) {
+                            if (!res.ok) throw new Error(data.error || 'Failed to deactivate faculty.');
+                            return data;
+                        });
+                    })
+                    .then(function () {
+                        loadFacultyTable();
+                    })
+                    .catch(function (err) {
+                        alert(err.message || 'Failed to deactivate faculty.');
+                    });
+                    return;
+                }
+
+                // Reactivate button
+                var actBtn = target.closest('.btn-fac-activate');
+                if (actBtn) {
+                    var aId = actBtn.getAttribute('data-id');
+                    fetch('/api/faculty/' + encodeURIComponent(aId) + '/activate', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' }
+                    })
+                    .then(function (res) {
+                        return res.json().then(function (data) {
+                            if (!res.ok) throw new Error(data.error || 'Failed to reactivate faculty.');
+                            return data;
+                        });
+                    })
+                    .then(function () {
+                        loadFacultyTable();
+                    })
+                    .catch(function (err) {
+                        alert(err.message || 'Failed to reactivate faculty.');
+                    });
+                    return;
+                }
+            });
+        }
+
+        // Close Edit Modal
+        if (el('btnEditFacClose') && !el('btnEditFacClose').__bound) {
+            el('btnEditFacClose').__bound = true;
+            el('btnEditFacClose').addEventListener('click', function () {
+                if (el('editFacultyModal')) el('editFacultyModal').style.display = 'none';
+            });
+        }
+        if (el('btnEditFacCancel') && !el('btnEditFacCancel').__bound) {
+            el('btnEditFacCancel').__bound = true;
+            el('btnEditFacCancel').addEventListener('click', function () {
+                if (el('editFacultyModal')) el('editFacultyModal').style.display = 'none';
+            });
+        }
+
+        // Submit Edit Form
+        if (el('editFacultyForm') && !el('editFacultyForm').__bound) {
+            el('editFacultyForm').__bound = true;
+            el('editFacultyForm').addEventListener('submit', function (e) {
+                e.preventDefault();
+                var id = el('editFacId') ? el('editFacId').value : '';
+                var name = el('editFacName') ? el('editFacName').value.trim() : '';
+                var phone = el('editFacPhone') ? el('editFacPhone').value.trim() : '';
+                var designation = el('editFacDesignation') ? el('editFacDesignation').value : 'Faculty';
+                var subjects = el('editFacSubjects') ? el('editFacSubjects').value.trim() : '';
+                var noteBox = el('editFacNote');
+
+                if (!name || name.length < 2) {
+                    if (noteBox) {
+                        noteBox.className = 'notice notice-danger';
+                        noteBox.textContent = 'Faculty name must be at least 2 characters.';
+                        noteBox.style.display = 'block';
+                    }
+                    return;
+                }
+
+                var saveBtn = el('btnEditFacSave');
+                if (saveBtn) saveBtn.disabled = true;
+
+                fetch('/api/faculty/' + encodeURIComponent(id), {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        name: name,
+                        phone: phone,
+                        designation: designation,
+                        subjects: subjects
+                    })
+                })
+                .then(function (res) {
+                    return res.json().then(function (data) {
+                        if (!res.ok) throw new Error(data.error || 'Failed to update faculty.');
+                        return data;
+                    });
+                })
+                .then(function () {
+                    if (saveBtn) saveBtn.disabled = false;
+                    if (el('editFacultyModal')) el('editFacultyModal').style.display = 'none';
+                    loadFacultyTable();
+                })
+                .catch(function (err) {
+                    if (saveBtn) saveBtn.disabled = false;
+                    if (noteBox) {
+                        noteBox.className = 'notice notice-danger';
+                        noteBox.textContent = err.message || 'Failed to save changes.';
+                        noteBox.style.display = 'block';
+                    }
+                });
+            });
+        }
+    }
+
     function bootstrap() {
+        initFacultyManagementEvents();
         return getJson(API.meta).then(function (meta) {
             state.meta = meta;
 
@@ -2617,6 +4422,38 @@
             });
         }
 
+        ['ttAcademicYear', 'ttSemester', 'ttSection'].forEach(function (id) {
+            if (el(id)) {
+                el(id).addEventListener('change', function () {
+                    describeTimetableClass();
+                    loadGrid(ttQuery(), 'ttHead', 'ttBody', jumpToAvailability);
+                });
+            }
+        });
+
+        if (el('btnTtClearScope')) {
+            el('btnTtClearScope').addEventListener('click', function () {
+                var sem = (el('ttSemester') && el('ttSemester').value) || 'SEM-1';
+                var sec = (el('ttSection') && el('ttSection').value) || 'A';
+                var year = (el('ttAcademicYear') && el('ttAcademicYear').value) || '';
+                var branch = (state.user && state.user.department) || '';
+                if (!confirm('Are you sure you want to clear the timetable for ' + (branch ? branch + ' ' : '') + sem + ' Section ' + sec + '?\n\nThis will delete scheduled slots for this section only. Faculty records, subjects, classes, and history are preserved.')) {
+                    return;
+                }
+                postJson('/api/timetable/clear', {
+                    semester: sem,
+                    section: sec,
+                    academicYear: year,
+                    branch: branch
+                }).then(function (res) {
+                    alert(res.message || 'Timetable cleared.');
+                    loadGrid(ttQuery(), 'ttHead', 'ttBody', jumpToAvailability);
+                }).catch(function (err) {
+                    alert(err.message || 'Failed to clear timetable.');
+                });
+            });
+        }
+
         // --- add / edit timetable
         if (el('manageDept')) el('manageDept').addEventListener('change', applyManageDepartment);
         if (el('manageForm')) el('manageForm').addEventListener('submit', saveEntry);
@@ -2807,6 +4644,32 @@
         if (el('classFilter')) el('classFilter').addEventListener('change', loadClasses);
         if (el('branchConfigForm')) el('branchConfigForm').addEventListener('submit', saveBranchConfig);
 
+        // Faculty Registration Requests Listeners (Phase B7.1)
+        if (el('btnRefreshRequests')) el('btnRefreshRequests').addEventListener('click', loadFacultyRequests);
+        if (el('btnRejectModalClose')) el('btnRejectModalClose').addEventListener('click', closeRejectModal);
+        if (el('btnRejectModalCancel')) el('btnRejectModalCancel').addEventListener('click', closeRejectModal);
+        if (el('btnConfirmReject')) el('btnConfirmReject').addEventListener('click', confirmRejectFacultyRequest);
+
+        var requestsTableBody = el('requestsTableBody');
+        if (requestsTableBody) {
+            requestsTableBody.addEventListener('click', function (e) {
+                var approveBtn = e.target.closest('.btn-req-approve');
+                if (approveBtn) {
+                    var reqId = approveBtn.getAttribute('data-id');
+                    var reqName = approveBtn.getAttribute('data-name') || 'Faculty';
+                    approveFacultyRequest(reqId, reqName);
+                    return;
+                }
+                var rejectBtn = e.target.closest('.btn-req-reject');
+                if (rejectBtn) {
+                    var reqId = rejectBtn.getAttribute('data-id');
+                    var reqName = rejectBtn.getAttribute('data-name') || 'Faculty';
+                    openRejectModal(reqId, reqName);
+                    return;
+                }
+            });
+        }
+
         // --- Timetable Upload Foundation (Phase B1) ---
         function setupTimetableUploads() {
             // HOS Master Timetable Upload
@@ -2853,6 +4716,12 @@
 
                     var formData = new FormData();
                     formData.append('timetable', file);
+                    if (el('hosUploadSemester') && el('hosUploadSemester').value) {
+                        formData.append('semester', el('hosUploadSemester').value);
+                    }
+                    if (el('hosUploadSection') && el('hosUploadSection').value) {
+                        formData.append('section', el('hosUploadSection').value);
+                    }
 
                     fetch('/api/uploads/master-timetable', {
                         method: 'POST',
@@ -3331,6 +5200,170 @@
                 });
                 refreshPendingStaging();
             }
+        var btnLoadAtt = el('btnLoadAttendance');
+        if (btnLoadAtt) {
+            btnLoadAtt.addEventListener('click', function () {
+                var input = el('attDateInput');
+                if (input && input.value) {
+                    loadHOSAttendance(input.value);
+                }
+            });
+        }
+        var inputAttDate = el('attDateInput');
+        if (inputAttDate) {
+            inputAttDate.addEventListener('change', function () {
+                if (inputAttDate.value) {
+                    loadHOSAttendance(inputAttDate.value);
+                }
+            });
+        }
+        var btnRefreshAtt = el('btnRefreshAttendance');
+        if (btnRefreshAtt) {
+            btnRefreshAtt.addEventListener('click', function () {
+                var input = el('attDateInput');
+                loadHOSAttendance(input ? input.value : null);
+            });
+        }
+
+        // Invigilation event listeners (B7.3)
+        var directInvigForm = el('directInvigForm');
+        if (directInvigForm) {
+            directInvigForm.addEventListener('submit', handleDirectInvigSubmit);
+        }
+
+        var btnRefreshInvig = el('btnRefreshInvig');
+        if (btnRefreshInvig) {
+            btnRefreshInvig.addEventListener('click', function () {
+                var input = el('filterInvigDate');
+                loadActiveInvigTable(input ? input.value : null);
+            });
+        }
+
+        var btnFilterInvig = el('btnFilterInvig');
+        if (btnFilterInvig) {
+            btnFilterInvig.addEventListener('click', function () {
+                var input = el('filterInvigDate');
+                if (input && input.value) {
+                    loadActiveInvigTable(input.value);
+                }
+            });
+        }
+
+        var btnClearFilterInvig = el('btnClearFilterInvig');
+        if (btnClearFilterInvig) {
+            btnClearFilterInvig.addEventListener('click', function () {
+                var input = el('filterInvigDate');
+                if (input) input.value = '';
+                loadActiveInvigTable();
+            });
+        }
+
+        var filterInvigReqStatus = el('filterInvigReqStatus');
+        if (filterInvigReqStatus) {
+            filterInvigReqStatus.addEventListener('change', function () {
+                loadHOSInvigRequests(filterInvigReqStatus.value);
+            });
+        }
+
+        var btnRefreshInvigReqs = el('btnRefreshInvigReqs');
+        if (btnRefreshInvigReqs) {
+            btnRefreshInvigReqs.addEventListener('click', function () {
+                loadHOSInvigRequests();
+            });
+        }
+
+        var btnRejectInvigClose = el('btnRejectInvigClose');
+        if (btnRejectInvigClose) {
+            btnRejectInvigClose.addEventListener('click', closeRejectInvigModal);
+        }
+
+        var btnRejectInvigCancel = el('btnRejectInvigCancel');
+        if (btnRejectInvigCancel) {
+            btnRejectInvigCancel.addEventListener('click', closeRejectInvigModal);
+        }
+
+        var btnConfirmRejectInvig = el('btnConfirmRejectInvig');
+        if (btnConfirmRejectInvig) {
+            btnConfirmRejectInvig.addEventListener('click', confirmRejectInvig);
+        }
+
+        var btnRefreshMyInvig = el('btnRefreshMyInvig');
+        if (btnRefreshMyInvig) {
+            btnRefreshMyInvig.addEventListener('click', loadMyInvigilation);
+        }
+
+        var facultyInvigRequestForm = el('facultyInvigRequestForm');
+        if (facultyInvigRequestForm) {
+            facultyInvigRequestForm.addEventListener('submit', handleFacultyInvigRequestSubmit);
+        }
+
+        // Faculty Substitution event listeners (Phase B7.5)
+        Array.prototype.forEach.call(document.querySelectorAll('.sub-tab-btn'), function (btn) {
+            btn.addEventListener('click', function () {
+                switchSubTab(btn.getAttribute('data-sub-tab'));
+            });
+        });
+
+        var btnCheckVacant = el('btnCheckVacantPeriods');
+        if (btnCheckVacant) {
+            btnCheckVacant.addEventListener('click', handleFindVacantPeriods);
+        }
+
+        var btnRefreshVacant = el('btnRefreshVacantPeriods');
+        if (btnRefreshVacant) {
+            btnRefreshVacant.addEventListener('click', handleFindVacantPeriods);
+        }
+
+        var btnRefreshIncoming = el('btnRefreshIncomingSubs');
+        if (btnRefreshIncoming) {
+            btnRefreshIncoming.addEventListener('click', loadIncomingSubstitutions);
+        }
+
+        var btnRefreshMySubs = el('btnRefreshMySubs');
+        if (btnRefreshMySubs) {
+            btnRefreshMySubs.addEventListener('click', loadMySubstitutions);
+        }
+
+        var btnRejectSubClose = el('btnRejectSubModalClose');
+        if (btnRejectSubClose) {
+            btnRejectSubClose.addEventListener('click', closeRejectSubModal);
+        }
+
+        var btnRejectSubCancel = el('btnRejectSubModalCancel');
+        if (btnRejectSubCancel) {
+            btnRejectSubCancel.addEventListener('click', closeRejectSubModal);
+        }
+
+        var btnConfirmRejectSub = el('btnConfirmRejectSub');
+        if (btnConfirmRejectSub) {
+            btnConfirmRejectSub.addEventListener('click', confirmRejectSub);
+        }
+
+        var btnRefreshHOSSubs = el('btnRefreshHOSSubs');
+        if (btnRefreshHOSSubs) {
+            btnRefreshHOSSubs.addEventListener('click', function () {
+                var d = el('filterHOSSubDate') ? el('filterHOSSubDate').value : '';
+                var s = el('filterHOSSubStatus') ? el('filterHOSSubStatus').value : '';
+                loadHOSSubstitutionsView(d, s);
+            });
+        }
+
+        var btnFilterHOSSubs = el('btnFilterHOSSubs');
+        if (btnFilterHOSSubs) {
+            btnFilterHOSSubs.addEventListener('click', function () {
+                var d = el('filterHOSSubDate') ? el('filterHOSSubDate').value : '';
+                var s = el('filterHOSSubStatus') ? el('filterHOSSubStatus').value : '';
+                loadHOSSubstitutionsView(d, s);
+            });
+        }
+
+        var btnClearFilterHOSSubs = el('btnClearFilterHOSSubs');
+        if (btnClearFilterHOSSubs) {
+            btnClearFilterHOSSubs.addEventListener('click', function () {
+                if (el('filterHOSSubDate')) el('filterHOSSubDate').value = '';
+                if (el('filterHOSSubStatus')) el('filterHOSSubStatus').value = '';
+                loadHOSSubstitutionsView();
+            });
         }
 
         setupTimetableUploads();

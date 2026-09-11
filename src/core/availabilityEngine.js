@@ -34,10 +34,20 @@ function createEngine(normalized) {
         bySlot.set(slotKey(day, period), { busy: [], free: [] });
     }));
 
+    const facultyMap = new Map((faculty || []).map(f => [(f.name || '').toUpperCase(), f]));
+
     normalized.records.forEach(record => {
         const slot = bySlot.get(slotKey(record.day, record.period));
         if (!slot) return;
-        (record.status === 'busy' ? slot.busy : slot.free).push(record);
+        if (record.status === 'busy') {
+            slot.busy.push(record);
+        } else if (record.status === 'free') {
+            const fac = facultyMap.get((record.faculty || '').toUpperCase());
+            const isInactive = (fac && fac.status === 'inactive') || record.facultyStatus === 'inactive';
+            if (!isInactive) {
+                slot.free.push(record);
+            }
+        }
     });
 
     /** Class timetable grid: one cell per day + period. */
@@ -141,7 +151,7 @@ function createEngine(normalized) {
                     busyPeriods: busy.length,
                     freePeriods: total - busy.length,
                     totalPeriods: total,
-                    subjects: [...new Set(busy.map(r => r.subject).filter(Boolean))].sort(),
+                    subjects: [...new Set((Array.isArray(member.subjects) ? member.subjects : []).concat(busy.map(r => r.subject).filter(Boolean)))].sort(),
                     classes: [...new Set(busy.map(r => r.className).filter(Boolean))].sort()
                 };
 
@@ -175,35 +185,184 @@ function createEngine(normalized) {
 
             const exclude = options.exclude
                 ? String(options.exclude).trim().toUpperCase() : null;
+            const excludedFaculty = new Set(
+                (Array.isArray(options.excludedFaculty) ? options.excludedFaculty : [])
+                    .map(x => String(typeof x === 'object' ? (x.name || x.id || x.code) : x).trim().toUpperCase())
+            );
+            if (exclude) excludedFaculty.add(exclude);
+
             const department = options.department
                 ? String(options.department).trim().toUpperCase() : null;
             const search = options.search
                 ? String(options.search).trim().toUpperCase() : null;
+            const priorityBranch = (options.priorityBranch || options.sameBranch)
+                ? String(options.priorityBranch || options.sameBranch).trim().toUpperCase() : null;
+            const validBranches = options.validBranches || null;
 
-            const matches = record =>
-                (!exclude || record.faculty.toUpperCase() !== exclude) &&
-                (!department || (record.department || '').toUpperCase() === department) &&
-                (!search || record.faculty.toUpperCase().includes(search));
+            const matches = record => {
+                const fac = facultyMap.get((record.faculty || '').toUpperCase());
+                if (fac && fac.status === 'inactive') return false;
+                if (validBranches) {
+                    const dept = (record.department || '').trim().toUpperCase();
+                    const isValid = Array.isArray(validBranches)
+                        ? validBranches.includes(dept)
+                        : (validBranches.has ? validBranches.has(dept) : true);
+                    if (!isValid) return false;
+                }
+                const facUpper = (record.faculty || '').trim().toUpperCase();
+                const facIdUpper = record.facultyId ? String(record.facultyId).trim().toUpperCase() : null;
+                if (excludedFaculty.size > 0 && (excludedFaculty.has(facUpper) || (facIdUpper && excludedFaculty.has(facIdUpper)))) {
+                    return false;
+                }
+                return (!department || (record.department || '').toUpperCase() === department) &&
+                    (!search || record.faculty.toUpperCase().includes(search));
+            };
 
-            const free = slot.free.filter(matches);
-            const busy = slot.busy.filter(matches);
+            const invigilationMap = new Map();
+            if (Array.isArray(options.invigilationFaculty)) {
+                options.invigilationFaculty.forEach(x => {
+                    const name = typeof x === 'object' ? (x.name || x.faculty) : x;
+                    const id = typeof x === 'object' ? (x.facultyId || x.id) : null;
+                    if (name) invigilationMap.set(String(name).trim().toUpperCase(), x);
+                    if (id) invigilationMap.set(String(id).trim().toUpperCase(), x);
+                });
+            }
+
+            const free = [];
+            const invigilationBusy = [];
+
+            slot.free.filter(matches).forEach(r => {
+                const facUpper = (r.faculty || '').trim().toUpperCase();
+                const facIdUpper = r.facultyId ? String(r.facultyId).trim().toUpperCase() : null;
+                const invigInfo = (invigilationMap.size > 0)
+                    ? (invigilationMap.get(facUpper) || (facIdUpper ? invigilationMap.get(facIdUpper) : null))
+                    : null;
+
+                if (invigInfo) {
+                    invigilationBusy.push({
+                        faculty: r.faculty,
+                        facultyId: r.facultyId,
+                        department: r.department,
+                        phone: r.phone || null,
+                        subject: 'Exam Invigilation',
+                        className: typeof invigInfo === 'object' && invigInfo.notes ? invigInfo.notes : 'Exam Duty',
+                        room: null,
+                        status: 'busy',
+                        isInvigilation: true,
+                        isSameBranch: Boolean(priorityBranch && (r.department || '').trim().toUpperCase() === priorityBranch)
+                    });
+                } else {
+                    free.push(r);
+                }
+            });
+
+            const busy = [
+                ...slot.busy.filter(matches).map(r => {
+                    const facUpper = (r.faculty || '').trim().toUpperCase();
+                    const facIdUpper = r.facultyId ? String(r.facultyId).trim().toUpperCase() : null;
+                    const invigInfo = (invigilationMap.size > 0)
+                        ? (invigilationMap.get(facUpper) || (facIdUpper ? invigilationMap.get(facIdUpper) : null))
+                        : null;
+                    if (invigInfo) {
+                        return { ...r, isInvigilation: true };
+                    }
+                    return r;
+                }),
+                ...invigilationBusy
+            ];
+
+            let orderedFree = free;
+            let sameBranchFree = [];
+            let otherBranchFree = [];
+
+            if (priorityBranch) {
+                free.forEach(r => {
+                    const dept = (r.department || '').trim().toUpperCase();
+                    if (dept === priorityBranch) {
+                        sameBranchFree.push(r);
+                    } else {
+                        otherBranchFree.push(r);
+                    }
+                });
+
+                sameBranchFree.sort((a, b) => a.faculty.localeCompare(b.faculty));
+                otherBranchFree.sort((a, b) => {
+                    const d1 = (a.department || '').toUpperCase();
+                    const d2 = (b.department || '').toUpperCase();
+                    if (d1 !== d2) return d1.localeCompare(d2);
+                    return a.faculty.localeCompare(b.faculty);
+                });
+
+                orderedFree = [...sameBranchFree, ...otherBranchFree];
+            }
 
             return {
                 day,
                 period,
-                availableFaculty: free.map(r => r.faculty),
-                available: free.map(r => ({
-                    faculty: r.faculty, facultyId: r.facultyId, department: r.department,
-                    phone: r.phone || null, status: 'free'
-                })),
-                busy: busy.map(r => ({
-                    faculty: r.faculty, facultyId: r.facultyId, department: r.department,
+                priorityBranch: priorityBranch || null,
+                availableFaculty: orderedFree.map(r => r.faculty),
+                available: orderedFree.map(r => ({
+                    faculty: r.faculty,
+                    facultyId: r.facultyId,
+                    facultyName: r.faculty,
+                    name: r.faculty,
+                    department: r.department,
+                    branch: r.department,
                     phone: r.phone || null,
-                    subject: r.subject, className: r.className, room: r.room, status: 'busy'
+                    status: 'free',
+                    reason: null,
+                    isSameBranch: Boolean(priorityBranch && (r.department || '').trim().toUpperCase() === priorityBranch)
                 })),
-                totalAvailable: free.length,
+                sameBranch: priorityBranch ? {
+                    branch: priorityBranch,
+                    available: sameBranchFree.map(r => ({
+                        faculty: r.faculty,
+                        facultyId: r.facultyId,
+                        facultyName: r.faculty,
+                        name: r.faculty,
+                        department: r.department,
+                        branch: r.department,
+                        phone: r.phone || null,
+                        status: 'free',
+                        reason: null,
+                        isSameBranch: true
+                    })),
+                    totalAvailable: sameBranchFree.length
+                } : null,
+                otherBranches: priorityBranch ? {
+                    available: otherBranchFree.map(r => ({
+                        faculty: r.faculty,
+                        facultyId: r.facultyId,
+                        facultyName: r.faculty,
+                        name: r.faculty,
+                        department: r.department,
+                        branch: r.department,
+                        phone: r.phone || null,
+                        status: 'free',
+                        reason: null,
+                        isSameBranch: false
+                    })),
+                    totalAvailable: otherBranchFree.length
+                } : null,
+                busy: busy.map(r => ({
+                    faculty: r.faculty,
+                    facultyId: r.facultyId,
+                    facultyName: r.faculty,
+                    name: r.faculty,
+                    department: r.department,
+                    branch: r.department,
+                    phone: r.phone || null,
+                    subject: r.subject,
+                    className: r.className,
+                    room: r.room,
+                    status: 'busy',
+                    reason: r.isInvigilation ? 'INVIGILATION' : 'TEACHING',
+                    isInvigilation: Boolean(r.isInvigilation),
+                    isSameBranch: Boolean(priorityBranch && (r.department || '').trim().toUpperCase() === priorityBranch)
+                })),
+                totalAvailable: orderedFree.length,
                 totalBusy: busy.length,
-                totalFaculty: free.length + busy.length
+                totalFaculty: orderedFree.length + busy.length
             };
         },
 

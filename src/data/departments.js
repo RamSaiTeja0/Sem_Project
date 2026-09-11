@@ -28,7 +28,8 @@ if (config.branchCode && config.branchName) {
         code: config.branchCode.toUpperCase(),
         name: config.branchName,
         academicYear: config.academicYear || null,
-        semester: config.semester || null
+        semester: config.semester || null,
+        totalSemesters: config.totalSemesters ? parseInt(config.totalSemesters, 10) : 6
     };
     branches.set(envBranch.code, envBranch);
     syncDepartments();
@@ -42,17 +43,29 @@ function registerBranch(branchData = {}) {
     const academicYear = branchData.academicYear ? String(branchData.academicYear).trim() : null;
     const parsedSem = branchData.semester != null ? parseInt(branchData.semester, 10) : null;
     const semester = Number.isFinite(parsedSem) ? parsedSem : null;
+    const rawTotal = branchData.totalSemesters != null ? branchData.totalSemesters : branchData.total_semesters;
+    const parsedTotal = rawTotal != null ? parseInt(rawTotal, 10) : null;
+    const totalSemesters = Number.isFinite(parsedTotal) && parsedTotal > 0 ? parsedTotal : 6;
 
     const b = {
         configured: true,
         code,
         name,
         academicYear,
-        semester
+        semester,
+        totalSemesters
     };
     branches.set(code, b);
     syncDepartments();
     return b;
+}
+
+function getRegisteredBranchCodes() {
+    const set = new Set();
+    for (const code of branches.keys()) {
+        if (code) set.add(code.toUpperCase());
+    }
+    return Array.from(set);
 }
 
 function isBranchRegistered(code) {
@@ -89,7 +102,8 @@ function getBranch(code = null) {
         code: null,
         name: null,
         academicYear: null,
-        semester: null
+        semester: null,
+        totalSemesters: 6
     };
 }
 
@@ -108,6 +122,11 @@ function setBranch(changes = {}) {
             const parsed = parseInt(changes.semester, 10);
             if (Number.isFinite(parsed)) existing.semester = parsed;
         }
+        const rawTotal = changes.totalSemesters != null ? changes.totalSemesters : changes.total_semesters;
+        if (rawTotal != null) {
+            const parsed = parseInt(rawTotal, 10);
+            if (Number.isFinite(parsed) && parsed > 0) existing.totalSemesters = parsed;
+        }
         syncDepartments();
         return existing;
     }
@@ -120,6 +139,11 @@ function setBranch(changes = {}) {
             const parsed = parseInt(changes.semester, 10);
             if (Number.isFinite(parsed)) first.semester = parsed;
         }
+        const rawTotal = changes.totalSemesters != null ? changes.totalSemesters : changes.total_semesters;
+        if (rawTotal != null) {
+            const parsed = parseInt(rawTotal, 10);
+            if (Number.isFinite(parsed) && parsed > 0) first.totalSemesters = parsed;
+        }
         syncDepartments();
         return first;
     }
@@ -129,7 +153,8 @@ function setBranch(changes = {}) {
             code: code || 'BRANCH',
             name: name || 'Branch',
             academicYear: changes.academicYear,
-            semester: changes.semester
+            semester: changes.semester,
+            totalSemesters: changes.totalSemesters || changes.total_semesters || 6
         });
     }
 
@@ -145,12 +170,19 @@ function resetBranchForTesting() {
             code: config.branchCode.toUpperCase(),
             name: config.branchName,
             academicYear: config.academicYear || null,
-            semester: config.semester || null
+            semester: config.semester || null,
+            totalSemesters: config.totalSemesters ? parseInt(config.totalSemesters, 10) : 6
         };
         branches.set(envBranch.code, envBranch);
         syncDepartments();
     }
     return getBranch();
+}
+
+function getBranchSemesters(branchCode = null) {
+    const branch = getBranch(branchCode);
+    const count = (branch && branch.totalSemesters && branch.totalSemesters > 0) ? branch.totalSemesters : 6;
+    return Array.from({ length: count }, (_, i) => `SEM-${i + 1}`);
 }
 
 function find(code) {
@@ -181,10 +213,12 @@ module.exports = {
     getBranch,
     setBranch,
     resetBranchForTesting,
+    getBranchSemesters,
     find,
     nameFor,
     codes,
     list,
     isConfigured,
-    isBranchRegistered
+    isBranchRegistered,
+    getRegisteredBranchCodes
 };

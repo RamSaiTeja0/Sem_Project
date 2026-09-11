@@ -24,9 +24,18 @@
       <button type="button" class="nav-item is-active" data-view="dashboard">Dashboard</button>
       <button type="button" class="nav-item" data-view="availability" id="navAvailability">Faculty Availability</button>
       <button type="button" class="nav-item" data-view="substitute" id="navSubstitute">Adjust / Substitute</button>
+      <button type="button" class="nav-item" data-view="attendance" id="navAttendance" style="display:none;">Faculty Attendance</button>
+      <button type="button" class="nav-item" data-view="my-attendance" id="navMyAttendance" style="display:none;">My Attendance</button>
+      <button type="button" class="nav-item" data-view="invigilation" id="navInvigilation" style="display:none;">Exam Invigilation</button>
+      <button type="button" class="nav-item" data-view="invig-requests" id="navInvigRequests" style="display:none;">Invigilation Requests <span class="badge badge-warning" id="pendingInvigRequestsCount" style="display:none; margin-left:auto; font-size:0.72rem; padding:1px 6px;">0</span></button>
+      <button type="button" class="nav-item" data-view="my-invigilation" id="navMyInvigilation" style="display:none;">My Invigilation</button>
+      <button type="button" class="nav-item" data-view="request-invigilation" id="navRequestInvigilation" style="display:none;">Request Invigilation</button>
+      <button type="button" class="nav-item" data-view="faculty-substitutions" id="navFacultySubstitutions" style="display:none;">Faculty Substitutions <span class="badge badge-warning" id="pendingSubstitutionsCount" style="display:none; margin-left:auto; font-size:0.72rem; padding:1px 6px;">0</span></button>
+      <button type="button" class="nav-item" data-view="hos-substitutions" id="navHosSubstitutions" style="display:none;">Branch Substitutions</button>
       <button type="button" class="nav-item" data-view="schedule" id="navSchedule">My Timetable</button>
       <button type="button" class="nav-item" data-view="timetable" id="navTimetable">Master Timetable</button>
       <button type="button" class="nav-item" data-view="faculty" id="navFaculty">Faculty Management</button>
+      <button type="button" class="nav-item" data-view="requests" id="navRequests" style="display:none;">Faculty Requests <span class="badge badge-warning" id="pendingRequestsCount" style="display:none; margin-left:auto; font-size:0.72rem; padding:1px 6px;">0</span></button>
 
       <div class="nav-label" id="navManageLabel">Manage</div>
       <button type="button" class="nav-item" data-view="manage" id="navManage">Add Timetable</button>
@@ -353,22 +362,24 @@
         <div class="card" id="availHOSCard" style="margin-bottom: 24px;">
           <div class="card-head">
             <div>
-              <h2>Faculty Availability Finder</h2>
-              <p>Determine which faculty members in this branch are free or busy during a specific period when a faculty member is absent.</p>
+              <h2>Faculty Availability & Substitution Preparation</h2>
+              <p>Check real-time faculty availability and candidate rankings for vacant periods.</p>
             </div>
             <span class="badge badge-primary" id="availBranchBadge">Branch</span>
           </div>
           <div class="card-body">
-            <div class="field-grid" style="grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 14px; align-items: flex-end;">
-              <label class="field"><span>Absent Faculty</span><select id="availAbsentFaculty"></select></label>
-              <label class="field"><span>Day</span><select id="availDay"></select></label>
+            <div class="field-grid" style="grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 14px; align-items: flex-end;">
+              <label class="field"><span>Date</span><input type="date" id="availDate" /></label>
               <label class="field"><span>Period</span><select id="availPeriod"></select></label>
+              <label class="field"><span>Day</span><select id="availDay"></select></label>
+              <label class="field"><span>Class / Section</span><select id="availClassSection"></select></label>
+              <label class="field"><span>Absent Faculty (Optional)</span><select id="availAbsentFaculty"></select></label>
               <div class="field" style="margin-bottom: 0;">
-                <button type="button" class="btn btn-primary" id="availCheckBtn" style="width: 100%;">Check Availability</button>
+                <button type="button" class="btn btn-primary" id="availCheckBtn" style="width: 100%;">Check Candidates</button>
               </div>
             </div>
             <div id="availHOSResult" class="result-panel" style="margin-top: 18px;">
-              <p class="muted">Select an absent faculty member, day, and period, then click Check Availability.</p>
+              <p class="muted">Select date and period, then click Check Candidates to view availability and substitute rankings.</p>
             </div>
           </div>
         </div>
@@ -520,6 +531,10 @@ Prof. B. Kumar, FREE, FREE, Database Management Systems"></textarea>
                 <button type="button" class="btn btn-secondary" id="btnHosChooseFile">Choose File</button>
                 <button type="submit" class="btn btn-primary" id="btnHosUpload" disabled>Upload</button>
               </div>
+              <div style="display: flex; gap: 12px; margin-top: 10px; flex-wrap: wrap;">
+                <label class="field inline" id="hosUploadSemWrap"><span>Target Semester</span><select id="hosUploadSemester" name="semester"></select></label>
+                <label class="field inline" id="hosUploadSecWrap"><span>Target Section</span><select id="hosUploadSection" name="section"></select></label>
+              </div>
               <div id="hosSelectedFile" style="margin-top: 10px; font-size: 0.9rem; color: var(--ink-700);">
                 Selected file: <span id="hosSelectedFileName" class="mono" style="font-weight: 600;">None</span>
               </div>
@@ -618,11 +633,15 @@ Prof. B. Kumar, FREE, FREE, Database Management Systems"></textarea>
               <h2>Master Timetable</h2>
               <p>Every cell is clickable. Clicking sends its day and period to the availability engine.</p>
             </div>
-            <div class="head-actions">
+            <div class="head-actions" style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px;">
               <span class="badge badge-primary" id="ttBranchBadge">Branch</span>
               <button type="button" class="btn btn-sm btn-primary" id="ttManageBtn">+ Add / Edit Entry</button>
               <label class="field inline" style="display:none;"><select id="ttDept"></select></label>
-              <label class="field inline"><span>View</span><select id="ttView"></select></label>
+              <label class="field inline" id="ttYearWrap"><span>Year</span><select id="ttAcademicYear"></select></label>
+              <label class="field inline" id="ttSemWrap"><span>Semester</span><select id="ttSemester"></select></label>
+              <label class="field inline" id="ttSecWrap"><span>Section</span><select id="ttSection"></select></label>
+              <button type="button" class="btn btn-sm btn-danger" id="btnTtClearScope" title="Clear all timetable slots for this semester and section">Clear Timetable</button>
+              <label class="field inline" style="display:none;"><select id="ttView"></select></label>
             </div>
           </div>
           <div class="card-body">
@@ -769,13 +788,14 @@ Prof. B. Kumar, FREE, FREE, Database Management Systems"></textarea>
           <div class="card-body">
             <p class="muted" id="facCount" style="margin-bottom:10px;"></p>
             <div class="table-scroll">
-              <table class="data directory">
+              <table class="data directory directory-wide">
                 <thead>
                   <tr>
                     <th>Faculty ID</th><th>Name</th><th>Branch</th>
                     <th>Designation</th><th>Phone</th><th>Email</th>
                     <th class="num">Busy</th><th class="num">Free</th>
                     <th>Load</th><th>Availability</th><th>Subjects</th><th>Classes</th><th>Status</th>
+                    <th>Actions</th>
                   </tr>
                 </thead>
                 <tbody id="facBody"></tbody>
@@ -783,10 +803,725 @@ Prof. B. Kumar, FREE, FREE, Database Management Systems"></textarea>
             </div>
           </div>
         </div>
+
+        <!-- Edit Faculty Modal (Phase B6.1) -->
+        <div id="editFacultyModal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(15,23,42,0.6); z-index:1000; align-items:center; justify-content:center; padding:16px;">
+          <div class="card" style="max-width:540px; width:100%; margin:auto; box-shadow:var(--shadow-lg, 0 10px 25px rgba(0,0,0,0.2)); border-radius:var(--radius-md);">
+            <div class="card-head" style="border-bottom:1px solid var(--border); padding-bottom:12px;">
+              <div>
+                <h3 style="margin:0; font-size:1.15rem;">Edit Faculty Details</h3>
+                <p class="muted" style="margin:4px 0 0; font-size:0.84rem;">Update name, phone, designation, and subject expertise.</p>
+              </div>
+              <button type="button" class="btn btn-ghost btn-sm" id="btnEditFacClose" style="font-size:1.1rem; line-height:1; padding:4px 8px;">✕</button>
+            </div>
+            <div class="card-body" style="padding-top:16px;">
+              <form id="editFacultyForm" autocomplete="off">
+                <input type="hidden" id="editFacId" />
+                <div class="controls" style="display:flex; flex-direction:column; gap:12px;">
+                  <div style="display:flex; gap:10px; align-items:center; background:var(--canvas-subtle); padding:10px 14px; border-radius:var(--radius-sm); border:1px solid var(--line);">
+                    <span style="font-size:0.82rem; font-weight:600; color:var(--ink-600);">Faculty ID:</span>
+                    <span id="editFacIdDisplay" class="mono" style="font-weight:700; color:var(--ink-900);">—</span>
+                    <span style="margin-left:auto; font-size:0.82rem; font-weight:600; color:var(--ink-600);">Branch:</span>
+                    <span id="editFacBranchDisplay" class="badge badge-primary">—</span>
+                  </div>
+
+                  <label class="field">
+                    <span>Full Name <em class="req" style="color:var(--danger-500);">*</em></span>
+                    <input type="text" id="editFacName" placeholder="Faculty name" required />
+                  </label>
+
+                  <label class="field">
+                    <span>Phone Number <em class="req" style="color:var(--danger-500);">*</em></span>
+                    <input type="text" id="editFacPhone" placeholder="Phone number" required />
+                  </label>
+
+                  <label class="field">
+                    <span>Designation / Category</span>
+                    <select id="editFacDesignation">
+                      <option value="Professor">Professor</option>
+                      <option value="Associate Professor">Associate Professor</option>
+                      <option value="Assistant Professor">Assistant Professor</option>
+                      <option value="Senior Lecturer">Senior Lecturer</option>
+                      <option value="Lecturer">Lecturer</option>
+                      <option value="Visiting Faculty">Visiting Faculty</option>
+                      <option value="Faculty">Faculty</option>
+                    </select>
+                  </label>
+
+                  <label class="field">
+                    <span>Subjects / Expertise (comma-separated) <em class="req" style="color:var(--danger-500);">*</em></span>
+                    <input type="text" id="editFacSubjects" placeholder="e.g. Data Structures, DBMS" required />
+                  </label>
+
+                  <div id="editFacNote" style="display:none; margin-top:6px;"></div>
+
+                  <div style="display:flex; gap:10px; justify-content:flex-end; margin-top:14px; padding-top:12px; border-top:1px solid var(--border);">
+                    <button type="button" class="btn btn-secondary" id="btnEditFacCancel">Cancel</button>
+                    <button type="submit" class="btn btn-primary" id="btnEditFacSave">Save Changes</button>
+                  </div>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ---------------- FACULTY REGISTRATION REQUESTS ---------------- -->
+      <section class="view" id="view-requests">
+        <div class="card">
+          <div class="card-head">
+            <div>
+              <h2>Faculty Registration Requests</h2>
+              <p>Review self-registration requests from faculty for your branch. Approving a request creates the faculty account and enables sign-in.</p>
+            </div>
+            <div class="head-actions">
+              <span class="badge badge-primary" id="reqBranchBadge">Branch</span>
+              <button type="button" class="btn btn-secondary btn-sm" id="btnRefreshRequests">↻ Refresh</button>
+            </div>
+          </div>
+          <div class="card-body">
+            <div id="requestsAlertBox" style="display:none; margin-bottom:14px;"></div>
+            <div class="table-scroll">
+              <table class="data directory" id="requestsTable">
+                <thead>
+                  <tr>
+                    <th>Full Name</th>
+                    <th>Username</th>
+                    <th>Phone</th>
+                    <th>Designation</th>
+                    <th>Subjects / Expertise</th>
+                    <th>Requested At</th>
+                    <th>Status</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="requestsTableBody"></tbody>
+              </table>
+            </div>
+            <div id="requestsEmptyNotice" class="notice notice-info" style="display:none; margin-top:12px;">
+              No faculty registration requests found for your branch.
+            </div>
+          </div>
+        </div>
+
+        <!-- Reject Request Modal -->
+        <div id="rejectRequestModal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(15,23,42,0.6); z-index:1000; align-items:center; justify-content:center; padding:16px;">
+          <div class="card" style="max-width:480px; width:100%; margin:auto; box-shadow:var(--shadow-lg, 0 10px 25px rgba(0,0,0,0.2)); border-radius:var(--radius-md);">
+            <div class="card-head" style="border-bottom:1px solid var(--border); padding-bottom:12px;">
+              <div>
+                <h3 style="margin:0; font-size:1.1rem;">Reject Faculty Request</h3>
+                <p class="muted" style="margin:4px 0 0; font-size:0.82rem;">Optionally specify a reason for rejecting this request.</p>
+              </div>
+              <button type="button" class="btn btn-ghost btn-sm" id="btnRejectModalClose" style="font-size:1.1rem; line-height:1; padding:4px 8px;">✕</button>
+            </div>
+            <div class="card-body" style="padding-top:16px;">
+              <input type="hidden" id="rejectTargetId" />
+              <label class="field">
+                <span>Rejection Reason (optional)</span>
+                <input type="text" id="rejectReasonInput" placeholder="e.g. Unverified faculty credentials or branch mismatch" />
+              </label>
+              <div style="display:flex; gap:10px; justify-content:flex-end; margin-top:16px;">
+                <button type="button" class="btn btn-secondary" id="btnRejectModalCancel">Cancel</button>
+                <button type="button" class="btn btn-danger" id="btnConfirmReject">Confirm Rejection</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ---------------- FACULTY ATTENDANCE (HOS) ---------------- -->
+      <section class="view" id="view-attendance">
+        <div class="card">
+          <div class="card-head">
+            <div>
+              <h2>Faculty Attendance</h2>
+              <p>Mark daily faculty attendance / absence for your branch. Active faculty are PRESENT by default.</p>
+            </div>
+            <div class="head-actions">
+              <span class="badge badge-primary" id="attBranchBadge">Branch</span>
+              <button type="button" class="btn btn-secondary btn-sm" id="btnRefreshAttendance">↻ Refresh</button>
+            </div>
+          </div>
+          <div class="card-body">
+            <div class="controls" style="align-items:flex-end; margin-bottom:18px;">
+              <label class="field" style="max-width:220px;">
+                <span>Select Date</span>
+                <input type="date" id="attDateInput" />
+              </label>
+              <button type="button" class="btn" id="btnLoadAttendance">View Date</button>
+              <span id="attDateDisplay" class="muted" style="margin-left:8px; font-weight:500;"></span>
+            </div>
+
+            <div id="attendanceAlertBox" style="display:none; margin-bottom:14px;"></div>
+
+            <div class="table-scroll">
+              <table class="data" id="attendanceTable">
+                <thead>
+                  <tr>
+                    <th>Faculty Name</th>
+                    <th>Designation</th>
+                    <th>Department</th>
+                    <th>Phone</th>
+                    <th>Status</th>
+                    <th>Action</th>
+                  </tr>
+                </thead>
+                <tbody id="attendanceTableBody"></tbody>
+              </table>
+            </div>
+
+            <div id="attendanceEmptyNotice" class="notice notice-info" style="display:none; margin-top:12px;">
+              No faculty found in your branch.
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ---------------- MY ATTENDANCE (FACULTY READ-ONLY) ---------------- -->
+      <section class="view" id="view-my-attendance">
+        <div class="card">
+          <div class="card-head">
+            <div>
+              <h2>My Attendance</h2>
+              <p>Your date-specific attendance history. Attendance is managed by your Head of Section (HOS).</p>
+            </div>
+            <span class="badge badge-info">Read Only</span>
+          </div>
+          <div class="card-body">
+            <div class="table-scroll">
+              <table class="data" id="myAttendanceTable">
+                <thead>
+                  <tr>
+                    <th>Date</th>
+                    <th>Day</th>
+                    <th>Status</th>
+                    <th>Marked By</th>
+                  </tr>
+                </thead>
+                <tbody id="myAttendanceTableBody"></tbody>
+              </table>
+            </div>
+
+            <div id="myAttendanceEmptyNotice" class="notice notice-info" style="display:none; margin-top:12px;">
+              No attendance records logged yet. Active faculty are PRESENT by default.
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ---------------- EXAM INVIGILATION (HOS) ---------------- -->
+      <section class="view" id="view-invigilation">
+        <!-- Card 1: Direct Invigilation Assignment -->
+        <div class="card" style="margin-bottom:20px;">
+          <div class="card-head">
+            <div>
+              <h2>Assign Exam Invigilation</h2>
+              <p>Directly schedule faculty for exam invigilation duties. Faculty remain PRESENT in college, but become BUSY during assigned periods.</p>
+            </div>
+            <span class="badge badge-primary" id="invigBranchBadge">Branch</span>
+          </div>
+          <div class="card-body">
+            <form id="directInvigForm" autocomplete="off">
+              <div class="field-grid" style="grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px;">
+                <label class="field">
+                  <span>Faculty Member</span>
+                  <select id="directInvigFaculty" required>
+                    <option value="">Select faculty…</option>
+                  </select>
+                </label>
+                <label class="field">
+                  <span>Exam Date</span>
+                  <input type="date" id="directInvigDate" required />
+                </label>
+              </div>
+
+              <div style="margin-top:14px;">
+                <label class="field-label" style="display:block; font-size:0.88rem; font-weight:600; margin-bottom:8px;">Select Periods</label>
+                <div id="directInvigPeriodsWrap" style="display:flex; flex-wrap:wrap; gap:10px; align-items:center;">
+                  <!-- Dynamic checkboxes populated from /api/invigilation/periods -->
+                </div>
+              </div>
+
+              <div style="margin-top:14px;">
+                <label class="field">
+                  <span>Exam / Duty Details (Optional)</span>
+                  <input type="text" id="directInvigNotes" placeholder="e.g. Mid-term Exam Hall 204" />
+                </label>
+              </div>
+
+              <div id="directInvigAlert" style="display:none; margin-top:12px;"></div>
+
+              <div style="margin-top:16px;">
+                <button type="submit" class="btn btn-primary" id="btnAssignInvig">Assign Invigilation</button>
+              </div>
+            </form>
+          </div>
+        </div>
+
+        <!-- Card 2: Active Invigilation Assignments Table -->
+        <div class="card">
+          <div class="card-head">
+            <div>
+              <h2>Active Invigilation Duties</h2>
+              <p>Official scheduled invigilations for faculty in your branch.</p>
+            </div>
+            <div class="head-actions">
+              <button type="button" class="btn btn-secondary btn-sm" id="btnRefreshInvig">↻ Refresh</button>
+            </div>
+          </div>
+          <div class="card-body">
+            <div class="controls" style="align-items:flex-end; margin-bottom:18px;">
+              <label class="field" style="max-width:200px;">
+                <span>Filter by Date</span>
+                <input type="date" id="filterInvigDate" />
+              </label>
+              <button type="button" class="btn btn-secondary" id="btnFilterInvig">Filter</button>
+              <button type="button" class="btn btn-ghost" id="btnClearFilterInvig">Clear Filter</button>
+            </div>
+
+            <div class="table-scroll">
+              <table class="data" id="activeInvigTable">
+                <thead>
+                  <tr>
+                    <th>Faculty Name</th>
+                    <th>Date</th>
+                    <th>Day</th>
+                    <th>Period</th>
+                    <th>Source</th>
+                    <th>Details</th>
+                    <th>Action</th>
+                  </tr>
+                </thead>
+                <tbody id="activeInvigTableBody"></tbody>
+              </table>
+            </div>
+
+            <div id="activeInvigEmptyNotice" class="notice notice-info" style="display:none; margin-top:12px;">
+              No active invigilation duties scheduled.
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ---------------- INVIGILATION REQUESTS (HOS REVIEW) ---------------- -->
+      <section class="view" id="view-invig-requests">
+        <div class="card">
+          <div class="card-head">
+            <div>
+              <h2>Faculty Invigilation Requests</h2>
+              <p>Review and approve faculty-submitted requests for exam invigilation supervision duties.</p>
+            </div>
+            <div class="head-actions">
+              <select id="filterInvigReqStatus" style="padding:4px 8px; font-size:0.88rem; border-radius:var(--radius-sm); border:1px solid var(--border);">
+                <option value="">All Statuses</option>
+                <option value="PENDING" selected>Pending</option>
+                <option value="APPROVED">Approved</option>
+                <option value="REJECTED">Rejected</option>
+              </select>
+              <button type="button" class="btn btn-secondary btn-sm" id="btnRefreshInvigReqs">↻ Refresh</button>
+            </div>
+          </div>
+          <div class="card-body">
+            <div id="invigReqReviewAlert" style="display:none; margin-bottom:14px;"></div>
+
+            <div class="table-scroll">
+              <table class="data directory" id="invigRequestsTable">
+                <thead>
+                  <tr>
+                    <th>Faculty Name</th>
+                    <th>Exam Date</th>
+                    <th>Day</th>
+                    <th>Periods</th>
+                    <th>Reason / Details</th>
+                    <th>Status</th>
+                    <th>Submitted</th>
+                    <th>Action</th>
+                  </tr>
+                </thead>
+                <tbody id="invigRequestsTableBody"></tbody>
+              </table>
+            </div>
+
+            <div id="invigRequestsEmptyNotice" class="notice notice-info" style="display:none; margin-top:12px;">
+              No invigilation requests found for your branch.
+            </div>
+          </div>
+        </div>
+
+        <!-- Reject Invigilation Request Modal -->
+        <div id="rejectInvigModal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(15,23,42,0.6); z-index:1000; align-items:center; justify-content:center; padding:16px;">
+          <div class="card" style="max-width:480px; width:100%; margin:auto; box-shadow:var(--shadow-lg, 0 10px 25px rgba(0,0,0,0.2)); border-radius:var(--radius-md);">
+            <div class="card-head" style="border-bottom:1px solid var(--border); padding-bottom:12px;">
+              <div>
+                <h3 style="margin:0; font-size:1.1rem;">Reject Invigilation Request</h3>
+                <p class="muted" style="margin:4px 0 0; font-size:0.82rem;">Optionally specify a reason for rejecting this invigilation request.</p>
+              </div>
+              <button type="button" class="btn btn-ghost btn-sm" id="btnRejectInvigClose" style="font-size:1.1rem; line-height:1; padding:4px 8px;">✕</button>
+            </div>
+            <div class="card-body" style="padding-top:16px;">
+              <input type="hidden" id="rejectInvigTargetId" />
+              <label class="field">
+                <span>Rejection Reason (optional)</span>
+                <input type="text" id="rejectInvigReasonInput" placeholder="e.g. Schedule clash or already sufficient invigilators assigned" />
+              </label>
+              <div style="display:flex; gap:10px; justify-content:flex-end; margin-top:16px;">
+                <button type="button" class="btn btn-secondary" id="btnRejectInvigCancel">Cancel</button>
+                <button type="button" class="btn btn-danger" id="btnConfirmRejectInvig">Confirm Rejection</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ---------------- MY INVIGILATION (FACULTY READ-ONLY) ---------------- -->
+      <section class="view" id="view-my-invigilation">
+        <!-- Active Invigilation Duties -->
+        <div class="card" style="margin-bottom:20px;">
+          <div class="card-head">
+            <div>
+              <h2>My Scheduled Invigilations</h2>
+              <p>Your active exam invigilation duties. During these periods, you are marked as occupied for exam supervision.</p>
+            </div>
+            <span class="badge badge-info">Read Only</span>
+          </div>
+          <div class="card-body">
+            <div class="table-scroll">
+              <table class="data" id="myInvigTable">
+                <thead>
+                  <tr>
+                    <th>Date</th>
+                    <th>Day</th>
+                    <th>Period</th>
+                    <th>Source</th>
+                    <th>Details</th>
+                    <th>Assigned By</th>
+                  </tr>
+                </thead>
+                <tbody id="myInvigTableBody"></tbody>
+              </table>
+            </div>
+
+            <div id="myInvigEmptyNotice" class="notice notice-info" style="display:none; margin-top:12px;">
+              You have no active invigilation assignments.
+            </div>
+          </div>
+        </div>
+
+        <!-- My Submitted Requests -->
+        <div class="card">
+          <div class="card-head">
+            <div>
+              <h2>My Invigilation Requests</h2>
+              <p>Status of your submitted requests for exam supervision duties.</p>
+            </div>
+            <button type="button" class="btn btn-secondary btn-sm" id="btnRefreshMyInvig">↻ Refresh</button>
+          </div>
+          <div class="card-body">
+            <div class="table-scroll">
+              <table class="data" id="myInvigRequestsTable">
+                <thead>
+                  <tr>
+                    <th>Exam Date</th>
+                    <th>Day</th>
+                    <th>Periods</th>
+                    <th>Reason / Details</th>
+                    <th>Status</th>
+                    <th>Review Notes</th>
+                  </tr>
+                </thead>
+                <tbody id="myInvigRequestsTableBody"></tbody>
+              </table>
+            </div>
+
+            <div id="myInvigRequestsEmptyNotice" class="notice notice-info" style="display:none; margin-top:12px;">
+              You have not submitted any invigilation requests yet.
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ---------------- REQUEST INVIGILATION (FACULTY FORM) ---------------- -->
+      <section class="view" id="view-request-invigilation">
+        <div class="card" style="max-width:700px;">
+          <div class="card-head">
+            <div>
+              <h2>Request Exam Invigilation</h2>
+              <p>Submit a request to be assigned to exam invigilation duty. Your Head of Section (HOS) will review and approve it.</p>
+            </div>
+          </div>
+          <div class="card-body">
+            <form id="facultyInvigRequestForm" autocomplete="off">
+              <label class="field" style="margin-bottom:14px;">
+                <span>Exam Date</span>
+                <input type="date" id="facultyInvigDate" required />
+              </label>
+
+              <div style="margin-bottom:14px;">
+                <label class="field-label" style="display:block; font-size:0.88rem; font-weight:600; margin-bottom:8px;">Select Periods</label>
+                <div id="facultyInvigPeriodsWrap" style="display:flex; flex-wrap:wrap; gap:10px; align-items:center;">
+                  <!-- Dynamic checkboxes populated from /api/invigilation/periods -->
+                </div>
+              </div>
+
+              <label class="field" style="margin-bottom:14px;">
+                <span>Reason / Exam Details</span>
+                <input type="text" id="facultyInvigReason" placeholder="e.g. End Semester Exam Invigilation in Hall B" />
+              </label>
+
+              <div id="facultyInvigAlert" style="display:none; margin-top:12px;"></div>
+
+              <div style="margin-top:18px;">
+                <button type="submit" class="btn btn-primary" id="btnSubmitFacultyInvig">Submit Request</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      </section>
+
+      <!-- ---------------- FACULTY SUBSTITUTIONS (FACULTY WORKFLOW) ---------------- -->
+      <section class="view" id="view-faculty-substitutions">
+        <!-- Tab navigation -->
+        <div style="display:flex; gap:10px; margin-bottom:18px; border-bottom:1px solid var(--border); padding-bottom:8px;">
+          <button type="button" class="btn btn-primary btn-sm sub-tab-btn" id="tabBtnSubRequest" data-sub-tab="request">Request Substitute</button>
+          <button type="button" class="btn btn-secondary btn-sm sub-tab-btn" id="tabBtnSubIncoming" data-sub-tab="incoming">Incoming Requests <span class="badge badge-warning" id="tabIncomingCount" style="display:none; margin-left:4px; font-size:0.72rem; padding:1px 6px;">0</span></button>
+          <button type="button" class="btn btn-secondary btn-sm sub-tab-btn" id="tabBtnSubHistory" data-sub-tab="history">My History</button>
+        </div>
+
+        <!-- Sub Tab 1: Request Substitute -->
+        <div id="subTabRequest">
+          <div class="card" style="margin-bottom:20px;">
+            <div class="card-head">
+              <div>
+                <h2>Step 1: Select Vacant Period</h2>
+                <p>Pick a date you are marked ABSENT to view your vacant teaching periods.</p>
+              </div>
+              <button type="button" class="btn btn-secondary btn-sm" id="btnRefreshVacantPeriods">↻ Refresh</button>
+            </div>
+            <div class="card-body">
+              <div class="controls" style="align-items:flex-end; margin-bottom:14px;">
+                <label class="field" style="max-width:220px;">
+                  <span>Absent Date</span>
+                  <input type="date" id="subRequestDate" />
+                </label>
+                <button type="button" class="btn" id="btnCheckVacantPeriods">Find My Vacant Periods</button>
+              </div>
+              <div id="vacantPeriodsAlert" style="display:none; margin-bottom:12px;"></div>
+              <div class="table-scroll">
+                <table class="data" id="vacantPeriodsTable">
+                  <thead>
+                    <tr>
+                      <th>Date</th>
+                      <th>Day</th>
+                      <th>Period</th>
+                      <th>Class</th>
+                      <th>Subject</th>
+                      <th>Room</th>
+                      <th>Action</th>
+                    </tr>
+                  </thead>
+                  <tbody id="vacantPeriodsTableBody">
+                    <tr><td colspan="7" class="muted">Enter a date when you are marked absent and click "Find My Vacant Periods".</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+
+          <!-- Step 2: Available Candidates Panel (hidden until a vacant period is selected) -->
+          <div class="card" id="subCandidatesCard" style="display:none;">
+            <div class="card-head">
+              <div>
+                <h2>Step 2: Choose Substitute Candidate</h2>
+                <p id="subCandidatesSubtitle">Showing available FREE faculty for selected period.</p>
+              </div>
+              <span class="badge badge-info" id="subSelectedSlotBadge">P1 · CSE-A</span>
+            </div>
+            <div class="card-body">
+              <div id="subCandidatesAlert" style="display:none; margin-bottom:12px;"></div>
+              <div class="table-scroll">
+                <table class="data" id="subCandidatesTable">
+                  <thead>
+                    <tr>
+                      <th>Faculty Name</th>
+                      <th>Department / Branch</th>
+                      <th>Priority</th>
+                      <th>Availability</th>
+                      <th>Action</th>
+                    </tr>
+                  </thead>
+                  <tbody id="subCandidatesTableBody"></tbody>
+                </table>
+              </div>
+              <div id="subCandidatesEmptyNotice" class="notice notice-info" style="display:none; margin-top:12px;">
+                No faculty members are free during this period.
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Sub Tab 2: Incoming Requests -->
+        <div id="subTabIncoming" style="display:none;">
+          <div class="card">
+            <div class="card-head">
+              <div>
+                <h2>Incoming Substitution Requests</h2>
+                <p>Colleagues who have requested you to cover their class. Availability is verified in real-time upon acceptance.</p>
+              </div>
+              <button type="button" class="btn btn-secondary btn-sm" id="btnRefreshIncomingSubs">↻ Refresh</button>
+            </div>
+            <div class="card-body">
+              <div id="incomingSubsAlert" style="display:none; margin-bottom:12px;"></div>
+              <div class="table-scroll">
+                <table class="data directory" id="incomingSubsTable">
+                  <thead>
+                    <tr>
+                      <th>Date</th>
+                      <th>Day</th>
+                      <th>Period</th>
+                      <th>Class</th>
+                      <th>Subject</th>
+                      <th>Absent Colleague</th>
+                      <th>Branch</th>
+                      <th>Action</th>
+                    </tr>
+                  </thead>
+                  <tbody id="incomingSubsTableBody"></tbody>
+                </table>
+              </div>
+              <div id="incomingSubsEmptyNotice" class="notice notice-info" style="display:none; margin-top:12px;">
+                You have no incoming substitution requests at this time.
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Sub Tab 3: My History -->
+        <div id="subTabHistory" style="display:none;">
+          <div class="card">
+            <div class="card-head">
+              <div>
+                <h2>My Substitution History</h2>
+                <p>Outgoing substitution requests you created and their real-time acceptance status.</p>
+              </div>
+              <button type="button" class="btn btn-secondary btn-sm" id="btnRefreshMySubs">↻ Refresh</button>
+            </div>
+            <div class="card-body">
+              <div id="mySubsAlert" style="display:none; margin-bottom:12px;"></div>
+              <div class="table-scroll">
+                <table class="data directory" id="mySubsTable">
+                  <thead>
+                    <tr>
+                      <th>Date</th>
+                      <th>Day</th>
+                      <th>Period</th>
+                      <th>Class</th>
+                      <th>Subject</th>
+                      <th>Substitute Faculty</th>
+                      <th>Status</th>
+                      <th>Notes / Rejection</th>
+                      <th>Action</th>
+                    </tr>
+                  </thead>
+                  <tbody id="mySubsTableBody"></tbody>
+                </table>
+              </div>
+              <div id="mySubsEmptyNotice" class="notice notice-info" style="display:none; margin-top:12px;">
+                No substitution requests created yet.
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Reject Substitution Modal -->
+        <div id="rejectSubModal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(15,23,42,0.6); z-index:1000; align-items:center; justify-content:center; padding:16px;">
+          <div class="card" style="max-width:480px; width:100%; margin:auto; box-shadow:var(--shadow-lg, 0 10px 25px rgba(0,0,0,0.2)); border-radius:var(--radius-md);">
+            <div class="card-head" style="border-bottom:1px solid var(--border); padding-bottom:12px;">
+              <div>
+                <h3 style="margin:0; font-size:1.1rem;">Decline Substitution Request</h3>
+                <p class="muted" style="margin:4px 0 0; font-size:0.82rem;">Optionally specify a reason for declining this request.</p>
+              </div>
+              <button type="button" class="btn btn-ghost btn-sm" id="btnRejectSubModalClose" style="font-size:1.1rem; line-height:1; padding:4px 8px;">✕</button>
+            </div>
+            <div class="card-body" style="padding-top:16px;">
+              <input type="hidden" id="rejectSubTargetId" />
+              <label class="field">
+                <span>Reason (optional)</span>
+                <input type="text" id="rejectSubReasonInput" placeholder="e.g. Schedule conflict or personal commitment" />
+              </label>
+              <div style="display:flex; gap:10px; justify-content:flex-end; margin-top:16px;">
+                <button type="button" class="btn btn-secondary" id="btnRejectSubModalCancel">Cancel</button>
+                <button type="button" class="btn btn-danger" id="btnConfirmRejectSub">Decline Request</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ---------------- HOS BRANCH SUBSTITUTIONS (READ-ONLY OVERSIGHT) ---------------- -->
+      <section class="view" id="view-hos-substitutions">
+        <div class="card">
+          <div class="card-head">
+            <div>
+              <h2>Branch Substitutions (HOS Oversight)</h2>
+              <p>Read-only overview of peer-to-peer faculty substitutions in your branch. Faculty agree substitutions directly; HOS does not assign or approve substitutions.</p>
+            </div>
+            <div class="head-actions">
+              <span class="badge badge-primary" id="hosSubBranchBadge">Branch</span>
+              <span class="badge badge-info">Read Only</span>
+              <button type="button" class="btn btn-secondary btn-sm" id="btnRefreshHOSSubs">↻ Refresh</button>
+            </div>
+          </div>
+          <div class="card-body">
+            <div class="controls" style="align-items:flex-end; margin-bottom:18px;">
+              <label class="field" style="max-width:200px;">
+                <span>Filter Date</span>
+                <input type="date" id="filterHOSSubDate" />
+              </label>
+              <label class="field" style="max-width:180px;">
+                <span>Filter Status</span>
+                <select id="filterHOSSubStatus">
+                  <option value="">All Statuses</option>
+                  <option value="PENDING">Pending</option>
+                  <option value="ACCEPTED">Accepted</option>
+                  <option value="REJECTED">Rejected</option>
+                  <option value="CANCELLED">Cancelled</option>
+                </select>
+              </label>
+              <button type="button" class="btn" id="btnFilterHOSSubs">Filter</button>
+              <button type="button" class="btn btn-secondary" id="btnClearFilterHOSSubs">Clear</button>
+            </div>
+
+            <div id="hosSubAlert" style="display:none; margin-bottom:14px;"></div>
+
+            <div class="table-scroll">
+              <table class="data directory" id="hosSubTable">
+                <thead>
+                  <tr>
+                    <th>Date</th>
+                    <th>Day</th>
+                    <th>Period</th>
+                    <th>Class</th>
+                    <th>Subject</th>
+                    <th>Absent Faculty</th>
+                    <th>Substitute Faculty</th>
+                    <th>Status</th>
+                    <th>Created At</th>
+                  </tr>
+                </thead>
+                <tbody id="hosSubTableBody"></tbody>
+              </table>
+            </div>
+
+            <div id="hosSubEmptyNotice" class="notice notice-info" style="display:none; margin-top:12px;">
+              No substitutions recorded for your branch.
+            </div>
+          </div>
+        </div>
       </section>
 
       <!-- ------------------------- ABOUT ----------------------------- -->
       <section class="view" id="view-about">
+
         <!-- Branch Configuration Card -->
         <div class="card" id="aboutBranchCard" style="margin-bottom:20px;">
           <div class="card-head">

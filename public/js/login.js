@@ -65,17 +65,6 @@
             })
             .catch(function () { /* ignore status error */ });
 
-        // Check whether sign-in is required or guest browsing is permitted
-        fetch('/api/auth/session')
-            .then(function (res) { return res.json(); })
-            .then(function (data) {
-                var guest = el('guestLink');
-                if (guest && data.authRequired) {
-                    guest.style.display = 'none';
-                }
-            })
-            .catch(function () { /* fallback to default */ });
-
         if (form) {
             form.addEventListener('submit', function (event) {
                 event.preventDefault();

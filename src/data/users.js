@@ -8,12 +8,42 @@
 const { getBranch, setBranch, registerBranch, isBranchRegistered } = require('./departments');
 const store = require('./store');
 const config = require('../config');
+const db = require('../db/pool');
+const repository = require('../db/repository');
 const { hashPassword, verifyPassword, validatePhone, validateUsername, validatePassword, PASSWORD_ERROR_MESSAGE } = require('../core/authSecurity');
 
 /**
  * In-memory storage for registered accounts.
  */
 let registeredUsers = [];
+
+function syncFromDatabase(dbUsers = []) {
+    if (!Array.isArray(dbUsers)) return;
+    for (const u of dbUsers) {
+        const uname = String(u.username || '').toLowerCase();
+        const existingIdx = registeredUsers.findIndex(r => r.username.toLowerCase() === uname);
+        const item = {
+            id: u.id,
+            username: uname,
+            name: u.name,
+            phone: u.phone || null,
+            role: u.role,
+            department: u.department || '',
+            branchName: u.branchName || u.department || '',
+            passwordHash: u.passwordHash,
+            subjects: Array.isArray(u.subjects) ? u.subjects : [],
+            facultyId: u.facultyId || null,
+            facultyName: u.facultyName || (u.role === 'faculty' ? u.name : null),
+            status: u.status || 'active',
+            createdAt: u.createdAt || new Date().toISOString()
+        };
+        if (existingIdx >= 0) {
+            registeredUsers[existingIdx] = item;
+        } else {
+            registeredUsers.push(item);
+        }
+    }
+}
 
 function slug(name) {
     return String(name)
@@ -170,7 +200,14 @@ function register(data, sessionUser = null) {
 
         targetBranchCode = bCode;
         targetBranchName = bName;
-        registerBranch({ code: targetBranchCode, name: targetBranchName });
+
+        registerBranch({
+            code: targetBranchCode,
+            name: targetBranchName,
+            academicYear: data.academicYear || null,
+            semester: data.semester || null,
+            totalSemesters: data.totalSemesters || data.total_semesters || 6
+        });
     } else if (role === 'faculty') {
         // Faculty accounts MUST be created by an authenticated HOS session
         const isAuthorizedHOS = sessionUser && (sessionUser.role === 'hos' || sessionUser.role === 'coordinator');
@@ -233,10 +270,27 @@ function register(data, sessionUser = null) {
         subjects: role === 'faculty' ? subjects : [],
         facultyId: facultyRecord ? facultyRecord.id : null,
         facultyName: role === 'faculty' ? name : null,
+        status: 'active',
         createdAt: new Date().toISOString()
     };
 
     registeredUsers.push(newUser);
+
+    if (db.isConfigured() && store.usingDatabase) {
+        try {
+            repository.saveUser({
+                username: newUser.username,
+                name: newUser.name,
+                phone: newUser.phone,
+                role: newUser.role,
+                departmentCode: newUser.department,
+                passwordHash: newUser.passwordHash,
+                status: newUser.status,
+                facultyId: newUser.facultyId,
+                subjects: newUser.subjects
+            }).catch(() => {});
+        } catch (_) {}
+    }
 
     return toPublicUser(newUser);
 }
@@ -253,7 +307,8 @@ function toPublicUser(user) {
         branchName: user.branchName || user.department,
         subjects: Array.isArray(user.subjects) ? user.subjects : [],
         facultyName: user.facultyName || (user.role === 'faculty' ? user.name : null),
-        facultyId: user.facultyId || null
+        facultyId: user.facultyId || null,
+        status: user.status || 'active'
     };
 }
 
@@ -268,6 +323,24 @@ function authenticate(username, password) {
     // 1. Search registered users
     const registered = registeredUsers.find(u => u.username === wanted);
     if (registered) {
+        if (registered.status === 'inactive') {
+            const err = new Error('Account is deactivated. Please contact your Head of Section.');
+            err.status = 403;
+            err.code = 'ACCOUNT_DEACTIVATED';
+            throw err;
+        }
+        if (registered.facultyId && store.engine) {
+            const fac = store.engine.getFaculty().find(f =>
+                (f.id && String(f.id).toLowerCase() === String(registered.facultyId).toLowerCase()) ||
+                (f.name && f.name.toLowerCase() === registered.name.toLowerCase())
+            );
+            if (fac && fac.status === 'inactive') {
+                const err = new Error('Account is deactivated. Please contact your Head of Section.');
+                err.status = 403;
+                err.code = 'ACCOUNT_DEACTIVATED';
+                throw err;
+            }
+        }
         if (verifyPassword(password, registered.passwordHash)) {
             return toPublicUser(registered);
         }
@@ -315,6 +388,12 @@ function authenticate(username, password) {
         const faculty = store.engine ? store.engine.getFaculty() : [];
         const member = faculty.find(f => slug(f.name) === wanted || (f.id && String(f.id).toLowerCase() === wanted));
         if (member) {
+            if (member.status === 'inactive') {
+                const err = new Error('Account is deactivated. Please contact your Head of Section.');
+                err.status = 403;
+                err.code = 'ACCOUNT_DEACTIVATED';
+                throw err;
+            }
             if (verifyPassword(password, null, config.demoPassword)) {
                 return {
                     id: member.id,
@@ -326,7 +405,8 @@ function authenticate(username, password) {
                     branchName: branch.name || member.department,
                     subjects: member.subjects || [],
                     facultyName: member.name,
-                    facultyId: member.id
+                    facultyId: member.id,
+                    status: member.status || 'active'
                 };
             }
         }
@@ -479,6 +559,104 @@ function updateProfile(username, changes = {}) {
     return toPublicUser(registeredUsers[idx]);
 }
 
+function updateFacultyUser(facultyIdOrUsername, updates = {}) {
+    const needle = String(facultyIdOrUsername).trim().toLowerCase();
+    const idx = registeredUsers.findIndex(u =>
+        (u.facultyId && String(u.facultyId).toLowerCase() === needle) ||
+        (u.id && String(u.id).toLowerCase() === needle) ||
+        (u.username && u.username.toLowerCase() === needle) ||
+        (u.name && u.name.toLowerCase() === needle)
+    );
+    if (idx !== -1) {
+        if (updates.name && String(updates.name).trim().length >= 2) {
+            registeredUsers[idx].name = String(updates.name).trim();
+            if (registeredUsers[idx].facultyName) registeredUsers[idx].facultyName = registeredUsers[idx].name;
+        }
+        if (updates.phone !== undefined) {
+            registeredUsers[idx].phone = updates.phone ? String(updates.phone).trim() : null;
+        }
+        if (Array.isArray(updates.subjects)) {
+            registeredUsers[idx].subjects = updates.subjects.map(s => String(s).trim()).filter(Boolean);
+        }
+        if (updates.status) {
+            registeredUsers[idx].status = updates.status;
+        }
+        return toPublicUser(registeredUsers[idx]);
+    }
+    return null;
+}
+
+function createApprovedFacultyUser(data) {
+    const username = String(data.username || '').trim().toLowerCase();
+    const name = String(data.name || data.fullName || '').trim();
+    const phone = String(data.phone || '').trim();
+    const targetBranchCode = String(data.branchCode || data.department || '').trim().toUpperCase();
+    const hosBranch = getBranch(targetBranchCode);
+    const targetBranchName = hosBranch && hosBranch.name ? hosBranch.name : targetBranchCode;
+    const designation = data.designation ? String(data.designation).trim() : null;
+
+    // Check duplicate username
+    if (registeredUsers.some(u => u.username === username)) {
+        const err = new Error(`Username "${username}" is already taken.`);
+        err.status = 409; err.code = 'USERNAME_EXISTS';
+        throw err;
+    }
+
+    const rawSubjects = Array.isArray(data.subjects)
+        ? data.subjects
+        : String(data.subjects || '').split(',').map(s => s.trim()).filter(Boolean);
+    const subjects = rawSubjects.map(s => String(s).trim()).filter(s => s.length > 0);
+
+    const facultyId = data.facultyId || `${targetBranchCode}_${username.replace(/[^a-z0-9]/g, '_').toUpperCase()}`;
+
+    const facultyRecord = store.addFacultyInMemory({
+        id: facultyId,
+        name: name,
+        department: targetBranchCode,
+        phone: phone,
+        designation: designation,
+        subjects: subjects,
+        status: 'active'
+    });
+
+    const newUser = {
+        id: facultyRecord ? facultyRecord.id : `USER_${Date.now()}`,
+        username,
+        name,
+        phone,
+        role: 'faculty',
+        department: targetBranchCode,
+        branchName: targetBranchName,
+        passwordHash: data.passwordHash,
+        designation: designation,
+        subjects,
+        facultyId: facultyRecord ? facultyRecord.id : null,
+        facultyName: name,
+        status: 'active',
+        createdAt: new Date().toISOString()
+    };
+
+    registeredUsers.push(newUser);
+
+    if (db.isConfigured() && store.usingDatabase) {
+        try {
+            repository.saveUser({
+                username: newUser.username,
+                name: newUser.name,
+                phone: newUser.phone,
+                role: newUser.role,
+                departmentCode: newUser.department,
+                passwordHash: newUser.passwordHash,
+                status: newUser.status,
+                facultyId: newUser.facultyId,
+                subjects: newUser.subjects
+            }).catch(() => {});
+        } catch (_) {}
+    }
+
+    return toPublicUser(newUser);
+}
+
 function resetForTesting() {
     registeredUsers = [];
 }
@@ -489,12 +667,16 @@ module.exports = {
     findHOSByBranch,
     authenticate,
     register,
+    createApprovedFacultyUser,
     hasHOS,
     hasHOSForBranch,
     isInitialSetupAllowed,
     getProfile,
     updateProfile,
+    updateFacultyUser,
+    syncFromDatabase,
     resetForTesting,
     toPublicUser
 };
+
 

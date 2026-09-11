@@ -34,12 +34,15 @@ function isNonFacultyActivity(subject, type) {
 function classesFromDataset() {
     const declared = (store.source && store.source.classes) || [];
     return store.engine.getMeta().classes.map(code => {
-        const match = declared.find(c => (c.class || c.name) === code) || {};
+        const match = declared.find(c => (c.class || c.name || c.code) === code) || {};
+        const derivedSection = match.section || (code.includes('-') ? code.split('-').pop() : 'A');
         return {
+            id: match.id || code,
             code,
             department: match.department || null,
             semester: match.semester || null,
             academicYear: match.academicYear || null,
+            section: derivedSection,
             room: match.room || null
         };
     });

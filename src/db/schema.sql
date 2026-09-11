@@ -15,6 +15,7 @@ CREATE TABLE IF NOT EXISTS departments (
 
 ALTER TABLE departments ADD COLUMN IF NOT EXISTS academic_year TEXT;
 ALTER TABLE departments ADD COLUMN IF NOT EXISTS semester INTEGER;
+ALTER TABLE departments ADD COLUMN IF NOT EXISTS total_semesters INTEGER NOT NULL DEFAULT 6;
 
 CREATE TABLE IF NOT EXISTS rooms (
     id          SERIAL PRIMARY KEY,
@@ -74,6 +75,11 @@ CREATE TABLE IF NOT EXISTS classes (
 
 -- The academic year a class belongs to, shown alongside its semester.
 ALTER TABLE classes ADD COLUMN IF NOT EXISTS academic_year TEXT;
+ALTER TABLE classes ADD COLUMN IF NOT EXISTS section TEXT;
+
+CREATE UNIQUE INDEX IF NOT EXISTS classes_dept_year_sem_sec_idx
+    ON classes (department_id, academic_year, semester, section)
+    WHERE academic_year IS NOT NULL AND semester IS NOT NULL AND section IS NOT NULL;
 
 -- Period definitions (start/end times shown in the grid header).
 CREATE TABLE IF NOT EXISTS periods (
@@ -169,6 +175,18 @@ CREATE TABLE IF NOT EXISTS attendance (
 -- Real account-based schema columns and faculty expertise
 ALTER TABLE users ADD COLUMN IF NOT EXISTS phone TEXT;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'active';
+
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'users_status_check') THEN
+        ALTER TABLE users ADD CONSTRAINT users_status_check
+            CHECK (status IN ('active', 'inactive'));
+    END IF;
+EXCEPTION
+    WHEN OTHERS THEN NULL;
+END $$;
+
 
 CREATE TABLE IF NOT EXISTS faculty_subjects (
     id         SERIAL PRIMARY KEY,
@@ -232,6 +250,113 @@ BEGIN
 EXCEPTION
     WHEN OTHERS THEN NULL;
 END $$;
+-- Phase B7.1 Faculty Registration Requests
+CREATE TABLE IF NOT EXISTS faculty_registration_requests (
+    id                 SERIAL PRIMARY KEY,
+    full_name          TEXT NOT NULL,
+    phone              TEXT NOT NULL,
+    username           TEXT NOT NULL,
+    password_hash      TEXT NOT NULL,
+    designation        TEXT,
+    subjects           TEXT[] NOT NULL DEFAULT ARRAY[]::text[],
+    branch_code        TEXT NOT NULL,
+    status             TEXT NOT NULL DEFAULT 'PENDING'
+                       CHECK (status IN ('PENDING', 'APPROVED', 'REJECTED')),
+    rejection_reason   TEXT,
+    reviewed_by        TEXT,
+    reviewed_at        TIMESTAMPTZ,
+    created_at         TIMESTAMPTZ NOT NULL DEFAULT now()
+);
 
+CREATE INDEX IF NOT EXISTS faculty_reg_req_branch_idx ON faculty_registration_requests (branch_code);
+CREATE INDEX IF NOT EXISTS faculty_reg_req_status_idx ON faculty_registration_requests (status);
+CREATE INDEX IF NOT EXISTS faculty_reg_req_username_idx ON faculty_registration_requests (LOWER(username));
 
+-- Phase B7.2 Faculty Attendance / Absence
+CREATE TABLE IF NOT EXISTS faculty_attendance (
+    id                 SERIAL PRIMARY KEY,
+    faculty_id         INTEGER NOT NULL REFERENCES faculty(id) ON DELETE CASCADE,
+    attendance_date    DATE NOT NULL,
+    status             TEXT NOT NULL DEFAULT 'ABSENT'
+                       CHECK (status IN ('PRESENT', 'ABSENT')),
+    marked_by          TEXT,
+    created_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT faculty_attendance_unique UNIQUE (faculty_id, attendance_date)
+);
 
+CREATE INDEX IF NOT EXISTS faculty_attendance_date_idx ON faculty_attendance (attendance_date);
+CREATE INDEX IF NOT EXISTS faculty_attendance_faculty_idx ON faculty_attendance (faculty_id);
+
+-- Phase B7.3 Exam Invigilation Requests (Faculty-submitted)
+CREATE TABLE IF NOT EXISTS exam_invigilation_requests (
+    id                 SERIAL PRIMARY KEY,
+    faculty_id         INTEGER NOT NULL REFERENCES faculty(id) ON DELETE CASCADE,
+    branch_code        TEXT NOT NULL,
+    exam_date          DATE NOT NULL,
+    periods            INTEGER[] NOT NULL,
+    reason             TEXT,
+    status             TEXT NOT NULL DEFAULT 'PENDING'
+                       CHECK (status IN ('PENDING', 'APPROVED', 'REJECTED')),
+    reviewed_by        TEXT,
+    reviewed_at        TIMESTAMPTZ,
+    rejection_reason   TEXT,
+    created_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at         TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS exam_invig_req_faculty_idx ON exam_invigilation_requests (faculty_id);
+CREATE INDEX IF NOT EXISTS exam_invig_req_branch_idx ON exam_invigilation_requests (branch_code);
+CREATE INDEX IF NOT EXISTS exam_invig_req_status_idx ON exam_invigilation_requests (status);
+CREATE INDEX IF NOT EXISTS exam_invig_req_date_idx ON exam_invigilation_requests (exam_date);
+
+-- Phase B7.3 Active Exam Invigilation Assignments
+CREATE TABLE IF NOT EXISTS exam_invigilation (
+    id                 SERIAL PRIMARY KEY,
+    faculty_id         INTEGER NOT NULL REFERENCES faculty(id) ON DELETE CASCADE,
+    branch_code        TEXT NOT NULL,
+    exam_date          DATE NOT NULL,
+    period             INTEGER NOT NULL,
+    source             TEXT NOT NULL DEFAULT 'DIRECT'
+                       CHECK (source IN ('DIRECT', 'REQUEST')),
+    request_id         INTEGER REFERENCES exam_invigilation_requests(id) ON DELETE SET NULL,
+    assigned_by        TEXT,
+    notes              TEXT,
+    created_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT exam_invigilation_unique UNIQUE (faculty_id, exam_date, period)
+);
+
+CREATE INDEX IF NOT EXISTS exam_invig_date_period_idx ON exam_invigilation (exam_date, period);
+CREATE INDEX IF NOT EXISTS exam_invig_faculty_idx ON exam_invigilation (faculty_id);
+CREATE INDEX IF NOT EXISTS exam_invig_branch_idx ON exam_invigilation (branch_code);
+
+-- Phase B7.5 Faculty-to-Faculty Substitutions
+CREATE TABLE IF NOT EXISTS faculty_substitutions (
+    id                      TEXT PRIMARY KEY,
+    date                    DATE NOT NULL,
+    day_of_week             TEXT NOT NULL,
+    period                  INTEGER NOT NULL,
+    class_name              TEXT,
+    subject                 TEXT,
+    room                    TEXT,
+    original_faculty_id     INTEGER NOT NULL REFERENCES faculty(id) ON DELETE CASCADE,
+    original_faculty_name   TEXT NOT NULL,
+    original_faculty_branch TEXT NOT NULL,
+    substitute_faculty_id   INTEGER NOT NULL REFERENCES faculty(id) ON DELETE CASCADE,
+    substitute_faculty_name TEXT NOT NULL,
+    substitute_faculty_branch TEXT NOT NULL,
+    requested_by            TEXT NOT NULL,
+    status                  TEXT NOT NULL DEFAULT 'PENDING'
+                            CHECK (status IN ('PENDING', 'ACCEPTED', 'REJECTED', 'CANCELLED')),
+    rejection_reason        TEXT,
+    created_at              TIMESTAMPTZ NOT NULL DEFAULT now(),
+    responded_at            TIMESTAMPTZ,
+    cancelled_at            TIMESTAMPTZ
+);
+
+CREATE INDEX IF NOT EXISTS faculty_sub_orig_idx ON faculty_substitutions (original_faculty_id);
+CREATE INDEX IF NOT EXISTS faculty_sub_subst_idx ON faculty_substitutions (substitute_faculty_id);
+CREATE INDEX IF NOT EXISTS faculty_sub_date_period_idx ON faculty_substitutions (date, period);
+CREATE INDEX IF NOT EXISTS faculty_sub_status_idx ON faculty_substitutions (status);
+CREATE INDEX IF NOT EXISTS faculty_sub_branch_idx ON faculty_substitutions (original_faculty_branch);

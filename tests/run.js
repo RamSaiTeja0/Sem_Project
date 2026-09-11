@@ -17,6 +17,15 @@ const suites = [
     'singlebranch.test.js',
     'mastertimetable.test.js',
     'facultyown.test.js',
+    'faculty_management.test.js',
+    'dynamic_timetable.test.js',
+    'cross_branch_availability.test.js',
+    'faculty_registration_requests.test.js',
+    'faculty_attendance.test.js',
+    'invigilation.test.js',
+    'b7_4_availability_candidates.test.js',
+    'b7_5_substitution.test.js',
+    'b6_final_integration.test.js',
     'availability.test.js',
     'engine.test.js',
     'api.test.js',
@@ -24,6 +33,7 @@ const suites = [
     'catalog.test.js',
     'dayparsing.test.js',
     'database.test.js',
+    'neon_persistence_verification.test.js',
     'e2e.test.js',
     'uploads.test.js',
     'internal_uploads.test.js',
@@ -34,12 +44,17 @@ const suites = [
 ];
 let failures = 0;
 
+const dbSuites = new Set(['database.test.js', 'neon_persistence_verification.test.js']);
+
 suites.forEach(suite => {
     console.log('\n' + '='.repeat(64));
     console.log('RUN  ' + suite);
     console.log('='.repeat(64));
     const envOverrides = legacyDemoConfigs[suite] || {};
     const env = { ...process.env, ...envOverrides };
+    if (!dbSuites.has(suite)) {
+        env.DATABASE_URL = '';
+    }
     const result = spawnSync(process.execPath, [path.join(__dirname, suite)], { stdio: 'inherit', env });
     if (result.status !== 0) failures++;
 });

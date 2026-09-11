@@ -46,44 +46,6 @@
       .field-row { grid-template-columns: 1fr; }
     }
 
-    /* Password visibility wrapper & buttons */
-    .password-input-wrapper {
-      position: relative;
-      display: flex;
-      align-items: center;
-      width: 100%;
-    }
-    .password-input-wrapper input {
-      width: 100%;
-      padding-right: 44px !important;
-    }
-    .btn-toggle-pw {
-      position: absolute;
-      right: 6px;
-      top: 50%;
-      transform: translateY(-50%);
-      background: transparent;
-      border: none;
-      padding: 6px;
-      cursor: pointer;
-      color: var(--ink-500);
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      border-radius: var(--radius-sm);
-      transition: color 0.15s ease, background-color 0.15s ease;
-    }
-    .btn-toggle-pw:hover {
-      color: var(--ink-900);
-      background-color: var(--canvas-alt);
-    }
-    .btn-toggle-pw:focus-visible {
-      outline: 2px solid var(--brand-500);
-    }
-    .btn-toggle-pw svg {
-      display: block;
-      pointer-events: none;
-    }
 
     /* Password live requirements feedback */
     .password-requirements {
@@ -187,6 +149,13 @@
                 <div class="role-desc">Administrator for branch</div>
               </div>
             </label>
+            <label class="role-option" id="roleFacultyLabel">
+              <input type="radio" name="role" value="faculty_request" id="roleFaculty" />
+              <div>
+                <div class="role-title">Faculty Registration</div>
+                <div class="role-desc">Request account from HOS</div>
+              </div>
+            </label>
           </div>
         </div>
 
@@ -211,6 +180,37 @@
           <label class="field">
             <span>Branch Code <em class="req" style="color: var(--danger-500);">*</em></span>
             <input type="text" id="regBranchCode" name="branchCode" placeholder="e.g. MEC" required style="text-transform: uppercase;" />
+          </label>
+        </div>
+
+        <!-- Flow C: Branch input for Faculty self-registration request -->
+        <div id="facultyBranchRow" style="display:none; margin-bottom: 12px;">
+          <label class="field">
+            <span>Branch Code <em class="req" style="color: var(--danger-500);">*</em></span>
+            <div style="display:flex; gap:8px;">
+              <select id="regFacultyBranchSelect" style="flex:1;">
+                <option value="">-- Select Registered Branch --</option>
+              </select>
+              <input type="text" id="regFacultyBranchCode" name="facultyBranchCode" placeholder="Or enter code (e.g. CME)" style="flex:1; text-transform:uppercase;" />
+            </div>
+            <small class="muted" style="font-size:0.75rem; margin-top:3px; display:block;">
+              Must match an existing registered branch. Your request will be sent to the HOS of this branch.
+            </small>
+          </label>
+        </div>
+
+        <!-- Designation / Category for Faculty Request -->
+        <div id="facultyDesignationRow" style="display:none; margin-bottom: 12px;">
+          <label class="field">
+            <span>Designation / Category</span>
+            <select id="regDesignation">
+              <option value="Assistant Professor">Assistant Professor</option>
+              <option value="Associate Professor">Associate Professor</option>
+              <option value="Professor">Professor</option>
+              <option value="Lecturer">Lecturer</option>
+              <option value="Senior Lecturer">Senior Lecturer</option>
+              <option value="Visiting Faculty">Visiting Faculty</option>
+            </select>
           </label>
         </div>
 
@@ -312,6 +312,22 @@
         </div>
         <div id="copyFeedback" style="font-size:0.8rem; color:var(--ok-700, #15803d); font-weight:500; margin-top:8px;"></div>
       </div>
+
+      <!-- Faculty Request Submitted Success Panel -->
+      <div id="facultyRequestSuccessPanel" style="display:none; margin-top: 18px; padding: 18px; background: var(--canvas, #fff); border: 2px solid var(--ok-600, #16a34a); border-radius: var(--radius-md, 8px); box-shadow: var(--shadow-md, 0 4px 12px rgba(0,0,0,0.08));">
+        <div style="display:flex; align-items:center; gap:8px; color: var(--ok-700, #15803d); font-weight:700; font-size:1.05rem; margin-bottom:8px;">
+          <span>✓ Faculty Registration Request Submitted</span>
+        </div>
+        <p style="font-size:0.85rem; color:var(--ink-700, #374151); line-height:1.45;">
+          Your registration request has been submitted to the Head of Section for <strong id="succReqBranch"></strong>.
+          Your faculty account will be created once approved by the HOS, after which you can sign in using your username and password.
+        </p>
+        <div style="margin-top:14px; display:flex; gap:10px;">
+          <a href="/login" class="btn btn-primary btn-sm" style="text-decoration:none;">Go to Sign in</a>
+          <button type="button" class="btn btn-secondary btn-sm" id="btnNewFacultyRequest">Submit Another Request</button>
+        </div>
+      </div>
+
 
       <div style="margin-top: 22px; padding-top: 18px; border-top: 1px solid var(--line-soft); display: flex; justify-content: space-between; align-items: center; font-size: 0.88rem;">
         <span class="muted">Already have an account?</span>
