@@ -1767,6 +1767,15 @@ async function saveUser({ username, name, phone, role, departmentCode, passwordH
         let facId = null;
         if (facultyId) {
             facId = await resolveFacultyDbId(client, facultyId, name);
+            if (!facId) {
+                facId = await ensureFacultyDbRecord(client, {
+                    id: facultyId,
+                    name: name,
+                    department: departmentCode,
+                    phone: phone,
+                    status: status || 'active'
+                });
+            }
         }
 
         const { rows } = await client.query(`
@@ -1803,6 +1812,77 @@ async function saveUser({ username, name, phone, role, departmentCode, passwordH
         }
 
         return rows[0];
+    });
+}
+
+async function updateUserProfile({ username, phone, subjects, name }) {
+    return db.withTransaction(async client => {
+        const uRes = await client.query(`
+            SELECT u.id, u.username, u.name, u.phone, u.role, u.department_id, u.faculty_id
+              FROM users u
+             WHERE LOWER(u.username) = LOWER($1)
+        `, [String(username).trim()]);
+
+        if (!uRes.rows.length) {
+            const err = new Error(`User "${username}" not found.`);
+            err.code = 'NOT_FOUND';
+            err.status = 404;
+            throw err;
+        }
+
+        const user = uRes.rows[0];
+        let facId = user.faculty_id;
+        if (!facId && user.role === 'faculty') {
+            facId = await resolveFacultyDbId(client, user.username, user.name);
+            if (facId) {
+                await client.query('UPDATE users SET faculty_id = $2 WHERE id = $1', [user.id, facId]);
+            }
+        }
+
+        const updates = [];
+        const params = [user.id];
+
+        if (name && String(name).trim().length >= 2) {
+            params.push(String(name).trim());
+            updates.push(`name = $${params.length}`);
+            if (facId) {
+                await client.query('UPDATE faculty SET name = $2 WHERE id = $1', [facId, String(name).trim()]);
+            }
+        }
+
+        if (phone !== undefined) {
+            const pVal = phone ? String(phone).trim() : null;
+            params.push(pVal);
+            updates.push(`phone = $${params.length}`);
+            if (facId) {
+                await client.query('UPDATE faculty SET phone = $2 WHERE id = $1', [facId, pVal]);
+            }
+        }
+
+        if (updates.length > 0) {
+            await client.query(`
+                UPDATE users
+                   SET ${updates.join(', ')}
+                 WHERE id = $1
+            `, params);
+        }
+
+        if (Array.isArray(subjects) && facId) {
+            await client.query('DELETE FROM faculty_subjects WHERE faculty_id = $1', [facId]);
+            const cleaned = subjects.map(s => String(s).trim()).filter(Boolean);
+            for (const subj of cleaned) {
+                await client.query(`
+                    INSERT INTO faculty_subjects (faculty_id, subject)
+                    VALUES ($1, $2)
+                    ON CONFLICT (faculty_id, subject) DO NOTHING
+                `, [facId, subj]);
+            }
+        }
+
+        return {
+            id: user.id,
+            username: user.username
+        };
     });
 }
 
@@ -1847,7 +1927,7 @@ module.exports = {
     createActiveInvigilation, listActiveInvigilation, deleteActiveInvigilation,
     createFacultySubstitution, getFacultySubstitutionById, updateFacultySubstitutionStatus,
     listFacultySubstitutions, hasAcceptedFacultySubstitution,
-    saveUser, loadAllUsers, loadAllDepartments,
+    saveUser, updateUserProfile, loadAllUsers, loadAllDepartments,
     resolveFacultyDbId, ensureFacultyDbRecord,
     DAY_ORDER
 };

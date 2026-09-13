@@ -5,7 +5,7 @@
  * faculty accounts with multiple subjects/expertise, password hashing via scrypt,
  * and single-branch context binding.
  */
-const { getBranch, setBranch, registerBranch, isBranchRegistered } = require('./departments');
+const { getBranch, setBranch, registerBranch, unregisterBranch, isBranchRegistered } = require('./departments');
 const store = require('./store');
 const config = require('../config');
 const db = require('../db/pool');
@@ -127,7 +127,7 @@ function isInitialSetupAllowed() {
  *   - Faculty creation by authenticated HOS inherits HOS branch context strictly
  *   - Cryptographic password hashing
  */
-function register(data, sessionUser = null) {
+async function register(data, sessionUser = null) {
     const name = String(data.name || '').trim();
     if (!name || name.length < 2) {
         const err = new Error('Full name is required (minimum 2 characters).');
@@ -200,14 +200,6 @@ function register(data, sessionUser = null) {
 
         targetBranchCode = bCode;
         targetBranchName = bName;
-
-        registerBranch({
-            code: targetBranchCode,
-            name: targetBranchName,
-            academicYear: data.academicYear || null,
-            semester: data.semester || null,
-            totalSemesters: data.totalSemesters || data.total_semesters || 6
-        });
     } else if (role === 'faculty') {
         // Faculty accounts MUST be created by an authenticated HOS session
         const isAuthorizedHOS = sessionUser && (sessionUser.role === 'hos' || sessionUser.role === 'coordinator');
@@ -229,7 +221,7 @@ function register(data, sessionUser = null) {
 
     // Faculty-specific validation: Subjects / Expertise
     let subjects = [];
-    let facultyRecord = null;
+    let facultyId = null;
 
     if (role === 'faculty') {
         const rawSubjects = Array.isArray(data.subjects)
@@ -243,8 +235,41 @@ function register(data, sessionUser = null) {
             throw err;
         }
 
-        // Add or synchronize faculty record in branch roster
-        const facultyId = data.facultyId || `${targetBranchCode}_${username.replace(/[^a-z0-9]/g, '_').toUpperCase()}`;
+        facultyId = data.facultyId || `${targetBranchCode}_${username.replace(/[^a-z0-9]/g, '_').toUpperCase()}`;
+    }
+
+    // Hash password securely with cryptographic salt
+    const passwordHash = hashPassword(password);
+
+    // Save to PostgreSQL first if database is configured
+    let dbUser = null;
+    if (db.isConfigured()) {
+        dbUser = await repository.saveUser({
+            username: username,
+            name: name,
+            phone: phone,
+            role: role,
+            departmentCode: targetBranchCode,
+            passwordHash: passwordHash,
+            status: 'active',
+            facultyId: facultyId,
+            subjects: subjects
+        });
+    }
+
+    // ONLY AFTER DATABASE SUCCESS (or in memory mode): update in-memory state
+    if (role === 'hos') {
+        registerBranch({
+            code: targetBranchCode,
+            name: targetBranchName,
+            academicYear: data.academicYear || null,
+            semester: data.semester || null,
+            totalSemesters: data.totalSemesters || data.total_semesters || 6
+        });
+    }
+
+    let facultyRecord = null;
+    if (role === 'faculty') {
         facultyRecord = store.addFacultyInMemory({
             id: facultyId,
             name: name,
@@ -255,11 +280,8 @@ function register(data, sessionUser = null) {
         });
     }
 
-    // Hash password securely with cryptographic salt
-    const passwordHash = hashPassword(password);
-
     const newUser = {
-        id: role === 'hos' ? `HOS_${targetBranchCode}` : (facultyRecord ? facultyRecord.id : `USER_${Date.now()}`),
+        id: (dbUser && dbUser.id) ? dbUser.id : (role === 'hos' ? `HOS_${targetBranchCode}` : (facultyRecord ? facultyRecord.id : `USER_${Date.now()}`)),
         username,
         name,
         phone,
@@ -268,29 +290,13 @@ function register(data, sessionUser = null) {
         branchName: targetBranchName,
         passwordHash,
         subjects: role === 'faculty' ? subjects : [],
-        facultyId: facultyRecord ? facultyRecord.id : null,
+        facultyId: facultyRecord ? facultyRecord.id : facultyId,
         facultyName: role === 'faculty' ? name : null,
         status: 'active',
-        createdAt: new Date().toISOString()
+        createdAt: (dbUser && dbUser.createdAt) ? dbUser.createdAt : new Date().toISOString()
     };
 
     registeredUsers.push(newUser);
-
-    if (db.isConfigured() && store.usingDatabase) {
-        try {
-            repository.saveUser({
-                username: newUser.username,
-                name: newUser.name,
-                phone: newUser.phone,
-                role: newUser.role,
-                departmentCode: newUser.department,
-                passwordHash: newUser.passwordHash,
-                status: newUser.status,
-                facultyId: newUser.facultyId,
-                subjects: newUser.subjects
-            }).catch(() => {});
-        } catch (_) {}
-    }
 
     return toPublicUser(newUser);
 }
@@ -528,7 +534,7 @@ function getProfile(username) {
     return toPublicUser(user);
 }
 
-function updateProfile(username, changes = {}) {
+async function updateProfile(username, changes = {}) {
     const wanted = String(username || '').trim().toLowerCase();
     const idx = registeredUsers.findIndex(u => u.username === wanted);
     if (idx === -1) {
@@ -537,26 +543,67 @@ function updateProfile(username, changes = {}) {
         throw err;
     }
 
-    if (changes.phone) {
-        if (!validatePhone(changes.phone)) {
+    const targetUser = registeredUsers[idx];
+    let newPhone = undefined;
+    if (changes.phone !== undefined && changes.phone !== null) {
+        const pStr = String(changes.phone).trim();
+        if (pStr && !validatePhone(pStr)) {
             const err = new Error('Invalid phone number format.');
             err.status = 400; err.code = 'INVALID_PHONE';
             throw err;
         }
-        registeredUsers[idx].phone = String(changes.phone).trim();
+        newPhone = pStr || null;
     }
 
+    let newSubjects = undefined;
     if (Array.isArray(changes.subjects)) {
         const cleaned = changes.subjects.map(s => String(s).trim()).filter(Boolean);
-        if (registeredUsers[idx].role === 'faculty' && cleaned.length === 0) {
+        if (targetUser.role === 'faculty' && cleaned.length === 0) {
             const err = new Error('Faculty must maintain at least one subject/expertise.');
             err.status = 400; err.code = 'SUBJECTS_REQUIRED';
             throw err;
         }
-        registeredUsers[idx].subjects = cleaned;
+        newSubjects = cleaned;
     }
 
-    return toPublicUser(registeredUsers[idx]);
+    let newName = undefined;
+    if (changes.name && String(changes.name).trim().length >= 2) {
+        newName = String(changes.name).trim();
+    }
+
+    // Save to PostgreSQL first if database is configured
+    if (db.isConfigured()) {
+        await repository.updateUserProfile({
+            username: targetUser.username,
+            phone: newPhone,
+            subjects: newSubjects,
+            name: newName
+        });
+    }
+
+    // ONLY AFTER DATABASE SUCCESS (or in memory mode): update in-memory state
+    if (newName !== undefined) {
+        targetUser.name = newName;
+        if (targetUser.facultyName) targetUser.facultyName = newName;
+    }
+    if (newPhone !== undefined) {
+        targetUser.phone = newPhone;
+    }
+    if (newSubjects !== undefined) {
+        targetUser.subjects = newSubjects;
+    }
+
+    if (targetUser.role === 'faculty' && (targetUser.facultyId || targetUser.name)) {
+        try {
+            store.updateFacultyInMemory(targetUser.facultyId || targetUser.name, {
+                name: newName,
+                phone: newPhone,
+                subjects: newSubjects
+            });
+        } catch (_) {}
+    }
+
+    return toPublicUser(targetUser);
 }
 
 function updateFacultyUser(facultyIdOrUsername, updates = {}) {
@@ -586,7 +633,7 @@ function updateFacultyUser(facultyIdOrUsername, updates = {}) {
     return null;
 }
 
-function createApprovedFacultyUser(data) {
+async function createApprovedFacultyUser(data) {
     const username = String(data.username || '').trim().toLowerCase();
     const name = String(data.name || data.fullName || '').trim();
     const phone = String(data.phone || '').trim();
@@ -609,6 +656,23 @@ function createApprovedFacultyUser(data) {
 
     const facultyId = data.facultyId || `${targetBranchCode}_${username.replace(/[^a-z0-9]/g, '_').toUpperCase()}`;
 
+    // Save to PostgreSQL first if database is configured
+    let dbUser = null;
+    if (db.isConfigured()) {
+        dbUser = await repository.saveUser({
+            username: username,
+            name: name,
+            phone: phone,
+            role: 'faculty',
+            departmentCode: targetBranchCode,
+            passwordHash: data.passwordHash,
+            status: 'active',
+            facultyId: facultyId,
+            subjects: subjects
+        });
+    }
+
+    // ONLY AFTER DATABASE SUCCESS (or in memory mode): update in-memory state
     const facultyRecord = store.addFacultyInMemory({
         id: facultyId,
         name: name,
@@ -620,7 +684,7 @@ function createApprovedFacultyUser(data) {
     });
 
     const newUser = {
-        id: facultyRecord ? facultyRecord.id : `USER_${Date.now()}`,
+        id: (dbUser && dbUser.id) ? dbUser.id : (facultyRecord ? facultyRecord.id : `USER_${Date.now()}`),
         username,
         name,
         phone,
@@ -630,29 +694,13 @@ function createApprovedFacultyUser(data) {
         passwordHash: data.passwordHash,
         designation: designation,
         subjects,
-        facultyId: facultyRecord ? facultyRecord.id : null,
+        facultyId: facultyRecord ? facultyRecord.id : facultyId,
         facultyName: name,
         status: 'active',
-        createdAt: new Date().toISOString()
+        createdAt: (dbUser && dbUser.createdAt) ? dbUser.createdAt : new Date().toISOString()
     };
 
     registeredUsers.push(newUser);
-
-    if (db.isConfigured() && store.usingDatabase) {
-        try {
-            repository.saveUser({
-                username: newUser.username,
-                name: newUser.name,
-                phone: newUser.phone,
-                role: newUser.role,
-                departmentCode: newUser.department,
-                passwordHash: newUser.passwordHash,
-                status: newUser.status,
-                facultyId: newUser.facultyId,
-                subjects: newUser.subjects
-            }).catch(() => {});
-        } catch (_) {}
-    }
 
     return toPublicUser(newUser);
 }

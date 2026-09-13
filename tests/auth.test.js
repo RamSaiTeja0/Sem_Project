@@ -53,7 +53,16 @@ function call(base, method, urlPath, body, cookie) {
 
 function startServer(port, env) {
     const child = spawn(process.execPath, [path.join(__dirname, '..', 'server.js')], {
-        env: { ...process.env, PORT: String(port), FALLBACK_PORTS: '', ...env },
+        env: {
+            ...process.env,
+            DATABASE_URL: '',
+            LOAD_DEMO_DATA: 'true',
+            BRANCH_CODE: 'CME',
+            BRANCH_NAME: 'Computer Engineering',
+            PORT: String(port),
+            FALLBACK_PORTS: '',
+            ...env
+        },
         stdio: ['ignore', 'pipe', 'pipe']
     });
     child.stdout.on('data', () => {});

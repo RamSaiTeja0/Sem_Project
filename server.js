@@ -38,17 +38,17 @@ app.use(express.urlencoded({ extended: true }));
 // routes so every handler, page and guard sees the same view of the user.
 app.use(session.middleware);
 
-// Static assets. `index: false` so "/" is routed explicitly to the landing
-// page rather than being served index.html by the static middleware.
-app.use(express.static(path.join(__dirname, 'public'), { index: false }));
-
 // Landing page.
 app.get(['/', '/home', '/home.html'], (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'home.html'));
 });
 
 // Sign-in page. Always reachable, including when auth is not enforced.
+// If already authenticated, redirect to /dashboard to prevent redundant login forms.
 app.get(['/login', '/login.html'], (req, res) => {
+    if (req.session && req.session.username) {
+        return res.redirect('/dashboard');
+    }
     res.sendFile(path.join(__dirname, 'public', 'login.html'));
 });
 
@@ -56,6 +56,10 @@ app.get(['/login', '/login.html'], (req, res) => {
 app.get(['/register', '/register.html'], (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'register.html'));
 });
+
+// Static assets. `index: false` so "/" is routed explicitly to the landing
+// page rather than being served index.html by the static middleware.
+app.use(express.static(path.join(__dirname, 'public'), { index: false }));
 
 // Health check, handy for deployment probes.
 app.get('/api/health', (req, res) => {

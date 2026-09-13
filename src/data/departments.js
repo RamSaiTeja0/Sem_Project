@@ -58,6 +58,16 @@ function registerBranch(branchData = {}) {
     return b;
 }
 
+function unregisterBranch(code) {
+    if (!code) return false;
+    const raw = String(code).trim().toUpperCase();
+    const deleted = branches.delete(raw);
+    if (deleted) {
+        syncDepartments();
+    }
+    return deleted;
+}
+
 function getRegisteredBranchCodes() {
     const set = new Set();
     for (const code of branches.keys()) {
@@ -225,6 +235,7 @@ module.exports = {
     DEPARTMENTS,
     ALIASES,
     registerBranch,
+    unregisterBranch,
     getBranch,
     setBranch,
     resetBranchForTesting,

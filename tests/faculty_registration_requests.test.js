@@ -86,6 +86,52 @@ function call(method, urlPath, body, cookie) {
     });
 }
 
+const TEST_BRANCH_CODES = ['DEPTA', 'DEPTB'];
+const TEST_USERNAMES = [
+    'hos.dept.a', 'hos.dept.b', 'fac.one', 'fac.fake',
+    'fac.nounder', 'fac.dept.b', 'fac.rejectme', 'fac.direct'
+];
+
+async function cleanupTestFixtures() {
+    const db = require('../src/db/pool');
+    if (!db.isConfigured()) return;
+    try {
+        await db.query(`
+            DELETE FROM faculty_registration_requests
+             WHERE UPPER(branch_code) = ANY($1)
+                OR LOWER(username) = ANY($2)
+        `, [TEST_BRANCH_CODES, TEST_USERNAMES]);
+
+        await db.query(`
+            DELETE FROM faculty_subjects
+             WHERE faculty_id IN (
+                 SELECT f.id FROM faculty f
+                   LEFT JOIN departments d ON d.id = f.department_id
+                  WHERE UPPER(d.code) = ANY($1) OR LOWER(f.code) = ANY($2)
+             )
+        `, [TEST_BRANCH_CODES, TEST_USERNAMES]);
+
+        await db.query(`
+            DELETE FROM users
+             WHERE LOWER(username) = ANY($1)
+                OR department_id IN (SELECT id FROM departments WHERE UPPER(code) = ANY($2))
+        `, [TEST_USERNAMES, TEST_BRANCH_CODES]);
+
+        await db.query(`
+            DELETE FROM faculty
+             WHERE department_id IN (SELECT id FROM departments WHERE UPPER(code) = ANY($1))
+                OR LOWER(code) = ANY($2)
+        `, [TEST_BRANCH_CODES, TEST_USERNAMES]);
+
+        await db.query(`
+            DELETE FROM departments
+             WHERE UPPER(code) = ANY($1)
+        `, [TEST_BRANCH_CODES]);
+    } catch (err) {
+        console.warn('[cleanupTestFixtures] non-critical cleanup warning:', err.message);
+    }
+}
+
 async function run() {
     console.log('\n====================================');
     console.log('TecSubstitution — Phase B7.1 Faculty Self-Registration Tests\n');
@@ -98,6 +144,7 @@ async function run() {
         resetBranchForTesting();
         store.resetForEmptyInstance();
         facultyRequests.resetForTesting();
+        await cleanupTestFixtures();
 
         // -------------------------------------------------------------
         // Setup: Register two distinct branches and HOS accounts
@@ -547,6 +594,7 @@ async function run() {
         });
 
     } finally {
+        await cleanupTestFixtures();
         await stopServer();
     }
 

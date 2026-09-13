@@ -288,7 +288,7 @@ async function approveRequest(id, sessionUser) {
     const reviewedAt = new Date().toISOString();
 
     // Transactionally create the actual faculty user account
-    const createdUser = users.createApprovedFacultyUser({
+    const createdUser = await users.createApprovedFacultyUser({
         username: req.username,
         name: req.fullName || req.full_name,
         phone: req.phone,
@@ -302,6 +302,13 @@ async function approveRequest(id, sessionUser) {
     req.status = 'APPROVED';
     req.reviewedBy = reviewer;
     req.reviewedAt = reviewedAt;
+
+    const memApprove = inMemoryRequests.find(r => String(r.id) === targetId || (r.username && r.username === req.username));
+    if (memApprove) {
+        memApprove.status = 'APPROVED';
+        memApprove.reviewedBy = reviewer;
+        memApprove.reviewedAt = reviewedAt;
+    }
 
     if (db.isConfigured()) {
         try {
@@ -360,6 +367,14 @@ async function rejectRequest(id, sessionUser, reason = null) {
     req.reviewedBy = reviewer;
     req.reviewedAt = reviewedAt;
     req.rejectionReason = rejectionReason;
+
+    const memReject = inMemoryRequests.find(r => String(r.id) === targetId || (r.username && r.username === req.username));
+    if (memReject) {
+        memReject.status = 'REJECTED';
+        memReject.reviewedBy = reviewer;
+        memReject.reviewedAt = reviewedAt;
+        memReject.rejectionReason = rejectionReason;
+    }
 
     if (db.isConfigured()) {
         try {

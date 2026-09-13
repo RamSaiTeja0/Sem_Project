@@ -109,9 +109,9 @@ router.get('/accounts', (req, res) => {
     });
 });
 
-router.post('/register', (req, res) => {
+router.post('/register', async (req, res) => {
     try {
-        const user = users.register(req.body || {}, req.session);
+        const user = await users.register(req.body || {}, req.session);
         // If an already authenticated HOS is creating a faculty account, do not overwrite their session
         const isHosCreating = req.session && (req.session.role === 'hos' || req.session.role === 'coordinator');
         if (!isHosCreating) {
@@ -164,14 +164,15 @@ router.get('/profile', (req, res) => {
     res.json({ profile: publicUser(profile || req.session) });
 });
 
-router.put('/profile', (req, res) => {
+router.put('/profile', async (req, res) => {
     if (!req.session) {
         return res.status(401).json({ error: 'Sign in to update your profile.', code: 'UNAUTHENTICATED' });
     }
     try {
-        const updated = users.updateProfile(req.session.username, req.body || {});
+        const updated = await users.updateProfile(req.session.username, req.body || {});
         if (updated.phone) req.session.phone = updated.phone;
         if (updated.subjects) req.session.subjects = updated.subjects;
+        if (updated.name) req.session.name = updated.name;
         res.json({ profile: publicUser(updated) });
     } catch (err) {
         res.status(err.status || 400).json({ error: err.message, code: err.code || 'PROFILE_UPDATE_FAILED' });
