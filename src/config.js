@@ -112,4 +112,36 @@ const config = {
     loadDemoData: boolOr(process.env.LOAD_DEMO_DATA, false)
 };
 
+function validateConfig(options = {}) {
+    const isProd = (options.env || config.env) === 'production';
+    const warnings = [];
+    const errors = [];
+
+    if (!config.sessionSecretConfigured) {
+        if (isProd) {
+            errors.push('ERROR: SESSION_SECRET is required in production. Set SESSION_SECRET in the environment before starting the server.');
+        } else {
+            warnings.push('WARNING: SESSION_SECRET is not set in your environment or .env file. An ephemeral random secret was generated for this process. Sessions will not survive a restart. Set SESSION_SECRET to persist sessions across restarts.');
+        }
+    } else if (isProd && config.sessionSecret.length < 16) {
+        errors.push('ERROR: SESSION_SECRET is too short. Use a cryptographically strong secret of at least 32 characters in production.');
+    }
+
+    if (config.authRequired && !config.demoPasswordConfigured) {
+        warnings.push('WARNING: Sign-in is required (AUTH_REQUIRED=true) but DEMO_PASSWORD is still the default. Set DEMO_PASSWORD before exposing this deployment.');
+    }
+
+    if (errors.length > 0) {
+        const message = errors.join('\n');
+        if (options.noThrow) {
+            return { valid: false, errors, warnings };
+        }
+        throw new Error(message);
+    }
+
+    return { valid: true, errors: [], warnings };
+}
+
+config.validateConfig = validateConfig;
+
 module.exports = config;

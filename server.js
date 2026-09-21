@@ -171,6 +171,9 @@ app.use((err, req, res, next) => {
  * fresh start, and the terminal always says which port actually came up.
  */
 function start(port = config.port, fallbacks = config.fallbackPorts) {
+    // Validate configuration (throws fail-fast error in production if required secrets are missing)
+    const validation = config.validateConfig();
+
     const server = app.listen(port);
     const queue = (fallbacks || []).slice();
 
@@ -185,16 +188,9 @@ function start(port = config.port, fallbacks = config.fallbackPorts) {
             ? 'Sign-in required: AUTH_REQUIRED=true'
             : 'Sign-in optional: visit /login to sign in, or browse as a guest.');
 
-        // Say plainly what is not production-ready, rather than letting a
-        // deployment quietly run on defaults that were never meant to ship.
-        if (!config.sessionSecretConfigured) {
-            console.warn('WARNING: SESSION_SECRET is not set — a random key was generated for ' +
-                'this process. Sessions will not survive a restart. Set SESSION_SECRET before ' +
-                'deploying.');
-        }
-        if (config.authRequired && !config.demoPasswordConfigured) {
-            console.warn('WARNING: sign-in is required but DEMO_PASSWORD is still the documented ' +
-                'default. Set DEMO_PASSWORD before exposing this to anyone.');
+        // Print any startup configuration warnings
+        if (validation && Array.isArray(validation.warnings)) {
+            validation.warnings.forEach(w => console.warn(w));
         }
     });
 

@@ -40,6 +40,7 @@ const suites = [
     'gemini_n8n.test.js',
     'gemini_accuracy.test.js',
     'staging_approval.test.js',
+    'config_and_session_persistence.test.js',
     'live_verification.js'
 ];
 let failures = 0;
