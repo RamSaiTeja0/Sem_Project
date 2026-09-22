@@ -23,7 +23,7 @@ const {
     UPLOADS_ROOT
 } = require('../data/uploads');
 const { validateExtractedContract } = require('../core/contractValidator');
-const { extractTimetableWithGemini, GeminiExtractionError } = require('../core/geminiExtractor');
+const { extractTimetableWithGemini, verifyTimetableWithGemini, GeminiExtractionError } = require('../core/geminiExtractor');
 const { resolveContract } = require('../core/entityResolver');
 
 /**
@@ -31,7 +31,9 @@ const { resolveContract } = require('../core/entityResolver');
  *
  * @param {string} uploadId
  * @param {Object} [options]
- * @param {Function} [options.geminiTransport] - Custom mock transport for testing
+ * @param {Function} [options.geminiTransport] - Custom mock transport for testing (default/both stages)
+ * @param {Function} [options.stage1Transport] - Custom mock transport for Stage 1
+ * @param {Function} [options.stage2Transport] - Custom mock transport for Stage 2
  * @param {string} [options.apiKey] - Override API key
  * @param {string} [options.model] - Override model
  * @returns {Promise<Object>} Result object with status and metadata
@@ -94,28 +96,31 @@ async function runExtractionPipeline(uploadId, options = {}) {
     }
 
     const fileBuffer = fs.readFileSync(filePath);
+    const uploadContext = {
+        departmentCode: upload.departmentCode,
+        uploadType: upload.uploadType,
+        facultyName: upload.facultyId,
+        className: options.className || upload.className || null,
+        originalFilename: upload.originalFilename
+    };
 
-    // Call Gemini Vision
-    let extractedJson;
+    // -------------------------------------------------------------------------
+    // Step 1: Stage 1 Gemini Vision Extraction
+    // -------------------------------------------------------------------------
+    let stage1Json;
     try {
-        extractedJson = await extractTimetableWithGemini({
+        stage1Json = await extractTimetableWithGemini({
             fileBuffer,
             mimeType: upload.fileType || 'application/pdf',
-            uploadContext: {
-                departmentCode: upload.departmentCode,
-                uploadType: upload.uploadType,
-                facultyName: upload.facultyId,
-                className: options.className || upload.className || null,
-                originalFilename: upload.originalFilename
-            }
+            uploadContext
         }, {
             apiKey: options.apiKey,
             model: options.model,
-            customTransport: options.geminiTransport
+            customTransport: options.stage1Transport || options.geminiTransport
         });
     } catch (geminiErr) {
         const errorCode = geminiErr.code || 'GEMINI_EXTRACTION_FAILED';
-        const errorMessage = geminiErr.message || 'Gemini extraction failed.';
+        const errorMessage = geminiErr.message || 'Gemini Stage 1 extraction failed.';
         await markFailed(uploadId, errorCode, errorMessage, geminiErr.details);
         return {
             success: false,
@@ -127,16 +132,58 @@ async function runExtractionPipeline(uploadId, options = {}) {
         };
     }
 
-    // Validate extracted JSON against B2.1 schema & authoritative upload metadata
-    // Note: Catalog reference resolution is delegated to Phase B2.5 resolveContract below
-    const validation = validateExtractedContract(extractedJson, upload, { skipCatalogCheck: true });
+    // Basic JSON safety check on Stage 1 draft
+    if (!stage1Json || typeof stage1Json !== 'object' || Array.isArray(stage1Json)) {
+        await markFailed(uploadId, 'INVALID_JSON_STRUCTURE', 'Stage 1 extraction produced invalid JSON object.', null, stage1Json);
+        return {
+            success: false,
+            uploadId,
+            status: 'FAILED',
+            code: 'INVALID_JSON_STRUCTURE',
+            error: 'Stage 1 extraction produced invalid JSON structure.'
+        };
+    }
+
+    // -------------------------------------------------------------------------
+    // Step 2: Stage 2 Gemini Vision Multimodal Verification (Original Image + Stage 1 JSON)
+    // -------------------------------------------------------------------------
+    let stage2Json;
+    try {
+        stage2Json = await verifyTimetableWithGemini({
+            fileBuffer,
+            mimeType: upload.fileType || 'application/pdf',
+            stage1Json,
+            uploadContext
+        }, {
+            apiKey: options.apiKey,
+            model: options.model,
+            customTransport: options.stage2Transport || options.geminiTransport
+        });
+    } catch (stage2Err) {
+        const errorCode = stage2Err.code || 'GEMINI_VERIFICATION_FAILED';
+        const errorMessage = stage2Err.message || 'Gemini Stage 2 verification failed.';
+        await markFailed(uploadId, errorCode, errorMessage, stage2Err.details, stage1Json);
+        return {
+            success: false,
+            uploadId,
+            status: 'FAILED',
+            code: errorCode,
+            error: errorMessage,
+            details: stage2Err.details || null
+        };
+    }
+
+    // -------------------------------------------------------------------------
+    // Step 3: Final B2.1 Validation on Verified Stage 2 JSON
+    // -------------------------------------------------------------------------
+    const validation = validateExtractedContract(stage2Json, upload, { skipCatalogCheck: true });
 
     if (!validation.ok) {
         await markFailed(uploadId, validation.code || 'VALIDATION_FAILED', validation.errors.join('; '), {
             errors: validation.errors,
             conflicts: validation.conflicts,
             missingReferences: validation.missingReferences
-        }, extractedJson);
+        }, stage2Json);
 
         return {
             success: false,
@@ -152,9 +199,11 @@ async function runExtractionPipeline(uploadId, options = {}) {
         };
     }
 
-    // Staging: Save validated JSON and resolve against branch catalog (zero silent creation)
-    const resolution = await resolveContract(extractedJson, upload.departmentCode);
-    await saveStagedData(uploadId, extractedJson, 'VALID', null, {
+    // -------------------------------------------------------------------------
+    // Step 4: Staging & Branch Catalog Entity Resolution
+    // -------------------------------------------------------------------------
+    const resolution = await resolveContract(stage2Json, upload.departmentCode);
+    await saveStagedData(uploadId, stage2Json, 'VALID', null, {
         importStatus: 'STAGED',
         unresolvedEntities: resolution.unresolvedEntities
     });
@@ -168,9 +217,9 @@ async function runExtractionPipeline(uploadId, options = {}) {
         status: updated.status,
         department: upload.departmentCode,
         uploadType: upload.uploadType,
-        entryCount: Array.isArray(extractedJson.entries) ? extractedJson.entries.length : 0,
+        entryCount: Array.isArray(stage2Json.entries) ? stage2Json.entries.length : 0,
         staged: true,
-        message: 'Extracted timetable validated and staged successfully.'
+        message: 'Extracted timetable verified, validated, and staged successfully.'
     };
 }
 

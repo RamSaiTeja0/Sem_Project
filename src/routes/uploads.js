@@ -34,8 +34,8 @@ const {
 ensureUploadDir();
 
 // Allowed timetable file extensions and mime types
-const ALLOWED_EXTS = new Set(['.png', '.jpg', '.jpeg', '.pdf']);
-const ALLOWED_MIMES = new Set(['image/png', 'image/jpeg', 'image/pjpeg', 'application/pdf']);
+const ALLOWED_EXTS = new Set(['.png', '.jpg', '.jpeg', '.webp', '.pdf']);
+const ALLOWED_MIMES = new Set(['image/png', 'image/jpeg', 'image/pjpeg', 'image/webp', 'application/pdf']);
 
 const storage = multer.diskStorage({
     destination: (req, file, cb) => {
@@ -59,8 +59,15 @@ const uploadMiddleware = multer({
         const ext = path.extname(file.originalname || '').toLowerCase();
         const mime = (file.mimetype || '').toLowerCase();
 
+        if (ext === '.heic' || ext === '.heif' || mime === 'image/heic' || mime === 'image/heif') {
+            const err = new Error('HEIC/HEIF image format is not supported directly. Please convert to PNG, JPG, or WebP before uploading.');
+            err.code = 'UNSUPPORTED_FORMAT';
+            err.status = 400;
+            return cb(err);
+        }
+
         if (!ALLOWED_EXTS.has(ext) || !ALLOWED_MIMES.has(mime)) {
-            const err = new Error('Invalid file type. Allowed formats: PNG, JPG, JPEG, PDF.');
+            const err = new Error('Invalid file type. Allowed formats: PNG, JPG, JPEG, WEBP, PDF.');
             err.code = 'INVALID_FILE_TYPE';
             err.status = 400;
             return cb(err);

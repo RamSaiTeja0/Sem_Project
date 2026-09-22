@@ -84,6 +84,16 @@ async function run() {
         assert.strictEqual(anonSession.body.user, null);
     });
 
+    const anonDashboard = await call(OPEN, 'GET', '/dashboard');
+    check('unauthenticated dashboard HTML hides HOD management and logout by default', () => {
+        assert.strictEqual(anonDashboard.status, 200);
+        assert.ok(anonDashboard.raw.includes('id="navFaculty" style="display:none;"'), 'navFaculty hidden by default');
+        assert.ok(anonDashboard.raw.includes('id="navManage" style="display:none;"'), 'navManage hidden by default');
+        assert.ok(anonDashboard.raw.includes('id="navImport" style="display:none;"'), 'navImport hidden by default');
+        assert.ok(anonDashboard.raw.includes('id="navAbout" style="display:none;"'), 'navAbout hidden by default');
+        assert.ok(anonDashboard.raw.includes('id="sidebarLogout" style="display:none;"'), 'sidebarLogout hidden by default');
+    });
+
     const openTimetable = await call(OPEN, 'GET', '/api/timetable');
     check('the demo timetable stays browsable without signing in', () => {
         assert.strictEqual(openTimetable.status, 200);

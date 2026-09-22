@@ -364,7 +364,23 @@ async function run() {
         });
 
         // ---------------------------------------------------------------------
-        console.log('\n[6] Asynchronous n8n Webhook Dispatch');
+        console.log('\n[6] Transient Error Classification & Retry Logic');
+        // ---------------------------------------------------------------------
+        const { isTransientError } = require('../src/core/geminiExtractor');
+        check('isTransientError identifies 429, 500, 502, 503, 504 and high demand messages', () => {
+            assert.strictEqual(isTransientError(429), true);
+            assert.strictEqual(isTransientError(500), true);
+            assert.strictEqual(isTransientError(502), true);
+            assert.strictEqual(isTransientError(503), true);
+            assert.strictEqual(isTransientError(504), true);
+            assert.strictEqual(isTransientError(400, { error: { message: 'This model is currently experiencing high demand.' } }), true);
+            assert.strictEqual(isTransientError(401), false);
+            assert.strictEqual(isTransientError(403), false);
+            assert.strictEqual(isTransientError(400, { error: { message: 'Invalid argument' } }), false);
+        });
+
+        // ---------------------------------------------------------------------
+        console.log('\n[7] Asynchronous n8n Webhook Dispatch');
         // ---------------------------------------------------------------------
         await checkAsync('n8n webhook dispatch handles offline webhook server without failing upload', async () => {
             // Point webhook to a dummy closed port

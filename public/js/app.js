@@ -160,7 +160,7 @@
         dashboard: 'Dashboard',
         availability: 'Faculty Availability',
         substitute: 'Adjust / Substitute',
-        schedule: 'My Schedule',
+        schedule: 'My Timetable',
         timetable: 'Master Timetable',
         faculty: 'Faculty Directory',
         requests: 'Faculty Registration Requests',
@@ -185,7 +185,21 @@
         return VIEW_NAMES.indexOf(name) >= 0 ? name : null;
     }
 
+    var HOS_ONLY_VIEWS = ['faculty', 'requests', 'attendance', 'invigilation', 'invig-requests', 'hos-substitutions', 'manage', 'import', 'about'];
+    var FACULTY_ONLY_VIEWS = ['my-attendance', 'my-invigilation', 'request-invigilation', 'faculty-substitutions'];
+
     function showView(name, updateHash) {
+        var isFaculty = Boolean(state.user && state.user.role === 'faculty');
+        var isHOS = Boolean(state.user && (state.user.role === 'hos' || state.user.role === 'coordinator' || state.user.role === 'admin'));
+
+        if (!state.user && (HOS_ONLY_VIEWS.indexOf(name) >= 0 || FACULTY_ONLY_VIEWS.indexOf(name) >= 0)) {
+            name = 'dashboard';
+        } else if (isFaculty && HOS_ONLY_VIEWS.indexOf(name) >= 0) {
+            name = 'schedule';
+        } else if (isHOS && FACULTY_ONLY_VIEWS.indexOf(name) >= 0) {
+            name = 'dashboard';
+        }
+
         Array.prototype.forEach.call(document.querySelectorAll('.view'), function (section) {
             section.classList.toggle('is-active', section.id === 'view-' + name);
         });
@@ -226,21 +240,24 @@
             ? (state.user.role === 'faculty' ? 'Faculty · ' + state.user.department : (state.user.role === 'hos' ? 'HOS · ' + state.user.department : 'HOS / Coordinator'))
             : (session && session.authRequired ? 'Sign-in required' : 'Not signed in');
 
-        el('userName').textContent = name;
-        el('userRole').textContent = role;
-        el('userAvatar').textContent = initials(name);
+        if (el('userName')) el('userName').textContent = name;
+        if (el('userRole')) el('userRole').textContent = role;
+        if (el('userAvatar')) el('userAvatar').textContent = initials(name);
 
         if (el('loginLink')) el('loginLink').style.display = state.user ? 'none' : '';
         if (el('logoutBtn')) {
             el('logoutBtn').hidden = !state.user;
             el('logoutBtn').style.display = state.user ? '' : 'none';
         }
+        if (el('sidebarLogout')) {
+            el('sidebarLogout').style.display = state.user ? '' : 'none';
+        }
 
-        var isFaculty = state.user && state.user.role === 'faculty';
-        var isHOS = state.user && (state.user.role === 'hos' || state.user.role === 'coordinator' || state.user.role === 'admin');
+        var isFaculty = Boolean(state.user && state.user.role === 'faculty');
+        var isHOS = Boolean(state.user && (state.user.role === 'hos' || state.user.role === 'coordinator' || state.user.role === 'admin'));
 
         // Role-based navigation visibility
-        if (el('navFaculty')) el('navFaculty').style.display = isFaculty ? 'none' : '';
+        if (el('navFaculty')) el('navFaculty').style.display = isHOS ? '' : 'none';
         if (el('navRequests')) el('navRequests').style.display = isHOS ? '' : 'none';
         if (el('navAttendance')) el('navAttendance').style.display = isHOS ? '' : 'none';
         if (el('navMyAttendance')) el('navMyAttendance').style.display = isFaculty ? '' : 'none';
@@ -250,11 +267,11 @@
         if (el('navRequestInvigilation')) el('navRequestInvigilation').style.display = isFaculty ? '' : 'none';
         if (el('navFacultySubstitutions')) el('navFacultySubstitutions').style.display = isFaculty ? '' : 'none';
         if (el('navHosSubstitutions')) el('navHosSubstitutions').style.display = isHOS ? '' : 'none';
-        if (el('navManageLabel')) el('navManageLabel').style.display = isFaculty ? 'none' : '';
-        if (el('navManage')) el('navManage').style.display = isFaculty ? 'none' : '';
-        if (el('navImport')) el('navImport').style.display = isFaculty ? 'none' : '';
-        if (el('navAbout')) el('navAbout').style.display = isFaculty ? 'none' : '';
-        if (el('navSchedule')) el('navSchedule').style.display = isFaculty ? '' : 'none';
+        if (el('navManageLabel')) el('navManageLabel').style.display = isHOS ? '' : 'none';
+        if (el('navManage')) el('navManage').style.display = isHOS ? '' : 'none';
+        if (el('navImport')) el('navImport').style.display = isHOS ? '' : 'none';
+        if (el('navAbout')) el('navAbout').style.display = isHOS ? '' : 'none';
+        if (el('navSchedule')) el('navSchedule').style.display = (isFaculty || isHOS) ? '' : 'none';
 
         if (isHOS) {
             updatePendingRequestsBadge();
@@ -266,17 +283,17 @@
 
         var manageBtn = el('ttManageBtn');
         if (manageBtn) {
-            manageBtn.style.display = isFaculty ? 'none' : '';
+            manageBtn.style.display = isHOS ? '' : 'none';
         }
 
         var facAddCard = el('facAddCard');
         if (facAddCard) {
-            facAddCard.style.display = isFaculty ? 'none' : '';
+            facAddCard.style.display = isHOS ? '' : 'none';
         }
 
         var hosUploadCard = el('hosUploadCard');
         if (hosUploadCard) {
-            hosUploadCard.style.display = isFaculty ? 'none' : '';
+            hosUploadCard.style.display = isHOS ? '' : 'none';
         }
 
         var deptCode = state.user ? state.user.department : 'Branch';
@@ -2859,35 +2876,41 @@
                 chip.className = 'pill ' + (warnings.length ? 'pill-warn' : 'pill-ok');
             }
 
-            el('validationStats').innerHTML = [
-                { label: 'Errors', value: 0, note: 'a loaded timetable has none by definition', tone: 'ok' },
-                { label: 'Warnings', value: warnings.length,
-                  note: warnings.length ? 'listed below' : 'none reported',
-                  tone: warnings.length ? 'busy' : 'ok' },
-                { label: 'Source', value: meta.origin || '—', note: 'where this timetable came from' },
-                { label: 'Faculty', value: meta.facultyCount, note: 'in the loaded roster' }
-            ].map(statCard).join('');
-
-            if (!warnings.length) {
-                el('validationBody').innerHTML =
-                    '<div class="notice notice-ok">The loaded timetable raised no warnings. ' +
-                    'No faculty member is double-booked, no room hosts two classes at once, ' +
-                    'and every class covers its week.</div>';
-                return;
+            if (el('validationStats')) {
+                el('validationStats').innerHTML = [
+                    { label: 'Errors', value: 0, note: 'a loaded timetable has none by definition', tone: 'ok' },
+                    { label: 'Warnings', value: warnings.length,
+                      note: warnings.length ? 'listed below' : 'none reported',
+                      tone: warnings.length ? 'busy' : 'ok' },
+                    { label: 'Source', value: meta.origin || '—', note: 'where this timetable came from' },
+                    { label: 'Faculty', value: meta.facultyCount, note: 'in the loaded roster' }
+                ].map(statCard).join('');
             }
 
-            el('validationBody').innerHTML =
-                '<div class="notice notice-info">These are <strong>warnings</strong>, not errors. ' +
-                'A timetable with errors is refused at load time, so anything listed here was ' +
-                'accepted — it is reported so you can decide whether it is intended.</div>' +
-                '<div class="table-scroll" style="margin-top:14px;"><table class="data"><thead><tr>' +
-                '<th>Code</th><th>Detail</th></tr></thead><tbody>' +
-                warnings.map(function (w) {
-                    return '<tr><td class="mono">' + esc(w.code) + '</td><td>' + esc(w.message) + '</td></tr>';
-                }).join('') + '</tbody></table></div>';
+            if (el('validationBody')) {
+                if (!warnings.length) {
+                    el('validationBody').innerHTML =
+                        '<div class="notice notice-ok">The loaded timetable raised no warnings. ' +
+                        'No faculty member is double-booked, no room hosts two classes at once, ' +
+                        'and every class covers its week.</div>';
+                    return;
+                }
+
+                el('validationBody').innerHTML =
+                    '<div class="notice notice-info">These are <strong>warnings</strong>, not errors. ' +
+                    'A timetable with errors is refused at load time, so anything listed here was ' +
+                    'accepted — it is reported so you can decide whether it is intended.</div>' +
+                    '<div class="table-scroll" style="margin-top:14px;"><table class="data"><thead><tr>' +
+                    '<th>Code</th><th>Detail</th></tr></thead><tbody>' +
+                    warnings.map(function (w) {
+                        return '<tr><td class="mono">' + esc(w.code) + '</td><td>' + esc(w.message) + '</td></tr>';
+                    }).join('') + '</tbody></table></div>';
+            }
         }).catch(function (err) {
-            el('validationBody').innerHTML =
-                '<div class="notice notice-error">Could not load the report: ' + esc(err.message) + '</div>';
+            if (el('validationBody')) {
+                el('validationBody').innerHTML =
+                    '<div class="notice notice-error">Could not load the report: ' + esc(err.message) + '</div>';
+            }
         });
     }
 
@@ -2912,7 +2935,7 @@
                 html += '</tr>';
             });
 
-            el('heatTable').innerHTML = html + '</tbody>';
+            if (el('heatTable')) el('heatTable').innerHTML = html + '</tbody>';
         });
     }
 
@@ -2987,8 +3010,8 @@
     }
 
     function loadAttendance() {
-        var day = el('attDay').value;
-        var className = el('attClass').value;
+        var day = el('attDay') ? el('attDay').value : null;
+        var className = el('attClass') ? el('attClass').value : null;
         if (!day || !className) return Promise.resolve();
 
         return getJson(API.timetable + '?class=' + encodeURIComponent(className)).then(function (grid) {
@@ -2997,36 +3020,40 @@
                 .sort(function (a, b) { return a.period - b.period; });
 
             if (!rows.length) {
-                el('attBody').innerHTML =
-                    '<tr><td colspan="6" class="muted">No scheduled periods for ' + esc(className) +
-                    ' on ' + esc(day) + '.</td></tr>';
-                el('attStats').innerHTML = '';
+                if (el('attBody')) {
+                    el('attBody').innerHTML =
+                        '<tr><td colspan="6" class="muted">No scheduled periods for ' + esc(className) +
+                        ' on ' + esc(day) + '.</td></tr>';
+                }
+                if (el('attStats')) el('attStats').innerHTML = '';
                 return;
             }
 
-            el('attBody').innerHTML = rows.map(function (cell) {
-                var key = className + '|' + day + '|' + cell.period;
-                var mark = state.attendance[key] || null;
-                var label = mark === 'held' ? '<span class="badge badge-free">Held</span>'
-                    : mark === 'missed' ? '<span class="badge badge-busy">Not held</span>'
-                    : mark === 'substituted' ? '<span class="badge badge-neutral">Substituted</span>'
-                    : '<span class="badge badge-muted">Unmarked</span>';
+            if (el('attBody')) {
+                el('attBody').innerHTML = rows.map(function (cell) {
+                    var key = className + '|' + day + '|' + cell.period;
+                    var mark = state.attendance[key] || null;
+                    var label = mark === 'held' ? '<span class="badge badge-free">Held</span>'
+                        : mark === 'missed' ? '<span class="badge badge-busy">Not held</span>'
+                        : mark === 'substituted' ? '<span class="badge badge-neutral">Substituted</span>'
+                        : '<span class="badge badge-muted">Unmarked</span>';
 
-                return '<tr data-key="' + esc(key) + '">' +
-                    '<td>P' + esc(cell.period) + '</td>' +
-                    '<td>' + esc(cell.subject) + '</td>' +
-                    '<td>' + esc(cell.faculty || '—') + '</td>' +
-                    '<td>' + esc(cell.room || '—') + '</td>' +
-                    '<td class="att-status">' + label + '</td>' +
-                    '<td><span class="mark-group">' +
-                        ['held', 'missed', 'substituted'].map(function (value) {
-                            return '<button type="button" class="mark' + (mark === value ? ' is-on' : '') +
-                                '" data-mark="' + value + '" data-key="' + esc(key) + '">' +
-                                (value === 'held' ? 'Held' : value === 'missed' ? 'Not held' : 'Substituted') +
-                                '</button>';
-                        }).join('') +
-                    '</span></td></tr>';
-            }).join('');
+                    return '<tr data-key="' + esc(key) + '">' +
+                        '<td>P' + esc(cell.period) + '</td>' +
+                        '<td>' + esc(cell.subject) + '</td>' +
+                        '<td>' + esc(cell.faculty || '—') + '</td>' +
+                        '<td>' + esc(cell.room || '—') + '</td>' +
+                        '<td class="att-status">' + label + '</td>' +
+                        '<td><span class="mark-group">' +
+                            ['held', 'missed', 'substituted'].map(function (value) {
+                                return '<button type="button" class="mark' + (mark === value ? ' is-on' : '') +
+                                    '" data-mark="' + value + '" data-key="' + esc(key) + '">' +
+                                    (value === 'held' ? 'Held' : value === 'missed' ? 'Not held' : 'Substituted') +
+                                    '</button>';
+                            }).join('') +
+                        '</span></td></tr>';
+                }).join('');
+            }
 
             var counts = { held: 0, missed: 0, substituted: 0, unmarked: 0 };
             rows.forEach(function (cell) {
@@ -3034,16 +3061,20 @@
                 counts[mark || 'unmarked']++;
             });
 
-            el('attStats').innerHTML = [
-                { label: 'Scheduled', value: rows.length, note: className + ' · ' + day },
-                { label: 'Held', value: counts.held, note: 'marked as taken', tone: 'ok' },
-                { label: 'Not held', value: counts.missed, note: 'marked as missed', tone: 'busy' },
-                { label: 'Unmarked', value: counts.unmarked, note: 'still to record' }
-            ].map(statCard).join('');
+            if (el('attStats')) {
+                el('attStats').innerHTML = [
+                    { label: 'Scheduled', value: rows.length, note: className + ' · ' + day },
+                    { label: 'Held', value: counts.held, note: 'marked as taken', tone: 'ok' },
+                    { label: 'Not held', value: counts.missed, note: 'marked as missed', tone: 'busy' },
+                    { label: 'Unmarked', value: counts.unmarked, note: 'still to record' }
+                ].map(statCard).join('');
+            }
         }).catch(function (err) {
-            el('attBody').innerHTML =
-                '<tr><td colspan="6" class="notice notice-error">Could not load attendance rows: ' +
-                esc(err.message) + '</td></tr>';
+            if (el('attBody')) {
+                el('attBody').innerHTML =
+                    '<tr><td colspan="6" class="notice notice-error">Could not load attendance rows: ' +
+                    esc(err.message) + '</td></tr>';
+            }
         });
     }
 
@@ -3293,13 +3324,16 @@
 
             var confirmBtn = el('importConfirm');
             if (confirmBtn) confirmBtn.addEventListener('click', commitImport);
-            el('importCancel').addEventListener('click', function () {
-                state.pendingImport = null;
-                state.importFile = null;
-                container.innerHTML = '';
-                el('importFile').value = '';
-                workflowStep('upload');
-            });
+            var cancelBtn = el('importCancel');
+            if (cancelBtn) {
+                cancelBtn.addEventListener('click', function () {
+                    state.pendingImport = null;
+                    state.importFile = null;
+                    container.innerHTML = '';
+                    if (el('importFile')) el('importFile').value = '';
+                    workflowStep('upload');
+                });
+            }
         }).catch(function () {
             progress.stop();
             workflowStep('process', true);
@@ -4202,17 +4236,19 @@
             var submit = el('branchSubmit');
             if (submit) submit.disabled = !data.writable;
 
-            el('branchBody').innerHTML = data.branches.map(function (b) {
-                return '<tr>' +
-                    '<td class="mono">' + esc(b.code) + '</td>' +
-                    '<td>' + esc(b.name) + '</td>' +
-                    '<td class="num">' + esc(b.facultyCount) + '</td>' +
-                    '<td>' + (data.writable
-                        ? '<button type="button" class="btn btn-secondary btn-sm" data-branch-delete="' +
-                          esc(b.code) + '">Delete</button>'
-                        : '<span class="muted">read-only</span>') + '</td>' +
-                    '</tr>';
-            }).join('');
+            if (el('branchBody')) {
+                el('branchBody').innerHTML = data.branches.map(function (b) {
+                    return '<tr>' +
+                        '<td class="mono">' + esc(b.code) + '</td>' +
+                        '<td>' + esc(b.name) + '</td>' +
+                        '<td class="num">' + esc(b.facultyCount) + '</td>' +
+                        '<td>' + (data.writable
+                            ? '<button type="button" class="btn btn-secondary btn-sm" data-branch-delete="' +
+                              esc(b.code) + '">Delete</button>'
+                            : '<span class="muted">read-only</span>') + '</td>' +
+                        '</tr>';
+                }).join('');
+            }
 
             Array.prototype.forEach.call(
                 document.querySelectorAll('[data-branch-delete]'), function (button) {
@@ -4237,20 +4273,22 @@
             var submit = el('subjectSubmit');
             if (submit) submit.disabled = !data.writable;
 
-            el('subjectBody').innerHTML = data.subjects.length
-                ? data.subjects.map(function (sub) {
-                    return '<tr>' +
-                        '<td class="mono">' + esc(sub.code || '—') + '</td>' +
-                        '<td>' + esc(sub.name) + '</td>' +
-                        '<td>' + esc(sub.department || '—') + '</td>' +
-                        '<td><span class="badge badge-neutral">' + esc(sub.type || 'theory') + '</span></td>' +
-                        '<td>' + (data.writable && sub.code
-                            ? '<button type="button" class="btn btn-secondary btn-sm" data-subject-delete="' +
-                              esc(sub.code) + '">Delete</button>'
-                            : '<span class="muted">read-only</span>') + '</td>' +
-                        '</tr>';
-                }).join('')
-                : '<tr><td colspan="5" class="muted">No subjects for this branch yet.</td></tr>';
+            if (el('subjectBody')) {
+                el('subjectBody').innerHTML = data.subjects.length
+                    ? data.subjects.map(function (sub) {
+                        return '<tr>' +
+                            '<td class="mono">' + esc(sub.code || '—') + '</td>' +
+                            '<td>' + esc(sub.name) + '</td>' +
+                            '<td>' + esc(sub.department || '—') + '</td>' +
+                            '<td><span class="badge badge-neutral">' + esc(sub.type || 'theory') + '</span></td>' +
+                            '<td>' + (data.writable && sub.code
+                                ? '<button type="button" class="btn btn-secondary btn-sm" data-subject-delete="' +
+                                  esc(sub.code) + '">Delete</button>'
+                                : '<span class="muted">read-only</span>') + '</td>' +
+                            '</tr>';
+                    }).join('')
+                    : '<tr><td colspan="5" class="muted">No subjects for this branch yet.</td></tr>';
+            }
 
             Array.prototype.forEach.call(
                 document.querySelectorAll('[data-subject-delete]'), function (button) {
@@ -4275,20 +4313,22 @@
             var submit = el('classSubmit');
             if (submit) submit.disabled = !data.writable;
 
-            el('classBody').innerHTML = data.classes.length
-                ? data.classes.map(function (cls) {
-                    return '<tr>' +
-                        '<td class="mono">' + esc(cls.code) + '</td>' +
-                        '<td>' + esc(cls.department || '—') + '</td>' +
-                        '<td class="num">' + esc(cls.semester == null ? '—' : cls.semester) + '</td>' +
-                        '<td>' + esc(cls.academicYear || '—') + '</td>' +
-                        '<td>' + (data.writable
-                            ? '<button type="button" class="btn btn-secondary btn-sm" data-class-delete="' +
-                              esc(cls.code) + '">Delete</button>'
-                            : '<span class="muted">read-only</span>') + '</td>' +
-                        '</tr>';
-                }).join('')
-                : '<tr><td colspan="5" class="muted">No classes for this branch yet.</td></tr>';
+            if (el('classBody')) {
+                el('classBody').innerHTML = data.classes.length
+                    ? data.classes.map(function (cls) {
+                        return '<tr>' +
+                            '<td class="mono">' + esc(cls.code) + '</td>' +
+                            '<td>' + esc(cls.department || '—') + '</td>' +
+                            '<td class="num">' + esc(cls.semester == null ? '—' : cls.semester) + '</td>' +
+                            '<td>' + esc(cls.academicYear || '—') + '</td>' +
+                            '<td>' + (data.writable
+                                ? '<button type="button" class="btn btn-secondary btn-sm" data-class-delete="' +
+                                  esc(cls.code) + '">Delete</button>'
+                                : '<span class="muted">read-only</span>') + '</td>' +
+                            '</tr>';
+                    }).join('')
+                    : '<tr><td colspan="5" class="muted">No classes for this branch yet.</td></tr>';
+            }
 
             Array.prototype.forEach.call(
                 document.querySelectorAll('[data-class-delete]'), function (button) {
@@ -5200,6 +5240,8 @@
                 });
                 refreshPendingStaging();
             }
+        }
+
         var btnLoadAtt = el('btnLoadAttendance');
         if (btnLoadAtt) {
             btnLoadAtt.addEventListener('click', function () {
@@ -5368,9 +5410,10 @@
 
         setupTimetableUploads();
 
-        var initial = viewFromHash();
-        if (initial) showView(initial, false);
-
-        loadSession().then(bootstrap);
+        loadSession().then(function () {
+            var initial = viewFromHash();
+            if (initial) showView(initial, false);
+            return bootstrap();
+        });
     });
 })();

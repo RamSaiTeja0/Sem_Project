@@ -12,6 +12,8 @@ const legacyDemoConfigs = {
 };
 
 const suites = [
+    'frontend_syntax_and_dom.test.js',
+    'web_auth_and_ui_lifecycle.test.js',
     'accounts.test.js',
     'singlebranch.e2e.test.js',
     'singlebranch.test.js',
@@ -41,11 +43,12 @@ const suites = [
     'gemini_accuracy.test.js',
     'staging_approval.test.js',
     'config_and_session_persistence.test.js',
+    'hod_schedule_and_sql_regression.test.js',
     'live_verification.js'
 ];
 let failures = 0;
 
-const dbSuites = new Set(['database.test.js', 'neon_persistence_verification.test.js']);
+const dbSuites = new Set(['database.test.js', 'neon_persistence_verification.test.js', 'hod_schedule_and_sql_regression.test.js']);
 
 suites.forEach(suite => {
     console.log('\n' + '='.repeat(64));

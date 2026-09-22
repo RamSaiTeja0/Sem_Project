@@ -106,12 +106,14 @@ function validateExtractedContract(payload, uploadRecord = null, options = {}) {
         });
     }
 
+    const contractMaxPeriods = Array.from({ length: 12 }, (_, i) => i + 1);
+
     if (!Array.isArray(payload.periods) || payload.periods.length === 0) {
         errors.push('periods array is required and must contain at least one period.');
         code = code || 'MISSING_REQUIRED_FIELDS';
     } else {
         payload.periods.forEach(p => {
-            const num = normalizePeriodNumber(p);
+            const num = normalizePeriodNumber(p, contractMaxPeriods);
             if (num == null || num < 1 || num > 12) {
                 errors.push(`Invalid period "${p}" in periods array. Expected 1–12.`);
                 code = code || 'INVALID_PERIOD';
@@ -131,6 +133,17 @@ function validateExtractedContract(payload, uploadRecord = null, options = {}) {
         };
     }
 
+    // Optional legend validation (if present, must be arrays)
+    if (payload.faculty_legend !== undefined && payload.faculty_legend !== null && !Array.isArray(payload.faculty_legend)) {
+        errors.push('faculty_legend must be an array when provided.');
+        code = code || 'INVALID_SCHEMA';
+    }
+
+    if (payload.subject_legend !== undefined && payload.subject_legend !== null && !Array.isArray(payload.subject_legend)) {
+        errors.push('subject_legend must be an array when provided.');
+        code = code || 'INVALID_SCHEMA';
+    }
+
     // 6. Detailed Entry Validation & Internal Slot Conflict Detection
     const classSlotSeen = new Map();
     const facultySlotSeen = new Map();
@@ -138,6 +151,12 @@ function validateExtractedContract(payload, uploadRecord = null, options = {}) {
 
     const rootClass = payload.class_name ? String(payload.class_name).trim() : null;
     const rootFaculty = payload.faculty_name ? String(payload.faculty_name).trim() : null;
+    const payloadDays = Array.isArray(payload.days) && payload.days.length > 0
+        ? payload.days.map(d => String(d).trim())
+        : WORKING_DAYS;
+    const payloadPeriods = Array.isArray(payload.periods) && payload.periods.length > 0
+        ? payload.periods.map(p => parseInt(p, 10)).filter(p => !isNaN(p) && p >= 1 && p <= 12)
+        : contractMaxPeriods;
 
     payload.entries.forEach((entry, idx) => {
         const line = idx + 1;
@@ -147,20 +166,20 @@ function validateExtractedContract(payload, uploadRecord = null, options = {}) {
             return;
         }
 
-        const normDay = normalizeDayName(entry.day);
+        const normDay = normalizeDayName(entry.day, payloadDays);
         if (!normDay) {
             errors.push(`Entry ${line}: invalid day "${entry.day}".`);
             code = code || 'INVALID_DAY';
         }
 
-        const normPeriod = normalizePeriodNumber(entry.period);
+        const normPeriod = normalizePeriodNumber(entry.period, payloadPeriods);
         if (normPeriod == null || normPeriod < 1 || normPeriod > 12) {
             errors.push(`Entry ${line}: invalid period "${entry.period}". Expected 1–12.`);
             code = code || 'INVALID_PERIOD';
         }
 
         if (entry.span_to != null) {
-            const span = normalizePeriodNumber(entry.span_to);
+            const span = normalizePeriodNumber(entry.span_to, contractMaxPeriods);
             if (span == null || span < normPeriod || span > 12) {
                 errors.push(`Entry ${line}: span_to "${entry.span_to}" must be between period ${normPeriod} and 12.`);
                 code = code || 'INVALID_PERIOD';

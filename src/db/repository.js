@@ -777,7 +777,7 @@ async function resolveOrCreateClass({ branch, academicYear, semester, section })
 
         // 1. Match by department + semester + section
         const q = await client.query(`
-            SELECT c.id, c.code, c.name, c.semester, c.academic_year AS "academicYear", c.section,
+            SELECT c.id, c.code, c.semester, c.academic_year AS "academicYear", c.section,
                    d.code AS department
               FROM classes c
               JOIN departments d ON d.id = c.department_id
@@ -785,7 +785,7 @@ async function resolveOrCreateClass({ branch, academicYear, semester, section })
                AND (c.semester = $2 OR ($2 IS NULL AND c.semester IS NULL))
                AND (UPPER(c.section) = UPPER($3) OR ($3 IS NULL AND c.section IS NULL))
              LIMIT 1
-        `, [branchCode, semStr, secStr]);
+        `, [branchCode, semStr ? (parseInt(semStr, 10) || null) : null, secStr]);
 
         if (q.rows.length) {
             return q.rows[0];
@@ -795,7 +795,7 @@ async function resolveOrCreateClass({ branch, academicYear, semester, section })
         if (secStr) {
             const legacyCode = `${branchCode}-${secStr}`;
             const legQ = await client.query(`
-                SELECT c.id, c.code, c.name, c.semester, c.academic_year AS "academicYear", c.section,
+                SELECT c.id, c.code, c.semester, c.academic_year AS "academicYear", c.section,
                        d.code AS department
                   FROM classes c
                   JOIN departments d ON d.id = c.department_id
@@ -806,7 +806,7 @@ async function resolveOrCreateClass({ branch, academicYear, semester, section })
 
             if (legQ.rows.length) {
                 const legClass = legQ.rows[0];
-                if (!semStr || legClass.semester === semStr) {
+                if (!semStr || String(legClass.semester) === semStr) {
                     return legClass;
                 }
             }
@@ -828,17 +828,17 @@ async function resolveOrCreateClass({ branch, academicYear, semester, section })
 
         const semClean = semStr ? semStr.replace(/[^A-Za-z0-9]/g, '') : '';
         const generatedCode = `${branchCode}${semClean ? '-' + semClean : ''}${secStr ? '-' + secStr : ''}`;
-        const className = `${branchCode} ${semStr || ''} ${secStr ? 'Sec-' + secStr : ''}`.replace(/\s+/g, ' ').trim();
+        const semInt = semStr ? (parseInt(semStr, 10) || null) : null;
 
         const ins = await client.query(`
-            INSERT INTO classes (code, name, department_id, semester, academic_year, section)
-            VALUES ($1, $2, $3, $4, $5, $6)
+            INSERT INTO classes (code, department_id, semester, academic_year, section)
+            VALUES ($1, $2, $3, $4, $5)
             ON CONFLICT (code) DO UPDATE SET
                 semester = COALESCE(EXCLUDED.semester, classes.semester),
                 academic_year = COALESCE(EXCLUDED.academic_year, classes.academic_year),
                 section = COALESCE(EXCLUDED.section, classes.section)
-            RETURNING id, code, name, semester, academic_year AS "academicYear", section
-        `, [generatedCode, className, deptId, semStr, yrStr, secStr]);
+            RETURNING id, code, semester, academic_year AS "academicYear", section
+        `, [generatedCode, deptId, semInt, yrStr, secStr]);
 
         return {
             ...ins.rows[0],

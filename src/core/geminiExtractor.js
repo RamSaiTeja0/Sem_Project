@@ -1,15 +1,16 @@
 /**
- * Gemini Vision Extractor — Phase B2.4
+ * Gemini Vision Extractor — Phase B2.4 Stage 1
  *
  * Implements multimodal extraction of timetable images/PDFs using Google Gemini AI.
- * Enforces strict JSON output, robust error handling, markdown-fence stripping,
+ * Enforces strict JSON output, bounded exponential backoff retry for transient errors,
+ * model fallback on unavailable endpoints, robust markdown-fence stripping,
  * and zero logging/exposure of API secrets.
  */
 
 const https = require('https');
 const http = require('http');
 const config = require('../config');
-const { buildExtractionPrompt } = require('./geminiPrompt');
+const { buildExtractionPrompt, buildVerificationPrompt } = require('./geminiPrompt');
 
 /**
  * Strip Markdown code blocks (e.g. ```json ... ``` or ``` ... ```) from text.
@@ -39,6 +40,13 @@ class GeminiExtractionError extends Error {
         this.status = status;
         this.details = details;
     }
+}
+
+/**
+ * Helper delay function for exponential backoff.
+ */
+function sleep(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
 }
 
 /**
@@ -111,22 +119,34 @@ function postJson(urlString, headers, bodyData, timeoutMs = 60000) {
 }
 
 /**
- * Extracts timetable data using Gemini Vision.
- *
- * @param {Object} params
- * @param {Buffer} params.fileBuffer - Raw file binary
- * @param {string} params.mimeType - 'application/pdf', 'image/png', etc.
- * @param {Object} params.uploadContext - { departmentCode, uploadType, facultyName, originalFilename }
- * @param {Object} [options]
- * @param {string} [options.apiKey] - Override API key
- * @param {string} [options.model] - Override model name
- * @param {string} [options.baseUrl] - Override base URL
- * @param {number} [options.timeoutMs] - Override timeout
- * @param {Function} [options.customTransport] - Mock transport function for testing (receives request payload)
- * @returns {Promise<Object>} The parsed B2.1 JSON extracted from the document
+ * Checks whether an HTTP response or error indicates a transient condition eligible for retry.
  */
-async function extractTimetableWithGemini(params, options = {}) {
-    const { fileBuffer, mimeType, uploadContext } = params;
+function isTransientError(status, errorBody = null) {
+    if ([429, 500, 502, 503, 504].includes(status)) return true;
+    if (errorBody && errorBody.error) {
+        const msg = String(errorBody.error.message || '');
+        if (/experiencing high demand|temporarily unavailable|resource exhausted|rate limit|quota|overloaded/i.test(msg)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/**
+ * Internal executor for multimodal Gemini API requests with exponential backoff & model fallback.
+ *
+ * @param {Object} executionParams
+ * @param {string} executionParams.promptText
+ * @param {Buffer} executionParams.fileBuffer
+ * @param {string} executionParams.mimeType
+ * @param {number} executionParams.stage - 1 or 2
+ * @param {Object} [executionParams.stage1Json]
+ * @param {Object} [executionParams.uploadContext]
+ * @param {Object} [options]
+ * @returns {Promise<Object>}
+ */
+async function executeGeminiMultimodal(executionParams, options = {}) {
+    const { promptText, fileBuffer, mimeType, stage = 1, stage1Json, uploadContext } = executionParams;
 
     if (!fileBuffer || !Buffer.isBuffer(fileBuffer) || fileBuffer.length === 0) {
         throw new GeminiExtractionError(
@@ -140,14 +160,19 @@ async function extractTimetableWithGemini(params, options = {}) {
     const model = options.model || config.geminiModel || process.env.GEMINI_MODEL || 'gemini-3-flash-preview';
     const baseUrl = (options.baseUrl || config.geminiBaseUrl || 'https://generativelanguage.googleapis.com').replace(/\/$/, '');
     const timeoutMs = options.timeoutMs || config.geminiTimeoutMs || 60000;
+    const maxRetries = Number.isInteger(options.maxRetries) ? options.maxRetries : 3;
+    const initialDelayMs = Number.isInteger(options.initialDelayMs) ? options.initialDelayMs : 1000;
 
-    // Check custom mock transport first (allows offline tests)
+    // Check custom mock transport first (allows offline testing)
     if (typeof options.customTransport === 'function') {
         const mockRaw = await options.customTransport({
+            stage,
             model,
             fileBuffer,
             mimeType,
-            uploadContext
+            uploadContext,
+            stage1Json,
+            promptText
         });
         return processGeminiOutput(mockRaw);
     }
@@ -161,7 +186,6 @@ async function extractTimetableWithGemini(params, options = {}) {
         );
     }
 
-    const promptText = buildExtractionPrompt(uploadContext || {});
     const base64Data = fileBuffer.toString('base64');
 
     const requestPayload = {
@@ -171,7 +195,7 @@ async function extractTimetableWithGemini(params, options = {}) {
                     { text: promptText },
                     {
                         inlineData: {
-                            mimeType: mimeType || 'application/pdf',
+                            mimeType: mimeType || 'image/png',
                             data: base64Data
                         }
                     }
@@ -192,52 +216,89 @@ async function extractTimetableWithGemini(params, options = {}) {
         'x-goog-api-key': apiKey.trim()
     };
 
-    let response = await postJson(targetUrl, headers, JSON.stringify(requestPayload), timeoutMs);
+    let lastError = null;
+    let response = null;
 
-    // Automatic fallback if requested model is no longer available (400/404) or experiencing high demand (503)
-    if (response.body && response.body.error) {
-        const msg = String(response.body.error.message || '');
-        if (/is no longer available|experiencing high demand|not found/i.test(msg) || response.status === 404 || response.status === 503) {
-            const fallbackModels = ['gemini-3-flash-preview', 'gemini-3.1-flash-lite-preview', 'gemini-3.6-flash'];
-            for (const fallbackModel of fallbackModels) {
-                if (model !== fallbackModel) {
-                    const fallbackUrl = `${baseUrl}/v1beta/models/${encodeURIComponent(fallbackModel)}:generateContent`;
-                    const fallbackRes = await postJson(fallbackUrl, headers, JSON.stringify(requestPayload), timeoutMs);
-                    if (fallbackRes.status >= 200 && fallbackRes.status < 300) {
-                        response = fallbackRes;
-                        break;
+    // Bounded exponential backoff retry loop
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        try {
+            response = await postJson(targetUrl, headers, JSON.stringify(requestPayload), timeoutMs);
+
+            // Automatic fallback if model is unavailable or overloaded (404 / 503)
+            if (response.body && response.body.error) {
+                const msg = String(response.body.error.message || '');
+                if (/is no longer available|experiencing high demand|not found/i.test(msg) || response.status === 404 || response.status === 503) {
+                    const fallbackModels = ['gemini-3-flash-preview', 'gemini-3.1-flash-lite-preview', 'gemini-3.6-flash'];
+                    for (const fallbackModel of fallbackModels) {
+                        if (model !== fallbackModel) {
+                            const fallbackUrl = `${baseUrl}/v1beta/models/${encodeURIComponent(fallbackModel)}:generateContent`;
+                            const fallbackRes = await postJson(fallbackUrl, headers, JSON.stringify(requestPayload), timeoutMs);
+                            if (fallbackRes.status >= 200 && fallbackRes.status < 300) {
+                                response = fallbackRes;
+                                break;
+                            }
+                        }
                     }
                 }
+            }
+
+            // Success condition
+            if (response.status >= 200 && response.status < 300) {
+                lastError = null;
+                break;
+            }
+
+            // Authentication failure (non-retryable)
+            if (response.status === 401 || response.status === 403) {
+                throw new GeminiExtractionError(
+                    'Gemini API authentication failed: invalid API key or insufficient permissions.',
+                    'GEMINI_KEY_INVALID',
+                    401
+                );
+            }
+
+            // Check if transient error eligible for retry
+            if (isTransientError(response.status, response.body)) {
+                const errorMsg = (response.body && response.body.error && response.body.error.message)
+                    || `Gemini API returned HTTP ${response.status}`;
+                lastError = new GeminiExtractionError(
+                    `Gemini API temporary error: ${errorMsg}`,
+                    response.status === 429 ? 'GEMINI_RATE_LIMIT' : 'GEMINI_SERVICE_UNAVAILABLE',
+                    response.status,
+                    response.body
+                );
+
+                if (attempt < maxRetries) {
+                    const backoffMs = initialDelayMs * Math.pow(2, attempt - 1) + Math.floor(Math.random() * 200);
+                    await sleep(backoffMs);
+                    continue;
+                }
+            } else {
+                // Non-retryable error
+                const errorMsg = (response.body && response.body.error && response.body.error.message)
+                    || `Gemini API returned HTTP ${response.status}`;
+                throw new GeminiExtractionError(
+                    `Gemini API error: ${errorMsg}`,
+                    'GEMINI_API_ERROR',
+                    response.status,
+                    response.body
+                );
+            }
+        } catch (netErr) {
+            if (netErr instanceof GeminiExtractionError && (netErr.code === 'GEMINI_KEY_INVALID' || netErr.code === 'GEMINI_API_ERROR')) {
+                throw netErr;
+            }
+            lastError = netErr;
+            if (attempt < maxRetries) {
+                const backoffMs = initialDelayMs * Math.pow(2, attempt - 1) + Math.floor(Math.random() * 200);
+                await sleep(backoffMs);
+                continue;
             }
         }
     }
 
-    // Handle HTTP status errors
-    if (response.status === 401 || response.status === 403) {
-        throw new GeminiExtractionError(
-            'Gemini API authentication failed: invalid API key or insufficient permissions.',
-            'GEMINI_KEY_INVALID',
-            401
-        );
-    }
-
-    if (response.status === 429) {
-        throw new GeminiExtractionError(
-            'Gemini API rate limit exceeded. Please retry later.',
-            'GEMINI_RATE_LIMIT',
-            429
-        );
-    }
-
-    if (response.status < 200 || response.status >= 300) {
-        const errorMsg = (response.body && response.body.error && response.body.error.message)
-            || `Gemini API returned HTTP ${response.status}`;
-        throw new GeminiExtractionError(
-            `Gemini API error: ${errorMsg}`,
-            'GEMINI_API_ERROR',
-            response.status,
-            response.body
-        );
+    if (lastError || !response || response.status < 200 || response.status >= 300) {
+        throw lastError || new GeminiExtractionError('Gemini API extraction failed after retries.', 'GEMINI_EXTRACTION_FAILED', 502);
     }
 
     // Parse candidate text from Gemini response structure
@@ -261,6 +322,71 @@ async function extractTimetableWithGemini(params, options = {}) {
     }
 
     return processGeminiOutput(parts[0].text);
+}
+
+/**
+ * Extracts timetable data using Stage 1 Gemini Vision with bounded exponential backoff.
+ *
+ * @param {Object} params
+ * @param {Buffer} params.fileBuffer - Raw file binary
+ * @param {string} params.mimeType - 'application/pdf', 'image/png', 'image/jpeg', 'image/webp'
+ * @param {Object} params.uploadContext - { departmentCode, uploadType, facultyName, className, originalFilename }
+ * @param {Object} [options]
+ * @param {string} [options.apiKey] - Override API key
+ * @param {string} [options.model] - Override model name
+ * @param {string} [options.baseUrl] - Override base URL
+ * @param {number} [options.timeoutMs] - Override timeout
+ * @param {number} [options.maxRetries] - Max retry attempts for transient errors (default 3)
+ * @param {number} [options.initialDelayMs] - Initial delay in ms for exponential backoff (default 1000)
+ * @param {Function} [options.customTransport] - Mock transport function for testing (receives request payload)
+ * @returns {Promise<Object>} The parsed B2.1 JSON extracted from the document
+ */
+async function extractTimetableWithGemini(params, options = {}) {
+    const promptText = buildExtractionPrompt(params.uploadContext || {});
+    return executeGeminiMultimodal({
+        promptText,
+        fileBuffer: params.fileBuffer,
+        mimeType: params.mimeType,
+        stage: 1,
+        uploadContext: params.uploadContext
+    }, options);
+}
+
+/**
+ * Verifies and corrects Stage 1 timetable JSON using Stage 2 Gemini Vision with the original document image.
+ *
+ * @param {Object} params
+ * @param {Buffer} params.fileBuffer - Raw file binary of original image/PDF
+ * @param {string} params.mimeType - 'application/pdf', 'image/png', 'image/jpeg', 'image/webp'
+ * @param {Object|string} params.stage1Json - Stage 1 draft JSON extracted previously
+ * @param {Object} params.uploadContext - { departmentCode, uploadType, facultyName, className, originalFilename }
+ * @param {Object} [options]
+ * @param {string} [options.apiKey] - Override API key
+ * @param {string} [options.model] - Override model name
+ * @param {string} [options.baseUrl] - Override base URL
+ * @param {number} [options.timeoutMs] - Override timeout
+ * @param {number} [options.maxRetries] - Max retry attempts for transient errors (default 3)
+ * @param {number} [options.initialDelayMs] - Initial delay in ms for exponential backoff (default 1000)
+ * @param {Function} [options.customTransport] - Mock transport function for testing (receives request payload)
+ * @returns {Promise<Object>} The verified and corrected B2.1 JSON
+ */
+async function verifyTimetableWithGemini(params, options = {}) {
+    if (!params.stage1Json) {
+        throw new GeminiExtractionError(
+            'Stage 1 JSON is required for Stage 2 verification.',
+            'INVALID_STAGE1_INPUT',
+            400
+        );
+    }
+    const promptText = buildVerificationPrompt(params.uploadContext || {}, params.stage1Json);
+    return executeGeminiMultimodal({
+        promptText,
+        fileBuffer: params.fileBuffer,
+        mimeType: params.mimeType,
+        stage: 2,
+        stage1Json: params.stage1Json,
+        uploadContext: params.uploadContext
+    }, options);
 }
 
 /**
@@ -309,7 +435,10 @@ function processGeminiOutput(rawOutput) {
 
 module.exports = {
     extractTimetableWithGemini,
+    verifyTimetableWithGemini,
     processGeminiOutput,
     cleanMarkdownFences,
+    isTransientError,
+    sleep,
     GeminiExtractionError
 };
