@@ -11,6 +11,7 @@ const path = require('path');
 const excelImporter = require('./excelImporter');
 const csvImporter = require('./csvImporter');
 const documentImporter = require('./documentImporter');
+const imageImporter = require('./imageImporter');
 const { normalize } = require('../core/normalizer');
 const { validate } = require('../core/validator');
 const store = require('../data/store');
@@ -20,8 +21,7 @@ const IMPORTERS = {
     '.xlsm': excelImporter,
     '.xls': excelImporter,
     '.csv': csvImporter,
-    // Image and PDF go to the adapter, which reports honestly that extraction
-    // is not configured rather than guessing at the table.
+    // Image and PDF files go to documentImporter, which routes images to Gemini Vision
     '.png': documentImporter,
     '.jpg': documentImporter,
     '.jpeg': documentImporter,
@@ -89,7 +89,10 @@ async function analyse(buffer, filename, options = {}) {
         // Present only for document imports: which service read the file, and
         // whether an image had to be converted to a PDF on the way.
         provider: parsed.provider || null,
-        convertedFromImage: parsed.convertedFromImage || false
+        convertedFromImage: parsed.convertedFromImage || false,
+        uploadId: parsed.uploadId || null,
+        rawContract: parsed.rawContract || null,
+        unresolvedEntities: parsed.unresolvedEntities || []
     };
 }
 
@@ -113,5 +116,6 @@ async function commit(buffer, filename, options = {}) {
 module.exports = {
     preview, commit, analyse, importerFor, buildPreview,
     SUPPORTED, SPREADSHEET_FORMATS,
-    documentImporter
+    documentImporter,
+    imageImporter
 };

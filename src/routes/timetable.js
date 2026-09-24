@@ -78,11 +78,27 @@ router.get('/scopes', async (req, res) => {
             return !effectiveBranch || dept === effectiveBranch;
         });
 
+        branchClasses.forEach(c => {
+            if (c.semester) {
+                const sNum = repository.parseSemesterNumber(c.semester);
+                if (sNum && !semesters.includes(`SEM-${sNum}`)) {
+                    semesters.push(`SEM-${sNum}`);
+                }
+            }
+        });
+        semesters.sort((a, b) => {
+            const numA = repository.parseSemesterNumber(a) || 0;
+            const numB = repository.parseSemesterNumber(b) || 0;
+            return numA - numB;
+        });
+
         const secSet = new Set(['A', 'B', 'C']);
         branchClasses.forEach(c => {
-            if (c.section) secSet.add(c.section.toUpperCase());
-            else if (c.code) {
-                const m = c.code.match(/-([A-Za-z0-9])$/);
+            if (c.section) {
+                const cleanSec = String(c.section).trim().toUpperCase().replace(/^(?:SEC(?:TION)?[-_\s]*)/, '');
+                if (cleanSec) secSet.add(cleanSec);
+            } else if (c.code) {
+                const m = c.code.match(/[-_]([A-Za-z0-9])$/);
                 if (m) secSet.add(m[1].toUpperCase());
             }
         });
@@ -146,22 +162,87 @@ router.get('/records', (req, res) => {
     res.json({ count: records.length, records });
 });
 
-router.get('/mine', (req, res) => {
+router.get('/mine', async (req, res) => {
     if (!req.session || req.session.role !== 'faculty') {
         return res.status(401).json({ error: 'Faculty sign-in required', code: 'UNAUTHORIZED' });
     }
     const facultyName = req.session.facultyName || req.session.name;
+    const facultyId = req.session.facultyId || facultyName;
     const engine = store.engine;
-    let grid = engine.getFacultyGrid(facultyName);
     const meta = engine.getMeta();
+    const days = engine.getDays();
+    const periods = engine.getPeriods();
+
+    let personalSlots = [];
+    try {
+        if (db.isConfigured() && store.usingDatabase) {
+            personalSlots = await repository.getFacultyPersonalTimetable(facultyId);
+        } else if (typeof store.getFacultyPersonalTimetableInMemory === 'function') {
+            personalSlots = store.getFacultyPersonalTimetableInMemory(facultyName);
+        }
+    } catch (_) {}
+
+    if (personalSlots && personalSlots.length > 0) {
+        const DAY_MAP = {
+            'MON': 'Monday', 'MONDAY': 'Monday',
+            'TUE': 'Tuesday', 'TUES': 'Tuesday', 'TUESDAY': 'Tuesday',
+            'WED': 'Wednesday', 'WEDNESDAY': 'Wednesday',
+            'THU': 'Thursday', 'THUR': 'Thursday', 'THURS': 'Thursday', 'THURSDAY': 'Thursday',
+            'FRI': 'Friday', 'FRIDAY': 'Friday',
+            'SAT': 'Saturday', 'SATURDAY': 'Saturday',
+            'SUN': 'Sunday', 'SUNDAY': 'Sunday'
+        };
+        const cells = [];
+        days.forEach(day => {
+            periods.forEach(period => {
+                const match = personalSlots.find(s => (s.day === day || DAY_MAP[String(s.day).toUpperCase()] === day) && s.period === period);
+                if (match) {
+                    cells.push({
+                        day, period,
+                        subject: match.subject,
+                        faculty: facultyName,
+                        facultyId,
+                        className: match.className,
+                        room: match.room,
+                        type: match.type || 'theory',
+                        status: 'busy',
+                        isPersonal: true
+                    });
+                } else {
+                    cells.push({
+                        day, period,
+                        subject: null,
+                        faculty: facultyName,
+                        facultyId,
+                        className: null,
+                        room: null,
+                        status: 'free',
+                        isPersonal: true
+                    });
+                }
+            });
+        });
+
+        return res.json({
+            view: 'faculty',
+            name: facultyName,
+            faculty: facultyName,
+            branch: req.session.department,
+            days,
+            periods,
+            cells,
+            periodTimings: meta.periodTimings,
+            isCustomPersonal: true
+        });
+    }
+
+    let grid = engine.getFacultyGrid(facultyName);
     if (!grid) {
-        const days = engine.getDays();
-        const periods = engine.getPeriods();
         const cells = [];
         days.forEach(day => periods.forEach(period => {
             cells.push({
                 day, period,
-                subject: null, faculty: facultyName, facultyId: req.session.facultyId || null,
+                subject: null, faculty: facultyName, facultyId,
                 phone: null, className: null, room: null, status: 'free'
             });
         }));
@@ -171,7 +252,8 @@ router.get('/mine', (req, res) => {
         ...grid,
         faculty: facultyName,
         branch: req.session.department,
-        periodTimings: meta.periodTimings
+        periodTimings: meta.periodTimings,
+        isCustomPersonal: false
     });
 });
 
@@ -209,21 +291,20 @@ router.get('/', async (req, res) => {
         return res.json({ ...grid, periodTimings: engine.getMeta().periodTimings });
     }
 
-    // Branch isolation for HOS
-    const isHOS = req.session && (req.session.role === 'hos' || req.session.role === 'coordinator');
-    const hosDept = isHOS ? String(req.session.department || '').trim().toUpperCase() : null;
+    // Branch isolation for authenticated users (HOS or Faculty)
+    const sessionDept = req.session && req.session.department ? String(req.session.department || '').trim().toUpperCase() : null;
 
-    if (isHOS && req.query.branch) {
+    if (sessionDept && req.query.branch) {
         const qBranch = String(req.query.branch).trim().toUpperCase();
-        if (qBranch !== hosDept) {
+        if (qBranch !== sessionDept) {
             return res.status(403).json({
-                error: `Cross-branch timetable access is not allowed. Current branch is ${hosDept}.`,
+                error: `Cross-branch timetable access is not allowed. Current branch is ${sessionDept}.`,
                 code: 'FORBIDDEN'
             });
         }
     }
 
-    const effectiveBranch = hosDept || (req.query.branch ? String(req.query.branch).trim().toUpperCase() : getBranch().code);
+    const effectiveBranch = sessionDept || (req.query.branch ? String(req.query.branch).trim().toUpperCase() : getBranch().code);
 
     let targetClassName = req.query.class ? String(req.query.class).trim() : null;
     const requestedSemester = req.query.semester ? String(req.query.semester).trim().toUpperCase() : null;
@@ -252,22 +333,22 @@ router.get('/', async (req, res) => {
     }
 
     // Branch isolation check on targetClassName
-    if (targetClassName && isHOS) {
+    if (targetClassName && sessionDept) {
         const allClasses = await getClassesList();
         const found = allClasses.find(c => (c.code || c.class || '').toUpperCase() === targetClassName.toUpperCase());
         if (found) {
             const classDept = String(found.department || found.branch || '').toUpperCase();
-            if (classDept && classDept !== hosDept) {
+            if (classDept && classDept !== sessionDept) {
                 return res.status(403).json({
-                    error: `Cross-branch timetable access is not allowed. Class ${targetClassName} belongs to ${classDept}, but current branch is ${hosDept}.`,
+                    error: `Cross-branch timetable access is not allowed. Class ${targetClassName} belongs to ${classDept}, but current branch is ${sessionDept}.`,
                     code: 'FORBIDDEN'
                 });
             }
         } else {
             const prefix = targetClassName.split('-')[0].toUpperCase();
-            if (prefix && prefix !== hosDept && ['CME', 'EEE', 'CSE', 'MEC', 'ECE', 'CIVIL', 'DEEE'].includes(prefix)) {
+            if (prefix && prefix !== sessionDept && ['CME', 'EEE', 'CSE', 'MEC', 'ECE', 'CIVIL', 'DEEE'].includes(prefix)) {
                 return res.status(403).json({
-                    error: `Cross-branch timetable access is not allowed. Class ${targetClassName} belongs to ${prefix}, but current branch is ${hosDept}.`,
+                    error: `Cross-branch timetable access is not allowed. Class ${targetClassName} belongs to ${prefix}, but current branch is ${sessionDept}.`,
                     code: 'FORBIDDEN'
                 });
             }
@@ -283,6 +364,21 @@ router.get('/', async (req, res) => {
                 error: `No class "${targetClassName}". Available: ${meta.classes.join(', ')}`,
                 code: 'NOT_FOUND'
             });
+        }
+    }
+
+    if (!targetClassName && !requestedSemester && !requestedSection) {
+        const branchClasses = ((store.source && store.source.classes) || []).filter(c => {
+            const dept = String(c.department || c.branch || '').toUpperCase();
+            return !effectiveBranch || dept === effectiveBranch;
+        }).map(c => c.code || c.class);
+
+        const activeClass = branchClasses.find(c => {
+            const g = engine.getClassGrid(c);
+            return g && Array.isArray(g.cells) && g.cells.some(cell => cell.status !== 'free' && (cell.subject || cell.faculty));
+        });
+        if (activeClass) {
+            targetClassName = activeClass;
         }
     }
 

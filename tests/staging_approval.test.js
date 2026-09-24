@@ -342,24 +342,20 @@ async function run() {
 
         await saveStagedData('upl_cme_review_01', contractWithUnresolved, 'VALID', []);
 
-        await checkAsync('Staged record with uncatalogued faculty/subject blocks approval (HTTP 422)', async () => {
+        await checkAsync('Staged record with uncatalogued subject blocks approval (HTTP 422)', async () => {
             const res = await call('POST', '/api/staging/upl_cme_review_01/approve', {}, cmeHosCookie);
             assert.strictEqual(res.status, 422);
             assert.strictEqual(res.body.code, 'UNRESOLVED_ENTITIES');
-            assert.strictEqual(res.body.unresolvedEntities.length, 2);
+            assert.strictEqual(res.body.unresolvedEntities.length, 1);
 
             const types = res.body.unresolvedEntities.map(e => e.entityType);
             assert.ok(types.includes('subject'), 'Must detect unresolved subject');
-            assert.ok(types.includes('faculty'), 'Must detect unresolved faculty');
         });
 
-        await checkAsync('Scheduled activity (TPC) with null faculty is NOT flagged as unresolved faculty', async () => {
+        await checkAsync('Unregistered faculty generates informational warning without blocking', async () => {
             const detailRes = await call('GET', '/api/staging/upl_cme_review_01', null, cmeHosCookie);
             assert.strictEqual(detailRes.status, 200);
-            const facUnresolved = detailRes.body.resolution.unresolvedEntities.filter(e => e.entityType === 'faculty');
-            // Only "Prof. Unknown Guest" is flagged; TPC is not flagged as a faculty failure
-            assert.strictEqual(facUnresolved.length, 1);
-            assert.strictEqual(facUnresolved[0].extractedText, 'Prof. Unknown Guest');
+            assert.ok(detailRes.body.resolution.informationalWarnings.length > 0, 'Must contain informational warning for unregistered faculty');
         });
 
         await checkAsync('HOS explicitly maps unresolved subject to existing catalog entity', async () => {
@@ -370,19 +366,8 @@ async function run() {
             }, cmeHosCookie);
             assert.strictEqual(mapSubjRes.status, 200);
             assert.strictEqual(mapSubjRes.body.success, true);
-            assert.strictEqual(mapSubjRes.body.resolution.unresolvedCount, 1); // Only faculty left
-        });
-
-        await checkAsync('HOS explicitly maps unresolved faculty to existing catalog entity', async () => {
-            const mapFacRes = await call('POST', '/api/staging/upl_cme_review_01/map-entity', {
-                entityType: 'faculty',
-                extractedText: 'Prof. Unknown Guest',
-                targetName: 'Ms. B. Kusuma'
-            }, cmeHosCookie);
-            assert.strictEqual(mapFacRes.status, 200);
-            assert.strictEqual(mapFacRes.body.success, true);
-            assert.strictEqual(mapFacRes.body.resolution.unresolvedCount, 0); // 0 unresolved left!
-            assert.strictEqual(mapFacRes.body.resolution.ok, true);
+            assert.strictEqual(mapSubjRes.body.resolution.unresolvedCount, 0); // 0 unresolved left!
+            assert.strictEqual(mapSubjRes.body.resolution.ok, true);
         });
 
         // -------------------------------------------------------------
@@ -411,8 +396,8 @@ async function run() {
             assert.ok(p2, 'Period 2 slot must exist (expanded from span_to: 2)');
             assert.ok(p3, 'Period 3 slot must exist');
 
-            assert.strictEqual(p1.faculty, 'Ms. B. Kusuma');
-            assert.strictEqual(p2.faculty, 'Ms. B. Kusuma');
+            assert.strictEqual(p1.faculty, 'Prof. Unknown Guest');
+            assert.strictEqual(p2.faculty, 'Prof. Unknown Guest');
             assert.strictEqual(p3.subject, 'TPC');
             assert.strictEqual(p3.faculty, null);
         });
@@ -555,11 +540,14 @@ async function run() {
             assert.strictEqual(res.status, 200);
             assert.strictEqual(res.body.department, 'CME');
             assert.ok(Array.isArray(res.body.staging));
-            // EEE HOS sees 0 pending uploads for EEE
+            assert.ok(res.body.staging.every(s => s.departmentCode === 'CME' || s.department === 'CME'));
+
+            // EEE HOS sees only EEE pending uploads
             const eeeRes = await call('GET', '/api/staging/pending', null, eeeHosCookie);
             assert.strictEqual(eeeRes.status, 200);
             assert.strictEqual(eeeRes.body.department, 'EEE');
-            assert.strictEqual(eeeRes.body.count, 0);
+            assert.ok(Array.isArray(eeeRes.body.staging));
+            assert.ok(eeeRes.body.staging.every(s => s.departmentCode === 'EEE' || s.department === 'EEE'));
         });
 
         console.log('\n======================================================');

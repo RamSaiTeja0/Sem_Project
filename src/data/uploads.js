@@ -47,12 +47,13 @@ function generateUploadId() {
  * Save upload metadata record.
  */
 async function saveUploadRecord(record) {
+    const uploadId = record.uploadId || generateUploadId();
     const uploadRecord = {
-        uploadId: record.uploadId || generateUploadId(),
-        originalFilename: record.originalFilename,
-        fileType: record.fileType,
-        fileSize: Number(record.fileSize || 0),
-        storagePath: record.storagePath,
+        uploadId,
+        originalFilename: record.originalFilename || 'timetable.jpeg',
+        fileType: record.fileType || record.mimeType || 'image/jpeg',
+        fileSize: Number(record.fileSize || (record.fileBuffer ? record.fileBuffer.length : 100)),
+        storagePath: record.storagePath || path.join(ensureUploadDir(), `${uploadId}_${record.originalFilename || 'upload.bin'}`),
         uploaderUserId: record.uploaderUserId != null ? String(record.uploaderUserId) : null,
         facultyId: record.facultyId != null ? String(record.facultyId) : null,
         branchId: record.branchId != null ? String(record.branchId) : null,
@@ -61,7 +62,7 @@ async function saveUploadRecord(record) {
         semester: record.semester || null,
         section: record.section || null,
         targetClass: record.targetClass || null,
-        uploadType: record.uploadType, // 'MASTER_TIMETABLE' or 'FACULTY_TIMETABLE'
+        uploadType: String(record.uploadType || '').toUpperCase().includes('FACULTY') ? 'FACULTY_TIMETABLE' : 'MASTER_TIMETABLE',
         status: record.status || 'UPLOADED',
         createdAt: record.createdAt || new Date().toISOString()
     };
@@ -77,7 +78,11 @@ async function saveUploadRecord(record) {
 
             let uploaderId = null;
             if (uploadRecord.uploaderUserId && /^\d+$/.test(uploadRecord.uploaderUserId)) {
-                uploaderId = parseInt(uploadRecord.uploaderUserId, 10);
+                const userRes = await db.query('SELECT id FROM users WHERE id = $1', [parseInt(uploadRecord.uploaderUserId, 10)]);
+                if (userRes.rows.length > 0) uploaderId = userRes.rows[0].id;
+            } else if (uploadRecord.uploaderUserId) {
+                const userRes = await db.query('SELECT id FROM users WHERE username = $1', [uploadRecord.uploaderUserId]);
+                if (userRes.rows.length > 0) uploaderId = userRes.rows[0].id;
             }
 
             let facId = null;
@@ -274,21 +279,33 @@ async function updateUploadStatus(uploadId, newStatus) {
 /**
  * Save extracted timetable JSON into the staging store.
  */
-async function saveStagedData(uploadId, extractedJson, validationStatus = 'VALID', validationErrors = null, extra = {}) {
+async function saveStagedData(uploadId, extractedJsonOrOpts, validationStatus = 'VALID', validationErrors = null, extra = {}) {
+    let extractedJson = extractedJsonOrOpts;
+    let vStatus = validationStatus;
+    let vErrors = validationErrors;
+    let extraOpts = extra;
+
+    if (extractedJsonOrOpts && typeof extractedJsonOrOpts === 'object' && extractedJsonOrOpts.extractedJson !== undefined) {
+        extractedJson = extractedJsonOrOpts.extractedJson;
+        vStatus = extractedJsonOrOpts.validationStatus || validationStatus || 'VALID';
+        vErrors = extractedJsonOrOpts.validationErrors !== undefined ? extractedJsonOrOpts.validationErrors : validationErrors;
+        extraOpts = { ...extractedJsonOrOpts, ...extra };
+    }
+
     const existing = inMemoryStaging.get(uploadId) || {};
     const record = {
         uploadId,
         extractedJson,
-        validationStatus,
-        validationErrors,
-        importStatus: extra.importStatus || existing.importStatus || 'STAGED',
-        reviewedBy: extra.reviewedBy !== undefined ? extra.reviewedBy : (existing.reviewedBy || null),
-        reviewedAt: extra.reviewedAt !== undefined ? extra.reviewedAt : (existing.reviewedAt || null),
-        rejectionReason: extra.rejectionReason !== undefined ? extra.rejectionReason : (existing.rejectionReason || null),
-        importedAt: extra.importedAt !== undefined ? extra.importedAt : (existing.importedAt || null),
-        importedCount: extra.importedCount !== undefined ? extra.importedCount : (existing.importedCount || null),
-        unresolvedEntities: extra.unresolvedEntities !== undefined ? extra.unresolvedEntities : (existing.unresolvedEntities || []),
-        entityMappings: extra.entityMappings !== undefined ? extra.entityMappings : (existing.entityMappings || {}),
+        validationStatus: vStatus,
+        validationErrors: vErrors,
+        importStatus: extraOpts.importStatus || existing.importStatus || 'STAGED',
+        reviewedBy: extraOpts.reviewedBy !== undefined ? extraOpts.reviewedBy : (existing.reviewedBy || null),
+        reviewedAt: extraOpts.reviewedAt !== undefined ? extraOpts.reviewedAt : (existing.reviewedAt || null),
+        rejectionReason: extraOpts.rejectionReason !== undefined ? extraOpts.rejectionReason : (existing.rejectionReason || null),
+        importedAt: extraOpts.importedAt !== undefined ? extraOpts.importedAt : (existing.importedAt || null),
+        importedCount: extraOpts.importedCount !== undefined ? extraOpts.importedCount : (existing.importedCount || null),
+        unresolvedEntities: extraOpts.unresolvedEntities !== undefined ? extraOpts.unresolvedEntities : (existing.unresolvedEntities || []),
+        entityMappings: extraOpts.entityMappings !== undefined ? extraOpts.entityMappings : (existing.entityMappings || {}),
         createdAt: existing.createdAt || new Date().toISOString(),
         updatedAt: new Date().toISOString()
     };
@@ -360,10 +377,25 @@ async function getStagedData(uploadId) {
             `, [uploadId]);
             if (rows.length > 0) {
                 const r = rows[0];
+                const parseJson = (val, def) => {
+                    if (val == null) return def;
+                    if (typeof val === 'object') return val;
+                    if (typeof val === 'string') {
+                        try {
+                            const p = JSON.parse(val);
+                            return typeof p === 'string' ? JSON.parse(p) : p;
+                        } catch (_) {
+                            return def;
+                        }
+                    }
+                    return def;
+                };
                 return {
                     ...r,
-                    unresolvedEntities: Array.isArray(r.unresolvedEntities) ? r.unresolvedEntities : (r.unresolvedEntities || []),
-                    entityMappings: r.entityMappings || {}
+                    extractedJson: parseJson(r.extractedJson, null),
+                    validationErrors: parseJson(r.validationErrors, []),
+                    unresolvedEntities: parseJson(r.unresolvedEntities, []),
+                    entityMappings: parseJson(r.entityMappings, {})
                 };
             }
         } catch (err) {
@@ -388,6 +420,9 @@ async function updateStagedStatus(uploadId, updates = {}) {
 
     const updatedRecord = {
         ...current,
+        extractedJson: updates.extractedJson !== undefined ? updates.extractedJson : current.extractedJson,
+        validationStatus: updates.validationStatus !== undefined ? updates.validationStatus : current.validationStatus,
+        validationErrors: updates.validationErrors !== undefined ? updates.validationErrors : current.validationErrors,
         importStatus: updates.importStatus || current.importStatus,
         reviewedBy: updates.reviewedBy !== undefined ? updates.reviewedBy : current.reviewedBy,
         reviewedAt: updates.reviewedAt !== undefined ? updates.reviewedAt : current.reviewedAt,
@@ -403,21 +438,37 @@ async function updateStagedStatus(uploadId, updates = {}) {
 
     if (db.isConfigured()) {
         try {
+            let reviewerUserId = null;
+            if (Number.isInteger(updatedRecord.reviewedBy)) {
+                reviewerUserId = updatedRecord.reviewedBy;
+            } else if (typeof updatedRecord.reviewedBy === 'string' && /^\d+$/.test(updatedRecord.reviewedBy)) {
+                reviewerUserId = parseInt(updatedRecord.reviewedBy, 10);
+            } else if (updatedRecord.reviewedBy) {
+                const uRes = await db.query('SELECT id FROM users WHERE username = $1', [updatedRecord.reviewedBy]);
+                if (uRes.rows.length > 0) reviewerUserId = uRes.rows[0].id;
+            }
+
             await db.query(`
                 UPDATE timetable_staging
-                   SET import_status = $1,
-                       reviewed_by = $2,
-                       reviewed_at = $3,
-                       rejection_reason = $4,
-                       imported_at = $5,
-                       imported_count = $6,
-                       unresolved_entities = $7,
-                       entity_mappings = $8,
+                   SET extracted_json = $1,
+                       validation_status = $2,
+                       validation_errors = $3,
+                       import_status = $4,
+                       reviewed_by = $5,
+                       reviewed_at = $6,
+                       rejection_reason = $7,
+                       imported_at = $8,
+                       imported_count = $9,
+                       unresolved_entities = $10,
+                       entity_mappings = $11,
                        updated_at = now()
-                 WHERE upload_id = $9
+                 WHERE upload_id = $12
             `, [
+                JSON.stringify(updatedRecord.extractedJson),
+                updatedRecord.validationStatus,
+                JSON.stringify(updatedRecord.validationErrors),
                 updatedRecord.importStatus,
-                updatedRecord.reviewedBy,
+                reviewerUserId,
                 updatedRecord.reviewedAt,
                 updatedRecord.rejectionReason,
                 updatedRecord.importedAt,

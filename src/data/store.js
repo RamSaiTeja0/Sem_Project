@@ -435,11 +435,43 @@ function resetForEmptyInstance(branch = null) {
     return state;
 }
 
-function importStagedTimetableInMemory({ uploadRecord, stagedContract, resolvedMap, userId }) {
+function parseSemesterNumber(val) {
+    if (val == null) return null;
+    if (typeof val === 'number' && !isNaN(val)) return val;
+    const str = String(val).trim().toUpperCase();
+    const semMatch = str.match(/SEM(?:ESTER)?[-_\s]*(\d+)/i);
+    if (semMatch) return parseInt(semMatch[1], 10);
+    const romanMatch = str.match(/^(VIII|VII|VI|IV|V|III|II|I)$/i);
+    if (romanMatch) {
+        const map = { I: 1, II: 2, III: 3, IV: 4, V: 5, VI: 6, VII: 7, VIII: 8 };
+        return map[romanMatch[1].toUpperCase()] || null;
+    }
+    const num = parseInt(str, 10);
+    return isNaN(num) ? null : num;
+}
+
+function importStagedTimetableInMemory(arg1, arg2) {
     ensureMemoryEntries();
+    let uploadRecord = {};
+    let stagedContract = {};
+    let resolvedMap = {};
+    let userId = null;
+
+    if (arg1 && typeof arg1 === 'object' && arg1.stagedContract) {
+        uploadRecord = arg1.uploadRecord || {};
+        stagedContract = arg1.stagedContract || {};
+        resolvedMap = arg1.resolvedMap || {};
+        userId = arg1.userId || null;
+    } else if (typeof arg1 === 'string' || (arg2 && typeof arg2 === 'object')) {
+        uploadRecord = { uploadId: arg1 };
+        stagedContract = arg2 || {};
+    } else if (arg1 && typeof arg1 === 'object') {
+        stagedContract = arg1;
+    }
+
     const targetClass = (resolvedMap && resolvedMap.class) ? (resolvedMap.class.code || resolvedMap.class.name) : stagedContract.class_name;
-    const className = targetClass || stagedContract.class_name;
-    const targetDept = String(uploadRecord.departmentCode || '').toUpperCase();
+    const className = (targetClass || stagedContract.class_name || stagedContract.className || 'GENERAL-A').trim();
+    const targetDept = String(uploadRecord.departmentCode || stagedContract.department_code || stagedContract.branch || 'General').toUpperCase();
 
     // 1. Check conflicts against other classes
     const existingEntries = state.source.entries || [];
@@ -454,27 +486,29 @@ function importStagedTimetableInMemory({ uploadRecord, stagedContract, resolvedM
         const resolvedFaculty = entry.faculty_name
             ? (resolvedMap && resolvedMap.faculty && (resolvedMap.faculty[entry.faculty_name] || (resolvedMap.faculty.get && resolvedMap.faculty.get(entry.faculty_name))))
             : null;
-        const facultyName = resolvedFaculty ? (resolvedFaculty.name || resolvedFaculty.code) : (entry.faculty_name || null);
+        const facultyName = resolvedFaculty ? (resolvedFaculty.name || resolvedFaculty.code) : (entry.faculty_name || entry.faculty || null);
 
         const resolvedSubject = (resolvedMap && resolvedMap.subjects && (resolvedMap.subjects[entry.subject_name] || resolvedMap.subjects[entry.subject_code] || (resolvedMap.subjects.get && (resolvedMap.subjects.get(entry.subject_name) || resolvedMap.subjects.get(entry.subject_code)))));
-        const subjectName = resolvedSubject ? (resolvedSubject.name || resolvedSubject.code) : (entry.subject_name || entry.subject_code);
+        const subjectName = resolvedSubject ? (resolvedSubject.name || resolvedSubject.code) : (entry.subject_name || entry.subject || 'Activity');
 
         const resolvedRoom = entry.room_code
             ? (resolvedMap && resolvedMap.rooms && (resolvedMap.rooms[entry.room_code] || (resolvedMap.rooms.get && resolvedMap.rooms.get(entry.room_code))))
             : null;
-        const roomCode = resolvedRoom ? (resolvedRoom.code || resolvedRoom.name) : (entry.room_code || null);
+        const roomCode = resolvedRoom ? (resolvedRoom.code || resolvedRoom.name) : (entry.room_code || entry.room || null);
 
         for (let p = startP; p <= endP; p++) {
-            // Check faculty conflict with other classes
+            // Check faculty clash across OTHER classes
             if (facultyName) {
-                const facClash = existingEntries.find(e =>
+                const clash = existingEntries.find(e =>
+                    e.faculty &&
+                    e.faculty.toUpperCase() === facultyName.toUpperCase() &&
                     e.day === entry.day &&
                     e.period === p &&
-                    (e.class !== className && e.className !== className) &&
-                    e.faculty && e.faculty.toUpperCase() === facultyName.toUpperCase()
+                    e.className !== className &&
+                    e.class !== className
                 );
-                if (facClash) {
-                    const err = new Error(`Faculty ${facultyName} already teaches ${facClash.subject} in class ${facClash.className || facClash.class} at ${entry.day} P${p}`);
+                if (clash) {
+                    const err = new Error(`Faculty ${facultyName} is already teaching ${clash.className || clash.class} at ${entry.day} P${p}`);
                     err.code = 'SLOT_CONFLICT';
                     err.status = 409;
                     err.details = [{
@@ -483,19 +517,21 @@ function importStagedTimetableInMemory({ uploadRecord, stagedContract, resolvedM
                         day: entry.day,
                         period: p,
                         faculty: facultyName,
-                        conflictingClass: facClash.className || facClash.class
+                        conflictingClass: clash.className || clash.class
                     }];
                     throw err;
                 }
             }
 
-            // Check room conflict with other classes
+            // Check room clash across OTHER classes
             if (roomCode) {
                 const roomClash = existingEntries.find(e =>
+                    e.room &&
+                    e.room.toUpperCase() === roomCode.toUpperCase() &&
                     e.day === entry.day &&
                     e.period === p &&
-                    (e.class !== className && e.className !== className) &&
-                    e.room && e.room.toUpperCase() === roomCode.toUpperCase()
+                    e.className !== className &&
+                    e.class !== className
                 );
                 if (roomClash) {
                     const err = new Error(`Room ${roomCode} is already used by ${roomClash.className || roomClash.class} at ${entry.day} P${p}`);
@@ -521,7 +557,7 @@ function importStagedTimetableInMemory({ uploadRecord, stagedContract, resolvedM
                 subject: subjectName,
                 faculty: facultyName,
                 room: roomCode,
-                type: entry.session_type || 'theory'
+                type: entry.session_type || entry.type || 'theory'
             });
         }
     }
@@ -534,14 +570,52 @@ function importStagedTimetableInMemory({ uploadRecord, stagedContract, resolvedM
 
     // 3. Assign IDs and combine
     let nextId = Math.max(1000, ...remainingEntries.map(e => e.id || 0));
+    if (!Number.isFinite(nextId)) nextId = 1000;
     const combinedEntries = remainingEntries.concat(newSlots.map(s => ({
         id: ++nextId,
         ...s
     })));
 
-    // 4. Update source and rebuild state
+    // 4. Update source classes metadata if needed
+    const stagedSem = parseSemesterNumber(stagedContract.semester) || stagedContract.semester;
+    let stagedSec = stagedContract.section ? String(stagedContract.section).trim().toUpperCase().replace(/^(?:SEC(?:TION)?[-_\s]*)/, '') : null;
+    if (!stagedSec && className) {
+        const m = className.match(/[-_]([A-Za-z0-9])$/);
+        if (m) stagedSec = m[1].toUpperCase();
+    }
+
+    const updatedClasses = (state.source.classes || []).map(c => {
+        const cCode = String(c.code || c.class || '').toUpperCase();
+        if (cCode === className.toUpperCase()) {
+            return {
+                ...c,
+                semester: c.semester != null ? c.semester : stagedSem,
+                academicYear: c.academicYear || stagedContract.academic_year || stagedContract.academicYear,
+                section: c.section || stagedSec,
+                department: c.department || targetDept
+            };
+        }
+        return c;
+    });
+
+    if (!updatedClasses.some(c => String(c.code || c.class || '').toUpperCase() === className.toUpperCase())) {
+        updatedClasses.push({
+            id: updatedClasses.length + 1,
+            code: className,
+            class: className,
+            name: className,
+            department: targetDept,
+            branch: targetDept,
+            semester: stagedSem,
+            academicYear: stagedContract.academic_year || stagedContract.academicYear,
+            section: stagedSec
+        });
+    }
+
+    // 5. Update source and rebuild state
     const newSource = {
         ...state.source,
+        classes: updatedClasses,
         allowEmpty: true,
         entries: combinedEntries
     };
@@ -552,34 +626,52 @@ function importStagedTimetableInMemory({ uploadRecord, stagedContract, resolvedM
 
 function resolveOrCreateClassInMemory({ branch, academicYear, semester, section }) {
     const branchCode = String(branch || '').trim().toUpperCase();
-    const semStr = semester ? String(semester).trim().toUpperCase() : null;
-    const secStr = section ? String(section).trim().toUpperCase() : null;
+    const semNum = parseSemesterNumber(semester);
+    const semStr = semNum ? `SEM-${semNum}` : (semester ? String(semester).trim().toUpperCase() : null);
+    const secStr = section ? String(section).trim().toUpperCase().replace(/^(?:SEC(?:TION)?[-_\s]*)/, '') : null;
     const yrStr = academicYear ? String(academicYear).trim() : null;
 
     if (!state.source.classes) state.source.classes = [];
     const sourceClasses = state.source.classes;
 
+    // Prioritize classes that have scheduled rows or busy records
+    const sortedClasses = sourceClasses.slice().sort((a, b) => {
+        const aEntries = (a.rows ? Object.values(a.rows).reduce((acc, r) => acc + (Array.isArray(r) ? r.length : 0), 0) : 0);
+        const bEntries = (b.rows ? Object.values(b.rows).reduce((acc, r) => acc + (Array.isArray(r) ? r.length : 0), 0) : 0);
+        return bEntries - aEntries;
+    });
+
     // 1. Match by branch + semester + section
-    let matched = sourceClasses.find(c => {
+    let matched = sortedClasses.find(c => {
         const cDept = String(c.department || c.branch || '').toUpperCase();
-        const cSem = c.semester ? String(c.semester).toUpperCase() : null;
-        let cSec = c.section ? String(c.section).toUpperCase() : null;
+        const cSemNum = parseSemesterNumber(c.semester);
+        let cSec = c.section ? String(c.section).trim().toUpperCase().replace(/^(?:SEC(?:TION)?[-_\s]*)/, '') : null;
         const cCode = String(c.code || c.class || '').toUpperCase();
         if (!cSec && cCode) {
-            const m = cCode.match(/-([A-Za-z0-9])$/);
+            const m = cCode.match(/[-_]([A-Za-z0-9])$/);
             if (m) cSec = m[1].toUpperCase();
         }
         const matchesBranch = !branchCode || cDept === branchCode;
-        const matchesSem = semStr ? cSem === semStr : true;
+        const matchesSem = (semNum != null) ? (cSemNum === semNum) : true;
         const matchesSec = secStr ? cSec === secStr : true;
         return matchesBranch && matchesSem && matchesSec;
     });
 
+    if (!matched && semNum != null) {
+        matched = sortedClasses.find(c => {
+            const cDept = String(c.department || c.branch || '').toUpperCase();
+            const cSemNum = parseSemesterNumber(c.semester);
+            const matchesBranch = !branchCode || cDept === branchCode;
+            const entries = (c.rows ? Object.values(c.rows).reduce((acc, r) => acc + (Array.isArray(r) ? r.length : 0), 0) : 0);
+            return matchesBranch && cSemNum === semNum && entries > 0;
+        });
+    }
+
     if (matched) {
         const code = matched.code || matched.class || '';
-        let sec = matched.section;
+        let sec = matched.section ? String(matched.section).trim().toUpperCase().replace(/^(?:SEC(?:TION)?[-_\s]*)/, '') : null;
         if (!sec && code) {
-            const m = code.match(/-([A-Za-z0-9])$/);
+            const m = code.match(/[-_]([A-Za-z0-9])$/);
             if (m) sec = m[1].toUpperCase();
         }
         return {
@@ -589,7 +681,7 @@ function resolveOrCreateClassInMemory({ branch, academicYear, semester, section 
             name: matched.name || code,
             department: matched.department || branchCode,
             branch: matched.department || branchCode,
-            semester: matched.semester || semStr,
+            semester: matched.semester || semNum || semStr,
             academicYear: matched.academicYear || yrStr,
             section: sec || secStr
         };
@@ -603,7 +695,8 @@ function resolveOrCreateClassInMemory({ branch, academicYear, semester, section 
             return cCode === legacyCode;
         });
         if (matched) {
-            if (!semStr || (matched.semester && matched.semester.toUpperCase() === semStr)) {
+            const cSemNum = repository.parseSemesterNumber ? repository.parseSemesterNumber(matched.semester) : null;
+            if (semNum == null || cSemNum === semNum) {
                 return {
                     id: matched.id || legacyCode,
                     code: legacyCode,
@@ -611,8 +704,8 @@ function resolveOrCreateClassInMemory({ branch, academicYear, semester, section 
                     name: matched.name || legacyCode,
                     department: branchCode,
                     branch: branchCode,
-                    semester: matched.semester || null,
-                    academicYear: matched.academicYear || null,
+                    semester: matched.semester || semNum || null,
+                    academicYear: matched.academicYear || yrStr || null,
                     section: secStr
                 };
             }
@@ -620,7 +713,7 @@ function resolveOrCreateClassInMemory({ branch, academicYear, semester, section 
     }
 
     // 3. Create new class in memory
-    const semClean = semStr ? semStr.replace(/[^A-Za-z0-9]/g, '') : '';
+    const semClean = semNum ? `SEM${semNum}` : (semStr ? semStr.replace(/[^A-Za-z0-9]/g, '') : '');
     const newCode = `${branchCode}${semClean ? '-' + semClean : ''}${secStr ? '-' + secStr : ''}`;
     const newName = `${branchCode} ${semStr || ''} ${secStr ? 'Sec-' + secStr : ''}`.replace(/\s+/g, ' ').trim();
     const newId = 5000 + sourceClasses.length + 1;
@@ -632,7 +725,7 @@ function resolveOrCreateClassInMemory({ branch, academicYear, semester, section 
         name: newName,
         department: branchCode,
         branch: branchCode,
-        semester: semStr,
+        semester: semNum || semStr,
         academicYear: yrStr,
         section: secStr,
         rows: {}
@@ -693,6 +786,59 @@ function clearTimetableInMemory({ classId, className, branchCode }) {
     };
 }
 
+const facultyPersonalStore = new Map();
+
+function saveFacultyPersonalTimetableInMemory(facultyNameOrId, slots) {
+    const key = String(facultyNameOrId).toUpperCase();
+    facultyPersonalStore.set(key, slots || []);
+    return { success: true, count: (slots || []).length };
+}
+
+function getFacultyPersonalTimetableInMemory(facultyNameOrId) {
+    const key = String(facultyNameOrId).toUpperCase();
+    return facultyPersonalStore.get(key) || [];
+}
+
+function clearFacultyPersonalTimetableInMemory(facultyNameOrId) {
+    const key = String(facultyNameOrId).toUpperCase();
+    const existed = facultyPersonalStore.has(key);
+    facultyPersonalStore.delete(key);
+    return { cleared: existed };
+}
+
+function saveSlotEntryInMemory({ className, day, period, subject, faculty, room, type }) {
+    const existingEntries = state.source.timetable || [];
+    const filtered = existingEntries.filter(
+        e => !((e.class === className || e.className === className) && e.day === day && e.period === period)
+    );
+
+    if (!subject || subject.trim() === '' || subject.trim().toLowerCase() === 'free') {
+        state.source.timetable = filtered;
+        state = buildState(state.source, state.origin);
+        return { deleted: true, day, period, className };
+    }
+
+    let nextId = Math.max(1000, ...filtered.map(e => e.id || 0));
+    if (!Number.isFinite(nextId)) nextId = 1000;
+
+    const newEntry = {
+        id: ++nextId,
+        className,
+        class: className,
+        day,
+        period,
+        subject,
+        faculty: faculty || null,
+        room: room || null,
+        type: type || 'theory'
+    };
+
+    filtered.push(newEntry);
+    state.source.timetable = filtered;
+    state = buildState(state.source, state.origin);
+    return newEntry;
+}
+
 module.exports = {
     buildState,
     init,
@@ -703,6 +849,7 @@ module.exports = {
     deleteEntryInMemory,
     getEntryInMemory,
     listEntriesInMemory,
+    saveSlotEntryInMemory,
     addFacultyInMemory,
     updateFacultyInMemory,
     setFacultyStatusInMemory,
@@ -710,6 +857,9 @@ module.exports = {
     clearTimetableInMemory,
     resetForEmptyInstance,
     importStagedTimetableInMemory,
+    saveFacultyPersonalTimetableInMemory,
+    getFacultyPersonalTimetableInMemory,
+    clearFacultyPersonalTimetableInMemory,
     get allowMemoryWrites() { return allowMemoryWrites || process.env.ALLOW_MEMORY_WRITES === 'true'; },
     set allowMemoryWrites(val) { allowMemoryWrites = Boolean(val); },
     /** Replace the live dataset. In-memory only; on failure the old one stays. */

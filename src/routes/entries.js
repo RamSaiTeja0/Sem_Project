@@ -564,6 +564,49 @@ async function checkDeleteOwnership(req, res, next) {
     next();
 }
 
+router.post('/slot', async (req, res, next) => {
+    if (!req.session || (req.session.role !== 'hos' && req.session.role !== 'coordinator' && req.session.role !== 'admin')) {
+        return res.status(403).json({
+            error: 'Forbidden: Only Head of Section (HOD) can edit the official Master Timetable.',
+            code: 'FORBIDDEN'
+        });
+    }
+
+    const { className, day, period, subject, faculty, room, type } = req.body || {};
+    if (!className || !day || period == null) {
+        return res.status(400).json({
+            error: 'Class, day, and period are required.',
+            code: 'INVALID_SLOT'
+        });
+    }
+
+    const sessionBranch = req.session && req.session.department;
+    if (sessionBranch) {
+        const branchClass = (store.source && store.source.classes || []).find(
+            c => (c.code || c.class || '').toUpperCase() === String(className).toUpperCase()
+        );
+        if (branchClass && branchClass.department && branchClass.department.toUpperCase() !== sessionBranch.toUpperCase()) {
+            return res.status(403).json({
+                error: 'Cross-branch master timetable modification is not allowed.',
+                code: 'FORBIDDEN'
+            });
+        }
+    }
+
+    requireStorage(req, res, async () => {
+        try {
+            if (db.isConfigured() && store.usingDatabase) {
+                const result = await repository.saveSlotEntry({ className, day, period: Number(period), subject, faculty, room, type });
+                await store.reloadFromDatabase();
+                res.json({ success: true, ...result });
+            } else {
+                const result = store.saveSlotEntryInMemory({ className, day, period: Number(period), subject, faculty, room, type });
+                res.json({ success: true, ...result });
+            }
+        } catch (err) { fail(res, err); void next; }
+    });
+});
+
 router.post('/', checkPostOwnership, async (req, res, next) => {
     const parsed = parseEntry(req.body || {});
     if (parsed.errors) {

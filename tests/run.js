@@ -41,14 +41,31 @@ const suites = [
     'internal_uploads.test.js',
     'gemini_n8n.test.js',
     'gemini_accuracy.test.js',
+    'image_upload_flow.test.js',
     'staging_approval.test.js',
+    'hod_timetable_approval_workflow.test.js',
+    'hod_master_timetable_upload_flow.test.js',
     'config_and_session_persistence.test.js',
     'hod_schedule_and_sql_regression.test.js',
+    'master_timetable_display.test.js',
+    'hod_only_master_timetable_rbac.test.js',
+    'timetable_workflow_complete.test.js',
+    'faculty_timetable_extraction.test.js',
     'live_verification.js'
 ];
 let failures = 0;
+const failedSuites = [];
 
-const dbSuites = new Set(['database.test.js', 'neon_persistence_verification.test.js', 'hod_schedule_and_sql_regression.test.js']);
+const dbSuites = new Set([
+    'database.test.js',
+    'neon_persistence_verification.test.js',
+    'hod_schedule_and_sql_regression.test.js',
+    'master_timetable_display.test.js',
+    'hod_only_master_timetable_rbac.test.js',
+    'timetable_workflow_complete.test.js',
+    'hod_master_timetable_upload_flow.test.js',
+    'faculty_timetable_extraction.test.js'
+]);
 
 suites.forEach(suite => {
     console.log('\n' + '='.repeat(64));
@@ -60,13 +77,16 @@ suites.forEach(suite => {
         env.DATABASE_URL = '';
     }
     const result = spawnSync(process.execPath, [path.join(__dirname, suite)], { stdio: 'inherit', env });
-    if (result.status !== 0) failures++;
+    if (result.status !== 0) {
+        failures++;
+        failedSuites.push(suite);
+    }
 });
 
 console.log('\n' + '='.repeat(64));
 if (failures === 0) {
     console.log('ALL SUITES PASSED');
 } else {
-    console.error(`${failures} SUITE(S) FAILED`);
+    console.error(`${failures} SUITE(S) FAILED: ${failedSuites.join(', ')}`);
     process.exit(1);
 }

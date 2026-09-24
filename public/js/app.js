@@ -59,22 +59,31 @@
     }
 
     function getJson(url) {
-        return fetch(url).then(function (res) {
+        return fetch(url, { credentials: 'same-origin' }).then(function (res) {
             return res.json().catch(function () { return null; })
                 .then(function (body) {
                     if (!res.ok) {
-                        var err = new Error((body && body.error) || ('HTTP ' + res.status));
+                        var msg = (body && (body.error || body.message)) || ('HTTP ' + res.status);
+                        var err = new Error(msg);
                         err.body = body;
                         err.status = res.status;
                         throw err;
                     }
                     return body;
                 });
+        }).catch(function (err) {
+            if (err.status) throw err;
+            throw new Error(err.message === 'Failed to fetch'
+                ? 'Server is temporarily unreachable. Please ensure the server is running.'
+                : err.message);
         });
     }
 
     function postJson(url, payload, method) {
-        var options = { method: method || 'POST' };
+        var options = {
+            method: method || 'POST',
+            credentials: 'same-origin'
+        };
         if (payload != null) {
             options.headers = { 'Content-Type': 'application/json' };
             options.body = JSON.stringify(payload);
@@ -82,6 +91,16 @@
         return fetch(url, options).then(function (res) {
             return res.json().catch(function () { return null; })
                 .then(function (body) { return { ok: res.ok, status: res.status, body: body }; });
+        }).catch(function (err) {
+            return {
+                ok: false,
+                status: 0,
+                body: {
+                    error: err.message === 'Failed to fetch'
+                        ? 'Server is temporarily unreachable. Please ensure the server is running.'
+                        : err.message
+                }
+            };
         });
     }
 
@@ -132,6 +151,23 @@
         var parts = String(name || 'Guest')
             .replace(/^(Dr|Prof|Mr|Mrs|Ms)\.?\s+/i, '').trim().split(/\s+/);
         return ((parts[0] || 'G')[0] + (parts.length > 1 ? parts[parts.length - 1][0] : '')).toUpperCase();
+    }
+
+    function parseSemesterNumber(val) {
+        if (val == null) return null;
+        var str = String(val).trim().toUpperCase();
+        var romanMap = { 'VIII': 8, 'VII': 7, 'VI': 6, 'IV': 4, 'V': 5, 'III': 3, 'II': 2, 'I': 1 };
+        for (var r in romanMap) {
+            if (new RegExp('\\b' + r + '\\b').test(str) || str === r || str === 'SEM-' + r || str === 'SEMESTER-' + r) {
+                return romanMap[r];
+            }
+        }
+        var digitMatch = str.match(/\d+/);
+        if (digitMatch) {
+            var num = parseInt(digitMatch[0], 10);
+            if (num >= 1 && num <= 12) return num;
+        }
+        return null;
     }
 
     // ----------------------------------------------------------- activity
@@ -286,6 +322,16 @@
             manageBtn.style.display = isHOS ? '' : 'none';
         }
 
+        var btnTtEditMode = el('btnTtEditMode');
+        if (btnTtEditMode) {
+            btnTtEditMode.style.display = isHOS ? '' : 'none';
+        }
+
+        var btnTtClearScope = el('btnTtClearScope');
+        if (btnTtClearScope) {
+            btnTtClearScope.style.display = isHOS ? '' : 'none';
+        }
+
         var facAddCard = el('facAddCard');
         if (facAddCard) {
             facAddCard.style.display = isHOS ? '' : 'none';
@@ -294,6 +340,16 @@
         var hosUploadCard = el('hosUploadCard');
         if (hosUploadCard) {
             hosUploadCard.style.display = isHOS ? '' : 'none';
+        }
+
+        var hosStagingCard = el('hosStagingCard');
+        if (hosStagingCard && !isHOS) {
+            hosStagingCard.style.display = 'none';
+        }
+
+        var ttEditModal = el('ttEditModal');
+        if (ttEditModal && !isHOS) {
+            ttEditModal.style.display = 'none';
         }
 
         var deptCode = state.user ? state.user.department : 'Branch';
@@ -3188,51 +3244,240 @@
         return html;
     }
 
+    function renderUnresolvedCategoriesHtml(unresolved, uploadId) {
+        if (!unresolved || unresolved.length === 0) return '';
+        var categories = [
+            { key: 'faculty', label: 'Faculty', icon: '👤' },
+            { key: 'subject', label: 'Subject', icon: '📚' },
+            { key: 'class', label: 'Class', icon: '🏫' },
+            { key: 'room', label: 'Room', icon: '🚪' }
+        ];
+
+        var grouped = { faculty: [], subject: [], class: [], room: [], other: [] };
+        unresolved.forEach(function (item) {
+            var k = (item.entityType || '').toLowerCase();
+            if (grouped[k]) grouped[k].push(item);
+            else grouped.other.push(item);
+        });
+
+        var html = '<div class="unresolved-banner-box" style="background:#fffdf5; border:1px solid #f6c000; border-radius:var(--radius-sm); padding:16px; margin:14px 0;">';
+        html += '<div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:12px;">';
+        html += '<div><strong style="color:#8c6200; font-size:0.95rem;">⚠️ Action Required: ' + unresolved.length + ' Unresolved Reference(s)</strong>';
+        html += '<p style="margin:2px 0 0; font-size:0.84rem; color:#5c4100;">These extracted names/codes are not yet registered in your branch catalog. Map them to existing records or click Register below to unblock approval.</p></div>';
+        if (uploadId) {
+            html += '<button type="button" class="btn btn-sm btn-primary btn-register-all-unresolved" data-upload="' + esc(uploadId) + '" style="background:#0284c7; border:none; color:#fff; font-weight:600; padding:6px 14px;">⚡ Register All Unresolved to Catalog</button>';
+        }
+        html += '</div>';
+
+        categories.concat([{ key: 'other', label: 'Other References', icon: '📌' }]).forEach(function (cat) {
+            var items = grouped[cat.key] || [];
+            if (items.length === 0) return;
+            html += '<div style="margin-top:10px; padding:10px 12px; background:#ffffff; border:1px solid #fae69e; border-radius:var(--radius-sm);">';
+            html += '<div style="font-weight:600; font-size:0.86rem; color:#8c6200; margin-bottom:8px; display:flex; align-items:center; gap:6px;">' + cat.icon + ' ' + cat.label + ' (' + items.length + ')</div>';
+            html += '<div style="display:flex; flex-direction:column; gap:6px;">';
+            items.forEach(function (item) {
+                html += '<div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; padding:6px 10px; background:var(--surface-subtle); border-radius:4px; font-size:0.83rem;">';
+                html += '<div><strong>' + esc(item.extractedText) + '</strong>' +
+                    (item.code ? ' <span class="mono text-muted">[' + esc(item.code) + ']</span>' : '') +
+                    '<div class="muted" style="font-size:0.77rem;">' + esc(item.reason || 'Not found in branch catalog') + '</div></div>';
+                if (uploadId) {
+                    html += '<div style="display:flex; gap:6px;">' +
+                        '<button type="button" class="btn btn-secondary btn-sm btn-map-entity" data-upload="' + esc(uploadId) + '" data-type="' + esc(item.entityType) + '" data-text="' + esc(item.extractedText) + '" style="font-size:0.78rem; padding:3px 8px;">Map Existing</button>' +
+                        '<button type="button" class="btn btn-outline-primary btn-sm btn-register-entity" data-upload="' + esc(uploadId) + '" data-type="' + esc(item.entityType) + '" data-text="' + esc(item.extractedText) + '" data-code="' + esc(item.code || '') + '" style="font-size:0.78rem; padding:3px 8px;">+ Register New</button>' +
+                        '</div>';
+                }
+                html += '</div>';
+            });
+            html += '</div></div>';
+        });
+
+        html += '</div>';
+        return html;
+    }
+
+    function bindUnresolvedActionHandlers(container, uploadId, onRefresh) {
+        if (!container || !uploadId) return;
+
+        var regAllBtn = container.querySelector('.btn-register-all-unresolved');
+        if (regAllBtn) {
+            regAllBtn.addEventListener('click', function () {
+                regAllBtn.disabled = true;
+                regAllBtn.textContent = 'Registering…';
+                fetch('/api/staging/' + encodeURIComponent(uploadId) + '/register-all-unresolved', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' }
+                }).then(function (r) { return r.json(); }).then(function (res) {
+                    if (res.success) {
+                        if (onRefresh) onRefresh();
+                    } else {
+                        alert(res.error || 'Failed to register entities.');
+                        regAllBtn.disabled = false;
+                        regAllBtn.textContent = '⚡ Register All Unresolved to Catalog';
+                    }
+                }).catch(function (err) {
+                    alert('Network error: ' + err.message);
+                    regAllBtn.disabled = false;
+                    regAllBtn.textContent = '⚡ Register All Unresolved to Catalog';
+                });
+            });
+        }
+
+        container.querySelectorAll('.btn-register-entity').forEach(function (btn) {
+            btn.addEventListener('click', function () {
+                var entityType = btn.getAttribute('data-type');
+                var extractedText = btn.getAttribute('data-text');
+                var code = btn.getAttribute('data-code') || '';
+                btn.disabled = true;
+                btn.textContent = 'Registering…';
+
+                fetch('/api/staging/' + encodeURIComponent(uploadId) + '/register-entity', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        entityType: entityType,
+                        extractedText: extractedText,
+                        code: code
+                    })
+                }).then(function (r) { return r.json(); }).then(function (res) {
+                    if (res.success) {
+                        if (onRefresh) onRefresh();
+                    } else {
+                        alert(res.error || 'Failed to register entity.');
+                        btn.disabled = false;
+                        btn.textContent = '+ Register New';
+                    }
+                }).catch(function (err) {
+                    alert('Network error: ' + err.message);
+                    btn.disabled = false;
+                    btn.textContent = '+ Register New';
+                });
+            });
+        });
+
+        container.querySelectorAll('.btn-map-entity').forEach(function (btn) {
+            btn.addEventListener('click', function () {
+                var entityType = btn.getAttribute('data-type');
+                var extractedText = btn.getAttribute('data-text');
+                var target = prompt('Map "' + extractedText + '" to existing branch ' + entityType + ' (enter exact name or code):');
+                if (!target || !target.trim()) return;
+
+                fetch('/api/staging/' + encodeURIComponent(uploadId) + '/map-entity', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        entityType: entityType,
+                        extractedText: extractedText,
+                        targetName: target.trim(),
+                        targetCode: target.trim()
+                    })
+                }).then(function (r) { return r.json(); }).then(function (res) {
+                    if (res.success) {
+                        if (onRefresh) onRefresh();
+                    } else {
+                        alert(res.error || 'Failed to map entity.');
+                    }
+                }).catch(function (e) {
+                    alert('Network error: ' + e.message);
+                });
+            });
+        });
+    }
+
     function importPreviewHtml(data) {
-        var summary = data.report.summary || {};
-        var head = '<div class="notice notice-' + (data.report.ok ? 'ok' : 'error') + '">' +
-            esc(data.filename) + ' — read as <strong>' + esc(data.format) + '</strong> (' +
-            esc(data.layout) + ' layout' +
-            (data.provider ? ', extracted by ' + esc(data.provider) +
-                (data.convertedFromImage ? ' (image converted to PDF)' : '') : '') +
-            '), ' + esc(data.rowCount == null ? 'n/a' : data.rowCount) + ' row(s): ' +
-            esc(summary.faculty) + ' faculty, ' + esc(summary.busySlots) + ' scheduled periods, ' +
-            esc(summary.freeSlots) + ' free.</div>';
+        if (!data) return notice('No preview data available.', 'warn');
+        var report = data.report || { ok: true, errors: [], warnings: [], summary: {} };
+        var summary = report.summary || {};
+        var meta = data.meta || { days: ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'], periods: [1, 2, 3, 4, 5, 6, 7] };
+        var previewRows = Array.isArray(data.preview) ? data.preview : [];
+        var unresolved = Array.isArray(data.unresolvedEntities) ? data.unresolvedEntities : [];
+        var isImported = (data.importStatus === 'IMPORTED');
+
+        var head = '';
+        if (isImported) {
+            head = '<div class="notice notice-ok" style="border-left: 4px solid #16a34a; padding: 12px 16px;">' +
+                '<strong>✓ Timetable Already Imported:</strong> This timetable has been successfully approved and added to the Master Timetable.' +
+                '</div>';
+        } else if (report.ok) {
+            head = '<div class="notice notice-info" style="border-left: 4px solid var(--brand-500); padding: 12px 16px;">' +
+                '<strong style="font-size:1rem; display:block; margin-bottom:4px;">Approve Timetable · Preview Only</strong>' +
+                '<span>Timetable extracted and validated. Review the schedule below and click <strong>"✓ Accept &amp; Import to Master Timetable"</strong> to approve and add it to the live schedule.</span>' +
+                '</div>';
+        } else {
+            head = '<div class="notice notice-error" style="border-left: 4px solid #dc2626; padding: 12px 16px;">' +
+                '<strong style="font-size:1rem; display:block; margin-bottom:4px;">Validation Issues Detected</strong>' +
+                '<span>Timetable extracted with validation errors. Review the issues below before approving.</span>' +
+                '</div>';
+        }
+
+        var fileInfo = '<div class="notice notice-info" style="margin-top:10px;display:flex;align-items:center;flex-wrap:wrap;gap:8px;">' +
+            '<span>File: <strong>' + esc(data.filename || 'Timetable') + '</strong></span> &bull; ' +
+            '<span>Format: <strong>' + esc(data.format || 'document') + '</strong> (' + esc(data.layout || 'visual') + ' layout' +
+            (data.provider ? ', ' + esc(data.provider) : '') + ')</span>' +
+            (isImported
+                ? ' &bull; <span class="badge" style="background:#16a34a;color:#fff;font-size:11px;padding:3px 8px;border-radius:4px;font-weight:600;">✓ IMPORTED</span>'
+                : (data.uploadId ? ' &bull; <span class="badge" style="background:#d97706;color:#fff;font-size:11px;padding:3px 8px;border-radius:4px;font-weight:600;">STAGED / PENDING APPROVAL</span>' : '')) +
+            '</div>';
 
         var stats = '<div class="stats compact" style="margin-top:14px;">' + [
-            { label: 'Rows read', value: data.rowCount == null ? '—' : data.rowCount,
+            { label: 'Rows read', value: data.rowCount == null ? (previewRows.length || '—') : data.rowCount,
               note: 'from the file', tone: 'brand' },
-            { label: 'Faculty', value: summary.faculty, note: 'found in the sheet' },
-            { label: 'Scheduled periods', value: summary.busySlots, note: 'to be loaded' },
-            { label: 'Errors', value: (data.report.errors || []).length,
-              note: data.report.ok ? 'none — safe to load' : 'must be fixed first',
-              tone: data.report.ok ? 'ok' : 'busy' },
-            { label: 'Warnings', value: (data.report.warnings || []).length, note: 'shown below' }
+            { label: 'Faculty', value: summary.faculty != null ? summary.faculty : previewRows.length, note: 'found in the sheet' },
+            { label: 'Scheduled periods', value: summary.busySlots != null ? summary.busySlots : '—', note: 'to be loaded' },
+            { label: 'Errors', value: (report.errors || []).length,
+              note: report.ok ? 'none — safe to load' : 'must be fixed first',
+              tone: report.ok ? 'ok' : 'busy' },
+            { label: 'Warnings', value: (report.warnings || []).length, note: 'shown below' }
         ].map(statCard).join('') + '</div>';
+
+        var unresolvedHtml = renderUnresolvedCategoriesHtml(unresolved, data.uploadId);
+
+        var days = Array.isArray(meta.days) && meta.days.length > 0 ? meta.days : ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+        var periods = Array.isArray(meta.periods) && meta.periods.length > 0 ? meta.periods : [1, 2, 3, 4, 5, 6, 7];
+        var timings = Array.isArray(meta.periodTimings) ? meta.periodTimings : [];
 
         var table = '<div class="table-scroll" style="margin-top:14px;"><table class="data"><thead><tr>' +
             '<th>Faculty</th><th>Department</th>' +
-            data.meta.days.reduce(function (cells, day) {
-                return cells.concat(data.meta.periods.map(function (p) {
-                    return '<th>' + esc(day.slice(0, 3)) + ' P' + esc(p) + '</th>';
+            days.reduce(function (cells, day) {
+                return cells.concat(periods.map(function (p, pIdx) {
+                    var timing = timings[pIdx] || '';
+                    return '<th>' + esc(String(day).slice(0, 3)) + '<br><small style="font-weight:normal;opacity:0.85;">P' + esc(p) + (timing ? ' (' + esc(timing) + ')' : '') + '</small></th>';
                 }));
             }, []).join('') + '</tr></thead><tbody>' +
-            data.preview.map(function (row) {
-                return '<tr><td>' + esc(row.faculty) + '</td><td>' + esc(row.department) + '</td>' +
-                    row.slots.map(function (slot) {
-                        return slot.status === 'busy'
-                            ? '<td>' + esc(slot.subject) + '</td>'
-                            : '<td class="muted">free</td>';
+            previewRows.map(function (row) {
+                var slots = Array.isArray(row.slots) ? row.slots : [];
+                return '<tr><td><strong>' + esc(row.faculty || '') + '</strong></td><td>' + esc(row.department || '') + '</td>' +
+                    slots.map(function (slot) {
+                        if (!slot || slot.status !== 'busy') {
+                            return '<td class="muted" style="text-align:center;">free</td>';
+                        }
+                        var label = esc(slot.subject || '');
+                        if (slot.className) {
+                            label += '<br><small class="muted">' + esc(slot.className) + '</small>';
+                        }
+                        return '<td>' + label + '</td>';
                     }).join('') + '</tr>';
             }).join('') + '</tbody></table></div>';
 
-        var actions = '<div class="controls" style="margin-top:16px;">' +
-            (data.report.ok
-                ? '<button type="button" class="btn" id="importConfirm">Confirm &amp; generate timetable</button>'
-                : '<span class="notice notice-error">Validation failed — this file cannot be loaded.</span>') +
-            '<button type="button" class="btn btn-secondary" id="importCancel">Cancel</button></div>';
+        var canApprove = report.ok && (!unresolved || unresolved.length === 0);
+        var buttonHtml = '';
+        if (isImported) {
+            buttonHtml = '<button type="button" class="btn btn-secondary" id="importConfirm" disabled style="font-weight:600;">✓ Already Imported</button>';
+        } else if (canApprove) {
+            buttonHtml = '<button type="button" class="btn btn-primary" id="importConfirm" style="background:#16a34a;border-color:#16a34a;color:#fff;font-weight:600;font-size:0.95rem;padding:8px 18px;">✓ Accept &amp; Import to Master Timetable</button>';
+        } else if (unresolved.length > 0) {
+            buttonHtml = '<button type="button" class="btn btn-secondary" id="importConfirm" disabled style="opacity:0.65;font-weight:600;">Resolve References to Enable Approval</button>' +
+                '<span class="notice notice-warn" style="margin:0;">Resolve ' + unresolved.length + ' catalog reference(s) above to enable approval.</span>';
+        } else {
+            buttonHtml = '<button type="button" class="btn btn-secondary" id="importConfirm" disabled style="opacity:0.65;font-weight:600;">Cannot Approve (Invalid Data)</button>' +
+                '<span class="notice notice-error" style="margin:0;">Validation failed — cannot add to Master Timetable.</span>';
+        }
 
-        return head + stats + importReportHtml(data.report) + table + actions;
+        var actions = '<div class="controls" style="margin-top:16px;display:flex;gap:12px;align-items:center;flex-wrap:wrap;">' +
+            buttonHtml +
+            '<button type="button" class="btn btn-secondary" id="importCancel">Cancel</button></div>' +
+            '<div id="importActionStatus" style="margin-top:12px;display:none;"></div>';
+
+        return head + fileInfo + stats + unresolvedHtml + importReportHtml(report) + table + actions;
     }
 
     function sendImport(url) {
@@ -3252,20 +3497,18 @@
 
     /** Formats the server actually accepts, so the UI never promises more. */
     function supportedExtensions() {
-        return (state.formats && state.formats.supported) || ['.xlsx', '.csv'];
+        return (state.formats && state.formats.supported) || ['.xlsx', '.xls', '.csv', '.png', '.jpg', '.jpeg', '.webp', '.pdf'];
     }
 
     function unsupportedMessage(filename) {
         var ext = (String(filename).match(/\.[a-z0-9]+$/i) || [''])[0].toLowerCase();
         var supported = supportedExtensions().join(', ');
         if (/^\.(pdf|png|jpg|jpeg|webp)$/.test(ext)) {
-            // PDFs and images ARE supported now; whether they can be read
-            // depends on the extraction provider, which the server reports.
             var document = state.formats && state.formats.document;
             if (document && document.available) {
                 return ext.slice(1).toUpperCase() + ' files are read by ' + document.provider + '.';
             }
-            return 'PDF/Image extraction is not configured. Add PDFCO_API_KEY to enable document ' +
+            return 'PDF/Image extraction is not configured. Add GEMINI_API_KEY to enable document ' +
                 'extraction. Meanwhile use ' +
                 ((document && document.alternatives) || ['Excel', 'CSV', 'Quick Paste']).join(', ') + '.';
         }
@@ -3276,69 +3519,126 @@
     function importProgress(container, name) {
         var isDocument = /\.(pdf|png|jpe?g|webp)$/i.test(name);
         var steps = isDocument
-            ? ['Uploading…',
-               'Extracting timetable from PDF/image…',
-               'Reading table…',
-               'Normalizing days…',
-               'Validating timetable…']
-            : ['Uploading…', 'Reading table…', 'Normalizing days…', 'Validating timetable…'];
+            ? [
+                { delay: 0, text: 'Uploading timetable to server…', sub: 'Preparing image payload…' },
+                { delay: 2000, text: 'Stage 1: Extracting timetable with Gemini Vision…', sub: 'Analyzing visual grid, periods, and staff legend…' },
+                { delay: 14000, text: 'Stage 2: Multimodal verification & error-correction…', sub: 'Cross-checking original image with draft JSON for full accuracy…' },
+                { delay: 28000, text: 'Validating timetable rules & constraints…', sub: 'Verifying subject codes, session spans, and class mappings…' },
+                { delay: 38000, text: 'Preparing staged timetable for HOD preview…', sub: 'Nothing is added to Master Timetable until you approve.' },
+                { delay: 50000, text: 'Processing complex timetable structure…', sub: 'Finalizing verification response. Please wait…' }
+              ]
+            : [
+                { delay: 0, text: 'Uploading…', sub: '' },
+                { delay: 400, text: 'Reading table…', sub: '' },
+                { delay: 800, text: 'Normalizing days…', sub: '' },
+                { delay: 1200, text: 'Validating timetable…', sub: '' }
+              ];
 
         var index = 0;
         function render() {
-            container.innerHTML = notice(steps[index], 'info') +
-                (isDocument && index >= 1
-                    ? '<p class="muted" style="margin-top:6px;">' +
-                      'The document is being read by the extraction service. This can take a ' +
-                      'few seconds; nothing is imported until you confirm the preview.</p>'
+            var item = steps[index] || steps[steps.length - 1];
+            container.innerHTML = notice(item.text, 'info') +
+                (item.sub
+                    ? '<p class="muted" style="margin-top:6px;">' + item.sub + '</p>'
                     : '');
         }
         render();
 
-        // Advance only while the request is genuinely still in flight, so the
-        // user is never shown a stage that has not been reached.
+        var startTime = Date.now();
         var timer = setInterval(function () {
-            if (index < steps.length - 1) { index++; render(); }
-        }, isDocument ? 1200 : 400);
+            var elapsed = Date.now() - startTime;
+            var nextIndex = index;
+            for (var i = 0; i < steps.length; i++) {
+                if (elapsed >= steps[i].delay) {
+                    nextIndex = i;
+                }
+            }
+            if (nextIndex !== index) {
+                index = nextIndex;
+                render();
+            }
+        }, 500);
 
         return { stop: function () { clearInterval(timer); } };
     }
 
+    function setPreviewButtonsDisabled(disabled) {
+        var btn1 = el('importPreview');
+        if (btn1) btn1.disabled = Boolean(disabled);
+        var btn2 = el('pastePreview');
+        if (btn2) btn2.disabled = Boolean(disabled);
+    }
+
     function runPreview(container) {
         workflowStep('process');
+        setPreviewButtonsDisabled(true);
         var progress = importProgress(container, state.importFile.name);
 
         return sendImport(API.importPreview).then(function (res) {
             progress.stop();
+            setPreviewButtonsDisabled(false);
             if (!res) return;
             workflowStep('validate');
             if (!res.ok) {
                 workflowStep('validate', true);
-                container.innerHTML = notice((res.body && res.body.error) || 'Import failed.', 'error') +
+                var errNotice = (res.body && res.body.error)
+                    ? res.body.error
+                    : (res.status ? 'Import failed (HTTP ' + res.status + ').' : 'Import failed.');
+                container.innerHTML = notice(errNotice, 'error') +
                     (res.body && res.body.report ? importReportHtml(res.body.report) : '');
                 return;
             }
-            state.pendingImport = true;
-            workflowStep(res.body.report.ok ? 'preview' : 'validate', !res.body.report.ok);
-            container.innerHTML = importPreviewHtml(res.body);
-            logActivity('Previewed ' + res.body.filename + ' (' + res.body.rowCount + ' rows)');
-
-            var confirmBtn = el('importConfirm');
-            if (confirmBtn) confirmBtn.addEventListener('click', commitImport);
-            var cancelBtn = el('importCancel');
-            if (cancelBtn) {
-                cancelBtn.addEventListener('click', function () {
-                    state.pendingImport = null;
-                    state.importFile = null;
-                    container.innerHTML = '';
-                    if (el('importFile')) el('importFile').value = '';
-                    workflowStep('upload');
-                });
+            if (!res.body || typeof res.body !== 'object') {
+                workflowStep('validate', true);
+                container.innerHTML = notice('Invalid server response format.', 'error');
+                return;
             }
-        }).catch(function () {
+            state.pendingImport = res.body;
+            var isReportOk = res.body.report ? Boolean(res.body.report.ok) : true;
+            workflowStep(isReportOk ? 'preview' : 'validate', !isReportOk);
+            renderPreviewIntoContainer(container, res.body);
+            logActivity('Previewed ' + (res.body.filename || 'timetable') + ' (' + (res.body.rowCount || 0) + ' rows)');
+        }).catch(function (err) {
             progress.stop();
+            setPreviewButtonsDisabled(false);
             workflowStep('process', true);
-            container.innerHTML = notice('Could not reach the server while importing.', 'error');
+            var msg = 'Could not reach the server while importing. Check that the server is running and try again.';
+            if (err && err.name === 'AbortError') {
+                msg = 'Import request timed out. Please try again.';
+            } else if (err && err.message && !/failed to fetch|networkerror/i.test(err.message)) {
+                msg = 'Import processing error: ' + err.message;
+            }
+            container.innerHTML = notice(msg, 'error');
         });
+    }
+
+    function renderPreviewIntoContainer(container, body) {
+        container.innerHTML = importPreviewHtml(body);
+        var confirmBtn = el('importConfirm');
+        if (confirmBtn) confirmBtn.addEventListener('click', commitImport);
+        var cancelBtn = el('importCancel');
+        if (cancelBtn) {
+            cancelBtn.addEventListener('click', function () {
+                state.pendingImport = null;
+                state.importFile = null;
+                container.innerHTML = '';
+                if (el('importFile')) el('importFile').value = '';
+                workflowStep('upload');
+            });
+        }
+        if (body.uploadId) {
+            bindUnresolvedActionHandlers(container, body.uploadId, function () {
+                fetch('/api/staging/' + encodeURIComponent(body.uploadId)).then(function (r) {
+                    return r.json();
+                }).then(function (stagingData) {
+                    if (stagingData && stagingData.resolution) {
+                        body.unresolvedEntities = stagingData.resolution.unresolvedEntities || [];
+                        state.pendingImport = body;
+                        renderPreviewIntoContainer(container, body);
+                    }
+                }).catch(function () {});
+            });
+        }
     }
 
     function previewImport() {
@@ -3380,29 +3680,109 @@
     }
 
     function commitImport() {
-        var container = el('importResult');
-        workflowStep('confirm');
-        container.innerHTML = notice('Loading timetable…', 'info');
+        var confirmBtn = el('importConfirm');
+        var statusBox = el('importActionStatus');
+        if (!confirmBtn || confirmBtn.disabled) return;
 
-        sendImport(API.importCommit).then(function (res) {
-            if (!res.ok) {
-                workflowStep('confirm', true);
-                container.innerHTML = notice(
-                    ((res.body && res.body.error) || 'Import failed.') +
-                    ' The previous timetable is still loaded.', 'error');
+        var pending = state.pendingImport;
+        if (!pending) return;
+
+        confirmBtn.disabled = true;
+        confirmBtn.textContent = 'Importing…';
+        if (statusBox) {
+            statusBox.style.display = 'block';
+            statusBox.innerHTML = notice('Adding timetable to Master Timetable…', 'info');
+        }
+        workflowStep('confirm');
+
+        var uploadId = pending.uploadId || null;
+        var approvePromise;
+        if (uploadId) {
+            // Explicit HOD Approval via staging API
+            approvePromise = fetch('/api/staging/' + encodeURIComponent(uploadId) + '/approve', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' }
+            }).then(function (res) {
+                return res.json().catch(function () { return null; }).then(function (body) {
+                    return { ok: res.ok, status: res.status, body: body };
+                });
+            });
+        } else {
+            // Direct commit for spreadsheet imports
+            approvePromise = sendImport(API.importCommit);
+        }
+
+        approvePromise.then(function (res) {
+            if (!res) {
+                if (confirmBtn) {
+                    confirmBtn.disabled = false;
+                    confirmBtn.textContent = '✓ Accept & Import to Master Timetable';
+                }
                 return;
             }
-            state.pendingImport = null;
-            state.importFile = null;
-            el('importFile').value = '';
+            if (!res.ok) {
+                workflowStep('preview', true);
+                var errNotice = (res.body && res.body.error)
+                    ? res.body.error
+                    : (res.status ? 'Approval failed (HTTP ' + res.status + ').' : 'Approval failed.');
+                if (statusBox) {
+                    statusBox.style.display = 'block';
+                    statusBox.innerHTML = notice(
+                        errNotice + ' The live timetable was not changed.', 'error') +
+                        (res.body && res.body.report ? importReportHtml(res.body.report) : '');
+                }
+                if (confirmBtn) {
+                    confirmBtn.disabled = false;
+                    confirmBtn.textContent = '✓ Accept & Import to Master Timetable';
+                }
+                return;
+            }
+
+            // Successful approval
+            if (confirmBtn) {
+                confirmBtn.disabled = true;
+                confirmBtn.textContent = '✓ Already Imported';
+                confirmBtn.className = 'btn btn-secondary';
+            }
+            if (state.pendingImport) {
+                state.pendingImport.importStatus = 'IMPORTED';
+            }
+            if (statusBox) {
+                statusBox.style.display = 'block';
+                statusBox.innerHTML = notice(
+                    '✓ Timetable approved and added to Master Timetable successfully. Availability now uses the approved timetable.', 'ok');
+            }
             workflowStep('generate');
-            container.innerHTML = notice(
-                'Timetable loaded from ' + res.body.filename + '. Availability now uses this data.', 'ok');
-            logActivity('Loaded timetable from ' + res.body.filename);
-            return bootstrap();
-        }).catch(function () {
-            workflowStep('confirm', true);
-            container.innerHTML = notice('Could not reach the server while importing.', 'error');
+            logActivity('Approved and added timetable to Master Timetable');
+
+            var preferredScope = (res.body && res.body.scope) || (pending && pending.stagedContract ? {
+                branch: pending.stagedContract.department_code || pending.stagedContract.branch_code,
+                semester: pending.stagedContract.semester,
+                section: pending.stagedContract.section,
+                academicYear: pending.stagedContract.academic_year
+            } : null);
+
+            return bootstrap().then(function () {
+                if (preferredScope) {
+                    return loadTimetableScopes(preferredScope);
+                }
+            });
+        }).catch(function (err) {
+            workflowStep('preview', true);
+            var msg = 'Could not reach the server while approving. Check that the server is running and try again.';
+            if (err && err.name === 'AbortError') {
+                msg = 'Approval request timed out. Please try again.';
+            } else if (err && err.message && !/failed to fetch|networkerror/i.test(err.message)) {
+                msg = 'Approval error: ' + err.message;
+            }
+            if (statusBox) {
+                statusBox.style.display = 'block';
+                statusBox.innerHTML = notice(msg, 'error');
+            }
+            if (confirmBtn) {
+                confirmBtn.disabled = false;
+                confirmBtn.textContent = '✓ Accept & Import to Master Timetable';
+            }
         });
     }
 
@@ -3434,29 +3814,60 @@
         return value.indexOf('class:') === 0 ? '?class=' + encodeURIComponent(value.slice(6)) : '';
     }
 
-    function loadTimetableScopes() {
+    function loadTimetableScopes(preferredScope) {
         return getJson('/api/timetable/scopes').then(function (data) {
             state.timetableScopes = data;
             var semEl = el('ttSemester');
             var secEl = el('ttSection');
             var yearEl = el('ttAcademicYear');
 
+            var branchClasses = (data && data.classes) || [];
+            var activeClass = branchClasses.find(function (c) { return (c.entryCount > 0); }) || branchClasses[0] || null;
+
+            var currentYear = (preferredScope && preferredScope.academicYear) || (yearEl && yearEl.value) || (activeClass && activeClass.academicYear);
+            var currentSem = (preferredScope && preferredScope.semester) || (semEl && semEl.value) || (activeClass && activeClass.semester);
+            var currentSec = (preferredScope && preferredScope.section) || (secEl && secEl.value) || (activeClass && activeClass.section);
+
+            // If no preferredScope provided, prefer semester/section from active class with timetable entries
+            if (!preferredScope && activeClass && activeClass.entryCount > 0 && activeClass.semester) {
+                var sem1Class = branchClasses.find(function (c) { return parseSemesterNumber(c.semester) === 1 && c.entryCount > 0; });
+                if (!sem1Class) {
+                    currentSem = activeClass.semester;
+                    currentSec = activeClass.section || currentSec;
+                    currentYear = activeClass.academicYear || currentYear;
+                }
+            }
+
             if (yearEl && data.academicYears && data.academicYears.length) {
+                var selectedYear = (data.academicYears.indexOf(currentYear) >= 0) ? currentYear : data.academicYears[0];
                 fillSelect(yearEl, data.academicYears.map(function (y) {
                     return { value: y, label: y };
-                }), data.academicYears[0]);
+                }), selectedYear);
             }
 
             if (semEl && data.semesters && data.semesters.length) {
+                var normSem = currentSem;
+                var currentSemNum = parseSemesterNumber(normSem);
+                if (normSem && data.semesters.indexOf(normSem) < 0) {
+                    var match = data.semesters.find(function (s) {
+                        if (s.toLowerCase() === String(normSem).toLowerCase()) return true;
+                        var sNum = parseSemesterNumber(s);
+                        return (sNum != null && currentSemNum != null && sNum === currentSemNum);
+                    });
+                    if (match) normSem = match;
+                }
+                var selectedSem = (normSem && data.semesters.indexOf(normSem) >= 0) ? normSem : data.semesters[0];
                 fillSelect(semEl, data.semesters.map(function (s) {
                     return { value: s, label: s };
-                }), data.semesters[0]);
+                }), selectedSem);
             }
 
             if (secEl && data.sections && data.sections.length) {
+                var normSec = currentSec ? String(currentSec).toUpperCase().replace(/^(?:SEC(?:TION)?[-_\s]*)/, '') : null;
+                var selectedSec = (normSec && data.sections.indexOf(normSec) >= 0) ? normSec : data.sections[0];
                 fillSelect(secEl, data.sections.map(function (sec) {
                     return { value: sec, label: 'Section ' + sec };
-                }), data.sections[0]);
+                }), selectedSec);
             }
 
             var uploadSem = el('hosUploadSemester');
@@ -3464,12 +3875,12 @@
             if (uploadSem && data.semesters) {
                 fillSelect(uploadSem, [{ value: '', label: '— Auto Detect —' }].concat(data.semesters.map(function (s) {
                     return { value: s, label: s };
-                })), '');
+                })), uploadSem.value || '');
             }
             if (uploadSec && data.sections) {
                 fillSelect(uploadSec, [{ value: '', label: '— Auto Detect —' }].concat(data.sections.map(function (sec) {
                     return { value: sec, label: 'Section ' + sec };
-                })), '');
+                })), uploadSec.value || '');
             }
 
             describeTimetableClass();
@@ -3500,8 +3911,7 @@
             };
         }), keep ? ('class:' + keep) : '');
         describeTimetableClass();
-        loadTimetableScopes();
-        return loadGrid(ttQuery(), 'ttHead', 'ttBody', jumpToAvailability);
+        return loadTimetableScopes();
     }
 
     /** The one-line academic context under the Master Timetable heading. */
@@ -4494,6 +4904,167 @@
             });
         }
 
+        // --- master timetable cell editing (HOD edit mode)
+        function setupMasterTimetableEdit() {
+            var btnEditMode = el('btnTtEditMode');
+            var modal = el('ttEditModal');
+            var btnClose = el('btnTtCloseEditModal');
+            var btnCancel = el('btnTtCancelSlot');
+            var btnClear = el('btnTtClearSlot');
+            var form = el('ttSlotEditForm');
+            var statusBox = el('ttEditStatus');
+
+            var selDay = el('ttEditDay');
+            var selPeriod = el('ttEditPeriod');
+            var selSubject = el('ttEditSubject');
+            var selFaculty = el('ttEditFaculty');
+            var inputRoom = el('ttEditRoom');
+            var selType = el('ttEditType');
+
+            function populateEditDropdowns(selectedCell) {
+                var days = (state.meta && state.meta.days) || ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+                var periods = (state.meta && state.meta.periods) || [1, 2, 3, 4, 5, 6, 7];
+
+                if (selDay) fillSelect(selDay, days, selectedCell && selectedCell.day);
+                if (selPeriod) fillSelect(selPeriod, periods, selectedCell && selectedCell.period);
+
+                getJson(API.entryReference).then(function (ref) {
+                    state.entryReference = ref;
+                    if (selSubject && ref.subjects) {
+                        var subList = [{ value: '', label: '— Free Slot —' }].concat(ref.subjects.map(function (s) {
+                            return { value: s.name, label: s.name + (s.code ? ' (' + s.code + ')' : '') };
+                        }));
+                        if (selectedCell && selectedCell.subject && !ref.subjects.some(function (s) { return s.name === selectedCell.subject; })) {
+                            subList.push({ value: selectedCell.subject, label: selectedCell.subject });
+                        }
+                        fillSelect(selSubject, subList, selectedCell && selectedCell.subject);
+                    }
+                    if (selFaculty && ref.faculty) {
+                        var facList = [{ value: '', label: '— Unassigned / Activity —' }].concat(ref.faculty.map(function (f) {
+                            return { value: f.name, label: f.name };
+                        }));
+                        if (selectedCell && selectedCell.faculty && !ref.faculty.some(function (f) { return f.name === selectedCell.faculty; })) {
+                            facList.push({ value: selectedCell.faculty, label: selectedCell.faculty });
+                        }
+                        fillSelect(selFaculty, facList, selectedCell && selectedCell.faculty);
+                    }
+                }).catch(function () {});
+
+                if (inputRoom) inputRoom.value = (selectedCell && selectedCell.room) || '';
+                if (selType) selType.value = (selectedCell && selectedCell.type) || 'theory';
+                if (statusBox) statusBox.style.display = 'none';
+            }
+
+            if (btnEditMode) {
+                btnEditMode.addEventListener('click', function () {
+                    var isHOS = Boolean(state.user && (state.user.role === 'hos' || state.user.role === 'coordinator' || state.user.role === 'admin'));
+                    if (!isHOS) return;
+                    if (modal.style.display === 'none' || !modal.style.display) {
+                        modal.style.display = 'block';
+                        var key = state.selected.ttBody;
+                        var parts = key ? key.split('|') : [];
+                        populateEditDropdowns({ day: parts[0], period: parts[1] ? Number(parts[1]) : 1 });
+                    } else {
+                        modal.style.display = 'none';
+                    }
+                });
+            }
+
+            if (btnClose) {
+                btnClose.addEventListener('click', function () { modal.style.display = 'none'; });
+            }
+            if (btnCancel) {
+                btnCancel.addEventListener('click', function () { modal.style.display = 'none'; });
+            }
+
+            function getCurrentClassName() {
+                var sem = (el('ttSemester') && el('ttSemester').value) || 'SEM-1';
+                var sec = (el('ttSection') && el('ttSection').value) || 'A';
+                var dept = (state.user && state.user.department) || '';
+                var semNum = parseSemesterNumber(sem) || 1;
+                return (dept ? dept + '-' : '') + semNum + '-' + sec;
+            }
+
+            if (form) {
+                form.addEventListener('submit', function (e) {
+                    e.preventDefault();
+                    var className = getCurrentClassName();
+                    var day = selDay ? selDay.value : null;
+                    var period = selPeriod ? selPeriod.value : null;
+                    var subject = selSubject ? selSubject.value : '';
+                    var faculty = selFaculty ? selFaculty.value : '';
+                    var room = inputRoom ? inputRoom.value.trim() : '';
+                    var type = selType ? selType.value : 'theory';
+
+                    if (statusBox) {
+                        statusBox.style.display = 'block';
+                        statusBox.innerHTML = '<div class="notice notice-info">Saving slot…</div>';
+                    }
+
+                    postJson('/api/timetable/entries/slot', {
+                        className: className,
+                        day: day,
+                        period: period,
+                        subject: subject,
+                        faculty: faculty,
+                        room: room,
+                        type: type
+                    }).then(function (res) {
+                        if (statusBox) {
+                            if (res.ok && res.body && res.body.success) {
+                                statusBox.innerHTML = '<div class="notice notice-success"><strong>✓ Slot updated!</strong> Live Master Timetable &amp; availability refreshed.</div>';
+                                loadGrid(ttQuery(), 'ttHead', 'ttBody', jumpToAvailability);
+                                loadDashboard();
+                            } else {
+                                var err = (res.body && (res.body.error || res.body.message)) || 'Failed to update slot.';
+                                statusBox.innerHTML = '<div class="notice notice-danger"><strong>Error:</strong> ' + esc(err) + '</div>';
+                            }
+                        }
+                    }).catch(function (err) {
+                        if (statusBox) {
+                            statusBox.innerHTML = '<div class="notice notice-danger"><strong>Network error:</strong> ' + esc(err.message) + '</div>';
+                        }
+                    });
+                });
+            }
+
+            if (btnClear) {
+                btnClear.addEventListener('click', function () {
+                    var className = getCurrentClassName();
+                    var day = selDay ? selDay.value : null;
+                    var period = selPeriod ? selPeriod.value : null;
+                    if (!confirm('Clear slot for ' + day + ' Period ' + period + ' (Mark as Free)?')) return;
+
+                    if (statusBox) {
+                        statusBox.style.display = 'block';
+                        statusBox.innerHTML = '<div class="notice notice-info">Clearing slot…</div>';
+                    }
+
+                    postJson('/api/timetable/entries/slot', {
+                        className: className,
+                        day: day,
+                        period: period,
+                        subject: ''
+                    }).then(function (res) {
+                        if (statusBox) {
+                            if (res.ok && res.body && res.body.success) {
+                                statusBox.innerHTML = '<div class="notice notice-success"><strong>✓ Slot cleared (marked free).</strong></div>';
+                                if (selSubject) selSubject.value = '';
+                                if (selFaculty) selFaculty.value = '';
+                                if (inputRoom) inputRoom.value = '';
+                                loadGrid(ttQuery(), 'ttHead', 'ttBody', jumpToAvailability);
+                                loadDashboard();
+                            } else {
+                                var err = (res.body && (res.body.error || res.body.message)) || 'Failed to clear slot.';
+                                statusBox.innerHTML = '<div class="notice notice-danger"><strong>Error:</strong> ' + esc(err) + '</div>';
+                            }
+                        }
+                    });
+                });
+            }
+        }
+        setupMasterTimetableEdit();
+
         // --- add / edit timetable
         if (el('manageDept')) el('manageDept').addEventListener('change', applyManageDepartment);
         if (el('manageForm')) el('manageForm').addEventListener('submit', saveEntry);
@@ -4751,7 +5322,7 @@
 
                     if (btnHosUpload) {
                         btnHosUpload.disabled = true;
-                        btnHosUpload.textContent = 'Uploading…';
+                        btnHosUpload.textContent = 'Extracting…';
                     }
 
                     var formData = new FormData();
@@ -4763,7 +5334,7 @@
                         formData.append('section', el('hosUploadSection').value);
                     }
 
-                    fetch('/api/uploads/master-timetable', {
+                    fetch('/api/timetable/import/preview', {
                         method: 'POST',
                         body: formData
                     }).then(function (res) {
@@ -4774,17 +5345,22 @@
                         if (statusHos) {
                             statusHos.style.display = 'block';
                             if (res.ok) {
+                                var slotCount = (res.body.report && res.body.report.stats && res.body.report.stats.busySlots != null)
+                                    ? res.body.report.stats.busySlots
+                                    : ((res.body.rawContract && res.body.rawContract.entries) ? res.body.rawContract.entries.length : (res.body.rowCount || 0));
                                 statusHos.innerHTML =
                                     '<div class="notice notice-success" style="margin-top:10px;">' +
-                                    '<strong>Upload status: Uploaded successfully</strong><br/>' +
-                                    '<span style="font-size:0.9rem; margin-top:4px; display:inline-block;">' +
-                                    'Timetable uploaded. Processing will be available in the next step.</span>' +
+                                    '<strong>Extraction complete!</strong> Found ' + slotCount + ' scheduled slot(s). Review and edit the timetable below before approving.' +
                                     '</div>';
+                                if (res.body && res.body.uploadId) {
+                                    loadStagedTimetable(res.body.uploadId);
+                                    refreshPendingStaging();
+                                }
                             } else {
-                                var errMsg = (res.body && res.body.error) || 'Upload failed.';
+                                var errMsg = (res.body && res.body.error) || 'Upload extraction failed.';
                                 statusHos.innerHTML =
                                     '<div class="notice notice-danger" style="margin-top:10px;">' +
-                                    '<strong>Upload failed:</strong> ' + esc(errMsg) +
+                                    '<strong>Extraction failed:</strong> ' + esc(errMsg) +
                                     '</div>';
                             }
                         }
@@ -4799,19 +5375,27 @@
                     }).finally(function () {
                         if (btnHosUpload) {
                             btnHosUpload.disabled = false;
-                            btnHosUpload.textContent = 'Upload';
+                            btnHosUpload.textContent = 'Preview Timetable';
                         }
                     });
                 });
             }
 
-            // Faculty My Timetable Upload
+            // Faculty My Timetable Upload & Preview
             var btnFacChoose = el('btnFacChooseFile');
             var inputFacFile = el('facTimetableFile');
             var btnFacUpload = el('btnFacUpload');
             var formFac = el('facUploadForm');
             var nameFac = el('facSelectedFileName');
             var statusFac = el('facUploadStatus');
+            var facPreviewCard = el('facPreviewCard');
+            var facPreviewCountBadge = el('facPreviewCountBadge');
+            var facPreviewHead = el('facPreviewHead');
+            var facPreviewBody = el('facPreviewBody');
+            var btnFacConfirmSave = el('btnFacConfirmSave');
+            var btnFacCancelPreview = el('btnFacCancelPreview');
+
+            var facPendingContract = null;
 
             if (btnFacChoose && inputFacFile) {
                 btnFacChoose.addEventListener('click', function () {
@@ -4844,13 +5428,13 @@
 
                     if (btnFacUpload) {
                         btnFacUpload.disabled = true;
-                        btnFacUpload.textContent = 'Uploading…';
+                        btnFacUpload.textContent = 'Extracting…';
                     }
 
                     var formData = new FormData();
                     formData.append('timetable', file);
 
-                    fetch('/api/uploads/faculty-timetable', {
+                    fetch('/api/faculty/timetable/preview', {
                         method: 'POST',
                         body: formData
                     }).then(function (res) {
@@ -4858,44 +5442,260 @@
                             return { ok: res.ok, status: res.status, body: body };
                         });
                     }).then(function (res) {
-                        if (statusFac) {
-                            statusFac.style.display = 'block';
-                            if (res.ok) {
-                                statusFac.innerHTML =
-                                    '<div class="notice notice-success" style="margin-top:10px;">' +
-                                    '<strong>Upload status: Uploaded successfully</strong><br/>' +
-                                    '<span style="font-size:0.9rem; margin-top:4px; display:inline-block;">' +
-                                    'Timetable uploaded. Processing will be available in the next step.</span>' +
-                                    '</div>';
-                            } else {
-                                var errMsg = (res.body && res.body.error) || 'Upload failed.';
-                                statusFac.innerHTML =
-                                    '<div class="notice notice-danger" style="margin-top:10px;">' +
-                                    '<strong>Upload failed:</strong> ' + esc(errMsg) +
-                                    '</div>';
+                        if (statusFac) statusFac.style.display = 'block';
+                        if (!res.ok) {
+                            var errMsg = (res.body && res.body.error) || 'Upload preview failed.';
+                            statusFac.innerHTML = '<div class="notice notice-danger" style="margin-top:10px;"><strong>Extraction failed:</strong> ' + esc(errMsg) + '</div>';
+                            if (facPreviewCard) facPreviewCard.style.display = 'none';
+                            return;
+                        }
+
+                        facPendingContract = res.body.contract || {};
+                        var entries = (res.body.slots && res.body.slots.length > 0) ? res.body.slots : (facPendingContract.entries || []);
+                        var totalSlots = res.body.slotCount != null ? res.body.slotCount : (res.body.totalSlots != null ? res.body.totalSlots : entries.length);
+
+                        if (totalSlots === 0) {
+                            var diag = res.body.diagnosticReason || res.body.message || 'No scheduled teaching slots were found for your faculty account.';
+                            statusFac.innerHTML = '<div class="notice notice-warning" style="margin-top:10px;">' +
+                                '<strong>No matching slots found:</strong> ' + esc(diag) + '</div>';
+                        } else {
+                            statusFac.innerHTML = '<div class="notice notice-success" style="margin-top:10px;">' +
+                                '<strong>Extraction complete!</strong> Found ' + totalSlots + ' teaching slot(s) for ' + esc(res.body.faculty || '') + '. Review below and confirm to save to your personal schedule.</div>';
+                        }
+
+                        if (facPreviewCard) {
+                            facPreviewCard.style.display = 'block';
+                            if (facPreviewCountBadge) facPreviewCountBadge.textContent = totalSlots + ' slots';
+                            if (facPreviewHead) {
+                                facPreviewHead.innerHTML = '<tr><th>Day</th><th>Period</th><th>Subject</th><th>Room</th><th>Class</th><th>Type</th></tr>';
+                            }
+                            if (facPreviewBody) {
+                                if (entries.length === 0) {
+                                    facPreviewBody.innerHTML = '<tr><td colspan="6" class="muted" style="text-align:center; padding: 1.5rem;">' + esc(res.body.diagnosticReason || 'No scheduled teaching slots extracted for your account.') + '</td></tr>';
+                                } else {
+                                    facPreviewBody.innerHTML = entries.map(function (e) {
+                                        return '<tr>' +
+                                            '<td style="font-weight:600;">' + esc(e.day) + '</td>' +
+                                            '<td>P' + esc(e.period) + '</td>' +
+                                            '<td>' + esc(e.subject || e.subject_name || e.subject_code || '—') + '</td>' +
+                                            '<td>' + esc(e.room || e.room_code || '—') + '</td>' +
+                                            '<td>' + esc(e.className || e.class_name || '—') + '</td>' +
+                                            '<td><span class="badge" style="font-size:0.75rem;">' + esc(e.type || e.session_type || 'theory') + '</span></td>' +
+                                            '</tr>';
+                                    }).join('');
+                                }
+                            }
+                            if (btnFacConfirmSave) {
+                                btnFacConfirmSave.disabled = (entries.length === 0);
                             }
                         }
                     }).catch(function (err) {
                         if (statusFac) {
                             statusFac.style.display = 'block';
-                            statusFac.innerHTML =
-                                '<div class="notice notice-danger" style="margin-top:10px;">' +
-                                '<strong>Network error:</strong> ' + esc(err.message) +
-                                '</div>';
+                            statusFac.innerHTML = '<div class="notice notice-danger" style="margin-top:10px;"><strong>Network error:</strong> ' + esc(err.message) + '</div>';
                         }
                     }).finally(function () {
                         if (btnFacUpload) {
                             btnFacUpload.disabled = false;
-                            btnFacUpload.textContent = 'Upload';
+                            btnFacUpload.textContent = 'Preview Timetable';
                         }
                     });
                 });
             }
 
+            if (btnFacConfirmSave) {
+                btnFacConfirmSave.addEventListener('click', function () {
+                    var slotsToSave = (facPendingContract && facPendingContract.entries && facPendingContract.entries.length > 0)
+                        ? facPendingContract.entries
+                        : [];
+                    if (slotsToSave.length === 0) return;
+
+                    btnFacConfirmSave.disabled = true;
+                    btnFacConfirmSave.textContent = 'Saving…';
+
+                    fetch('/api/faculty/timetable/confirm', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            slots: slotsToSave,
+                            entries: slotsToSave,
+                            academicYear: facPendingContract.academic_year,
+                            semester: facPendingContract.semester
+                        })
+                    }).then(function (r) { return r.json(); }).then(function (res) {
+                        btnFacConfirmSave.disabled = false;
+                        btnFacConfirmSave.textContent = 'Confirm & Save to My Timetable';
+                        if (res.saved) {
+                            if (statusFac) {
+                                statusFac.innerHTML = '<div class="notice notice-success" style="margin-top:10px;"><strong>✓ Personal timetable saved!</strong> Your My Timetable schedule has been updated without altering the official branch Master Timetable.</div>';
+                            }
+                            if (facPreviewCard) facPreviewCard.style.display = 'none';
+                            loadSchedule();
+                        } else {
+                            alert(res.error || 'Failed to save personal timetable.');
+                        }
+                    }).catch(function (err) {
+                        btnFacConfirmSave.disabled = false;
+                        btnFacConfirmSave.textContent = 'Confirm & Save to My Timetable';
+                        alert('Network error: ' + err.message);
+                    });
+                });
+            }
+
+            if (btnFacCancelPreview) {
+                btnFacCancelPreview.addEventListener('click', function () {
+                    if (facPreviewCard) facPreviewCard.style.display = 'none';
+                    facPendingContract = null;
+                });
+            }
+
             // --- Phase B2.5 Staging Review & Approval UI Logic ---
             var currentStagingUploadId = null;
+            var currentStagingContract = null;
+
+            function openStagingCellEditor(day, period, entry, periods) {
+                var modal = el('stagingCellModal');
+                if (!modal) return;
+
+                var stgEditDay = el('stgEditDay');
+                var stgEditPeriod = el('stgEditPeriod');
+                var stgEditSubject = el('stgEditSubject');
+                var stgEditSubjectCode = el('stgEditSubjectCode');
+                var stgEditFaculty = el('stgEditFaculty');
+                var stgEditRoom = el('stgEditRoom');
+                var stgEditType = el('stgEditType');
+                var stgEditSpanTo = el('stgEditSpanTo');
+                var stgEditIsFree = el('stgEditIsFree');
+                var modalTitle = el('stagingCellModalTitle');
+                var cellStatus = el('stagingCellStatus');
+
+                if (stgEditDay) stgEditDay.value = day;
+                if (stgEditPeriod) stgEditPeriod.value = period;
+                if (modalTitle) modalTitle.textContent = 'Edit Timetable Slot — ' + day + ' Period ' + period;
+
+                var isFree = !entry || entry.is_free;
+                if (stgEditIsFree) stgEditIsFree.checked = isFree;
+                if (stgEditSubject) {
+                    stgEditSubject.value = isFree ? '' : (entry.subject_name || entry.subject_code || '');
+                    stgEditSubject.required = !isFree;
+                }
+                if (stgEditSubjectCode) stgEditSubjectCode.value = isFree ? '' : (entry.subject_code || '');
+                if (stgEditFaculty) stgEditFaculty.value = isFree ? '' : (entry.faculty_name || '');
+                if (stgEditRoom) stgEditRoom.value = isFree ? '' : (entry.room_code || '');
+                if (stgEditType) stgEditType.value = isFree ? 'theory' : (entry.session_type || 'theory');
+
+                if (stgEditSpanTo) {
+                    stgEditSpanTo.innerHTML = '<option value="">Single Period (P' + period + ')</option>';
+                    (periods || [1, 2, 3, 4, 5, 6, 7]).forEach(function (p) {
+                        if (p > period) {
+                            var opt = document.createElement('option');
+                            opt.value = p;
+                            opt.textContent = 'Spans P' + period + ' to P' + p;
+                            if (entry && entry.span_to === p) opt.selected = true;
+                            stgEditSpanTo.appendChild(opt);
+                        }
+                    });
+                }
+
+                if (stgEditIsFree) {
+                    stgEditIsFree.onchange = function () {
+                        var free = stgEditIsFree.checked;
+                        if (stgEditSubject) stgEditSubject.required = !free;
+                    };
+                }
+
+                if (cellStatus) cellStatus.style.display = 'none';
+                modal.style.display = 'flex';
+            }
+
+            function setupStagingCellModalEvents() {
+                var modal = el('stagingCellModal');
+                var btnClose = el('btnStagingCellModalClose');
+                var btnCancel = el('btnStagingCellCancel');
+                var form = el('stagingCellEditForm');
+                var btnSave = el('btnStagingCellSave');
+                var cellStatus = el('stagingCellStatus');
+
+                if (btnClose && modal && !btnClose._bound) {
+                    btnClose._bound = true;
+                    btnClose.addEventListener('click', function () { modal.style.display = 'none'; });
+                }
+                if (btnCancel && modal && !btnCancel._bound) {
+                    btnCancel._bound = true;
+                    btnCancel.addEventListener('click', function () { modal.style.display = 'none'; });
+                }
+                if (form && !form._bound) {
+                    form._bound = true;
+                    form.addEventListener('submit', function (e) {
+                        e.preventDefault();
+                        if (!currentStagingUploadId) return;
+
+                        var day = el('stgEditDay').value;
+                        var period = parseInt(el('stgEditPeriod').value, 10);
+                        var isFree = el('stgEditIsFree') ? el('stgEditIsFree').checked : false;
+                        var subjectName = el('stgEditSubject') ? el('stgEditSubject').value.trim() : '';
+                        var subjectCode = el('stgEditSubjectCode') ? el('stgEditSubjectCode').value.trim() : '';
+                        var facultyName = el('stgEditFaculty') ? el('stgEditFaculty').value.trim() : '';
+                        var roomCode = el('stgEditRoom') ? el('stgEditRoom').value.trim() : '';
+                        var sessionType = el('stgEditType') ? el('stgEditType').value : 'theory';
+                        var spanToVal = el('stgEditSpanTo') ? el('stgEditSpanTo').value : '';
+                        var spanTo = spanToVal ? parseInt(spanToVal, 10) : null;
+
+                        if (btnSave) {
+                            btnSave.disabled = true;
+                            btnSave.textContent = 'Saving…';
+                        }
+
+                        fetch('/api/staging/' + encodeURIComponent(currentStagingUploadId) + '/entry', {
+                            method: 'PUT',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                day: day,
+                                period: period,
+                                is_free: isFree,
+                                subject_name: subjectName,
+                                subject_code: subjectCode,
+                                faculty_name: facultyName,
+                                room_code: roomCode,
+                                session_type: sessionType,
+                                span_to: spanTo
+                            })
+                        }).then(function (r) {
+                            return r.json().catch(function () { return {}; }).then(function (body) {
+                                return { ok: r.ok, status: r.status, body: body };
+                            });
+                        }).then(function (res) {
+                            if (btnSave) {
+                                btnSave.disabled = false;
+                                btnSave.textContent = 'Save Cell Changes';
+                            }
+                            if (res.ok) {
+                                if (modal) modal.style.display = 'none';
+                                loadStagedTimetable(currentStagingUploadId);
+                            } else {
+                                if (cellStatus) {
+                                    cellStatus.style.display = 'block';
+                                    cellStatus.innerHTML = '<div class="notice notice-danger">' + esc(res.body.error || 'Failed to save cell changes.') + '</div>';
+                                }
+                            }
+                        }).catch(function (err) {
+                            if (btnSave) {
+                                btnSave.disabled = false;
+                                btnSave.textContent = 'Save Cell Changes';
+                            }
+                            if (cellStatus) {
+                                cellStatus.style.display = 'block';
+                                cellStatus.innerHTML = '<div class="notice notice-danger">Network error: ' + esc(err.message) + '</div>';
+                            }
+                        });
+                    });
+                }
+            }
 
             function renderStagingGrid(contract) {
+                currentStagingContract = contract;
+                setupStagingCellModalEvents();
+
                 var head = el('stgHead');
                 var body = el('stgBody');
                 if (!head || !body) return;
@@ -4923,9 +5723,13 @@
                     periods.forEach(function (p) {
                         if (p <= coveredUntil) return;
 
-                        var entry = entries.find(function (e) { return e.day === day && e.period === p; });
+                        var entry = entries.find(function (e) {
+                            return String(e.day).trim().toUpperCase() === String(day).trim().toUpperCase() && parseInt(e.period, 10) === p;
+                        });
+
                         if (!entry || entry.is_free) {
-                            bodyHtml += '<td class="muted" style="text-align:center; padding:10px; font-size:0.85rem;">—</td>';
+                            bodyHtml += '<td class="staging-cell-clickable" data-day="' + esc(day) + '" data-period="' + p + '" style="text-align:center; padding:10px; font-size:0.85rem; cursor:pointer; background:var(--surface-subtle);" title="Click to add/edit slot">' +
+                                '<span class="muted" style="opacity:0.6;">—</span> <span style="font-size:0.75rem; color:var(--brand-600); margin-left:4px;">✎</span></td>';
                             return;
                         }
 
@@ -4951,9 +5755,10 @@
 
                         var roomText = entry.room_code ? ('<div style="font-size:0.75rem; color:var(--ink-600); margin-top:2px;">Room: ' + esc(entry.room_code) + '</div>') : '';
 
-                        bodyHtml += '<td ' + (colspan > 1 ? ('colspan="' + colspan + '"') : '') + ' style="background:var(--surface); padding:8px 10px; vertical-align:top; border-left: 3px solid var(--brand-500);">' +
+                        bodyHtml += '<td class="staging-cell-clickable" data-day="' + esc(day) + '" data-period="' + p + '" ' + (colspan > 1 ? ('colspan="' + colspan + '"') : '') + ' style="background:var(--surface); padding:8px 10px; vertical-align:top; border-left: 3px solid var(--brand-500); cursor:pointer;" title="Click to edit slot">' +
                             '<div style="display:flex; justify-content:space-between; align-items:center; gap:4px; flex-wrap:wrap;">' +
                             typeBadge + (spanBadge ? (' ' + spanBadge) : '') +
+                            '<span style="font-size:0.75rem; color:var(--brand-600); font-weight:600;">✎ Edit</span>' +
                             '</div>' +
                             '<div style="font-weight:600; font-size:0.88rem; margin-top:4px;">' + esc(entry.subject_name || entry.subject_code || '—') +
                             (entry.subject_code ? (' <span style="font-size:0.78rem; font-weight:normal; color:var(--ink-500);">(' + esc(entry.subject_code) + ')</span>') : '') +
@@ -4965,6 +5770,22 @@
                     bodyHtml += '</tr>';
                 });
                 body.innerHTML = bodyHtml;
+
+                var stagingTable = el('stagingTable');
+                if (stagingTable && !stagingTable._clickBound) {
+                    stagingTable._clickBound = true;
+                    stagingTable.addEventListener('click', function (e) {
+                        var cell = e.target.closest('.staging-cell-clickable');
+                        if (!cell) return;
+                        var day = cell.getAttribute('data-day');
+                        var period = parseInt(cell.getAttribute('data-period'), 10);
+                        if (!day || isNaN(period) || !currentStagingContract) return;
+                        var entry = (currentStagingContract.entries || []).find(function (it) {
+                            return String(it.day).trim().toUpperCase() === day.trim().toUpperCase() && parseInt(it.period, 10) === period;
+                        });
+                        openStagingCellEditor(day, period, entry, currentStagingContract.periods || [1, 2, 3, 4, 5, 6, 7]);
+                    });
+                }
             }
 
             function loadStagedTimetable(uploadId) {
@@ -5012,6 +5833,8 @@
                     if (stgSemester) stgSemester.textContent = contract.semester != null ? ('Semester ' + contract.semester) : '—';
                     if (stgYear) stgYear.textContent = contract.academic_year || '—';
                     if (stgCount) stgCount.textContent = (contract.entries && contract.entries.length) || 0;
+                    var stgCountBadge = el('stgCountBadge');
+                    if (stgCountBadge) stgCountBadge.textContent = ((contract.entries && contract.entries.length) || 0) + ' slots';
 
                     if (validationBadge) {
                         if (s.validationStatus === 'VALID') {
@@ -5034,47 +5857,71 @@
                         }
                     }
 
+                    if (alertBox) {
+                        var alertHtml = '';
+                        var valErrors = s.validationErrors || [];
+                        var branchErr = valErrors.find(function (e) { return e.code === 'BRANCH_MISMATCH' || e.code === 'UNRESOLVED_BRANCH'; });
+                        if (branchErr) {
+                            alertHtml += '<div class="notice notice-danger" style="margin-bottom:12px;">' +
+                                '<strong>Branch Mismatch:</strong> ' + esc(branchErr.message) +
+                                (branchErr.details && branchErr.details.detectedBranch ? '<br/><strong>Detected branch:</strong> ' + esc(branchErr.details.detectedBranch) : '') +
+                                (branchErr.details && branchErr.details.expectedBranch ? '<br/><strong>Your branch:</strong> ' + esc(branchErr.details.expectedBranch) : '') +
+                                '</div>';
+                        } else if (valErrors.length > 0) {
+                            alertHtml += '<div class="notice notice-danger" style="margin-bottom:12px;"><strong>Validation Errors:</strong><br/>' +
+                                valErrors.map(function (e) { return '• ' + esc(e.message || e); }).join('<br/>') + '</div>';
+                        }
+                        var warnings = s.warnings || [];
+                        if (warnings.length > 0) {
+                            alertHtml += '<div class="notice notice-warning" style="margin-bottom:12px;">' +
+                                warnings.map(function (w) { return 'ℹ️ ' + esc(w.message || w); }).join('<br/>') + '</div>';
+                        }
+                        if (alertHtml) {
+                            alertBox.style.display = 'block';
+                            alertBox.innerHTML = alertHtml;
+                        } else {
+                            alertBox.style.display = 'none';
+                            alertBox.innerHTML = '';
+                        }
+                    }
+
                     var unresolved = (s.resolution && s.resolution.unresolvedEntities) || [];
                     if (unresolved.length > 0) {
-                        if (unresolvedBanner) unresolvedBanner.style.display = 'block';
-                        if (unresolvedList) {
-                            unresolvedList.innerHTML = unresolved.map(function (item) {
-                                return '<div style="display:flex; justify-content:space-between; align-items:center; gap:8px; padding:8px 12px; background:#fff; border-radius:var(--radius-sm); border:1px solid #fae69e; font-size:0.84rem;">' +
-                                    '<div><strong>' + esc(item.entityType.toUpperCase()) + ':</strong> ' + esc(item.extractedText) +
-                                    (item.code ? ' <span class="mono">(' + esc(item.code) + ')</span>' : '') +
-                                    '<div class="muted" style="font-size:0.78rem; margin-top:2px;">' + esc(item.reason) + '</div></div>' +
-                                    '<button type="button" class="btn btn-secondary btn-sm btn-map-entity" data-type="' + esc(item.entityType) + '" data-text="' + esc(item.extractedText) + '">Map to Catalog</button>' +
-                                    '</div>';
-                            }).join('');
-
-                            unresolvedList.querySelectorAll('.btn-map-entity').forEach(function (btn) {
-                                btn.addEventListener('click', function () {
-                                    var entityType = btn.getAttribute('data-type');
-                                    var extractedText = btn.getAttribute('data-text');
-                                    promptEntityMapping(uploadId, entityType, extractedText);
-                                });
+                        if (unresolvedBanner) {
+                            unresolvedBanner.style.display = 'block';
+                            unresolvedBanner.innerHTML = renderUnresolvedCategoriesHtml(unresolved, uploadId);
+                            bindUnresolvedActionHandlers(unresolvedBanner, uploadId, function () {
+                                loadStagedTimetable(uploadId);
                             });
                         }
                     } else {
-                        if (unresolvedBanner) unresolvedBanner.style.display = 'none';
+                        if (unresolvedBanner) {
+                            unresolvedBanner.style.display = 'none';
+                            unresolvedBanner.innerHTML = '';
+                        }
                     }
 
                     if (btnApprove) {
                         if (s.importStatus === 'IMPORTED') {
                             btnApprove.disabled = true;
                             btnApprove.textContent = '✓ Already Imported';
+                            btnApprove.className = 'btn btn-secondary';
                         } else if (s.importStatus === 'REJECTED') {
                             btnApprove.disabled = true;
                             btnApprove.textContent = 'Rejected';
+                            btnApprove.className = 'btn btn-secondary';
                         } else if (s.validationStatus !== 'VALID') {
                             btnApprove.disabled = true;
                             btnApprove.textContent = 'Cannot Approve (Invalid)';
+                            btnApprove.className = 'btn btn-secondary';
                         } else if (unresolved.length > 0) {
                             btnApprove.disabled = true;
                             btnApprove.textContent = 'Resolve References to Enable Approval';
+                            btnApprove.className = 'btn btn-secondary';
                         } else {
                             btnApprove.disabled = false;
-                            btnApprove.textContent = 'Approve & Import to Live Timetable';
+                            btnApprove.textContent = '✓ Accept & Import to Master Timetable';
+                            btnApprove.className = 'btn btn-primary';
                         }
                     }
 
@@ -5122,7 +5969,7 @@
             if (btnStgApprove) {
                 btnStgApprove.addEventListener('click', function () {
                     if (!currentStagingUploadId) return;
-                    var confirmed = confirm('Approve and import this timetable into the live schedule?\n\nExisting live entries for this class will be replaced.');
+                    var confirmed = confirm('Approve and import this timetable into the live Master Timetable?\n\nExisting live entries for this class will be replaced.');
                     if (!confirmed) return;
 
                     btnStgApprove.disabled = true;
@@ -5143,12 +5990,15 @@
                                 actionStatus.innerHTML = '<div class="notice notice-success"><strong>✓ Timetable Approved &amp; Imported!</strong> ' + esc(res.body.message || '') + '</div>';
                                 loadStagedTimetable(currentStagingUploadId);
                                 refreshPendingStaging();
-                                loadMasterTimetable();
-                                loadDashboard();
+                                var approvedScope = res.body && res.body.scope;
+                                bootstrap().then(function () {
+                                    if (approvedScope) loadTimetableScopes(approvedScope);
+                                    loadDashboard();
+                                });
                             } else {
                                 actionStatus.innerHTML = '<div class="notice notice-danger"><strong>Import Failed:</strong> ' + esc(res.body.error || 'Failed to import timetable.') + '</div>';
                                 btnStgApprove.disabled = false;
-                                btnStgApprove.textContent = 'Approve & Import to Live Timetable';
+                                btnStgApprove.textContent = '✓ Accept & Import to Master Timetable';
                             }
                         }
                     }).catch(function (err) {
@@ -5157,7 +6007,7 @@
                             actionStatus.innerHTML = '<div class="notice notice-danger">Network error: ' + esc(err.message) + '</div>';
                         }
                         btnStgApprove.disabled = false;
-                        btnStgApprove.textContent = 'Approve & Import to Live Timetable';
+                        btnStgApprove.textContent = '✓ Accept & Import to Master Timetable';
                     });
                 });
             }

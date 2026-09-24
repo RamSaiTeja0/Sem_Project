@@ -497,3 +497,21 @@ BEGIN
             CHECK (data_source IN ('real', 'placeholder'));
     END IF;
 END $$;
+
+-- Phase B8: Faculty Personal Timetable Storage (Isolated from Master Timetable)
+CREATE TABLE IF NOT EXISTS faculty_personal_timetable (
+    id            SERIAL PRIMARY KEY,
+    faculty_id    INTEGER NOT NULL REFERENCES faculty(id) ON DELETE CASCADE,
+    day_of_week   TEXT NOT NULL,
+    period        INTEGER NOT NULL,
+    class_name    TEXT,
+    subject       TEXT,
+    room          TEXT,
+    session_type  TEXT NOT NULL DEFAULT 'theory',
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT faculty_personal_slot_unique UNIQUE (faculty_id, day_of_week, period)
+);
+
+CREATE INDEX IF NOT EXISTS faculty_personal_tt_fac_idx ON faculty_personal_timetable (faculty_id);
+

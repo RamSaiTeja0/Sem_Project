@@ -183,26 +183,48 @@
           </div>
         </div>
 
-        <!-- Upload My Timetable Card (Phase B1) -->
+        <!-- Upload My Timetable Card (Phase B8) -->
         <div class="card" id="facUploadCard" style="margin-bottom: 20px;">
           <div class="card-head">
             <div>
               <h2>Upload My Timetable</h2>
-              <p>Upload your personal timetable sheet as an image (PNG, JPG) or PDF document.</p>
+              <p>Upload your personal timetable sheet as an image (PNG, JPG, WebP), PDF, or spreadsheet (Excel, CSV).</p>
+            </div>
+            <div class="head-actions">
+              <button type="button" class="btn btn-sm btn-secondary" id="btnFacResetMine" title="Reset personal timetable back to official branch Master Timetable view">Revert to Master Timetable</button>
             </div>
           </div>
           <div class="card-body">
             <form id="facUploadForm" enctype="multipart/form-data">
               <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 12px;">
-                <input type="file" id="facTimetableFile" name="timetable" accept=".png,.jpg,.jpeg,.pdf" style="display:none;" />
+                <input type="file" id="facTimetableFile" name="timetable" accept=".png,.jpg,.jpeg,.webp,.pdf,.xlsx,.xls,.csv" style="display:none;" />
                 <button type="button" class="btn btn-secondary" id="btnFacChooseFile">Choose File</button>
-                <button type="submit" class="btn btn-primary" id="btnFacUpload" disabled>Upload</button>
+                <button type="submit" class="btn btn-primary" id="btnFacUpload" disabled>Preview Timetable</button>
               </div>
               <div id="facSelectedFile" style="margin-top: 10px; font-size: 0.9rem; color: var(--ink-700);">
                 Selected file: <span id="facSelectedFileName" class="mono" style="font-weight: 600;">None</span>
               </div>
               <div id="facUploadStatus" style="margin-top: 12px; display: none;"></div>
             </form>
+
+            <!-- Faculty Timetable Preview & Confirmation Card -->
+            <div id="facPreviewCard" style="display: none; margin-top: 18px; padding-top: 18px; border-top: 1px solid var(--border);">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                <h3 style="margin: 0; font-size: 1.05rem;">Extracted Personal Timetable Preview</h3>
+                <span class="badge badge-primary" id="facPreviewCountBadge">0 slots</span>
+              </div>
+              <p class="muted" style="margin-bottom: 12px; font-size: 0.88rem;">Review your extracted timetable slots below. Confirming will save this directly to your personal schedule without altering the official branch Master Timetable.</p>
+              <div class="table-scroll">
+                <table class="timetable" id="facPreviewTable">
+                  <thead id="facPreviewHead"></thead>
+                  <tbody id="facPreviewBody"></tbody>
+                </table>
+              </div>
+              <div style="display: flex; gap: 10px; margin-top: 14px; align-items: center;">
+                <button type="button" class="btn btn-primary" id="btnFacConfirmSave">Confirm &amp; Save to My Timetable</button>
+                <button type="button" class="btn btn-secondary" id="btnFacCancelPreview">Cancel</button>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -498,14 +520,9 @@ Prof. B. Kumar, FREE, FREE, Database Management Systems"></textarea>
             </div>
 
             <div class="notice notice-info" style="margin-top:18px;">
-              <strong>Expected layout (matrix):</strong>
-              <div class="mono" style="margin-top:6px;">
-                Faculty | Monday P1 | Monday P2 | Tuesday P1 | …<br />
-                Dr. A Rao | DBMS | FREE | OS | …
-              </div>
+              <strong>Supported Timetable Formats:</strong>
               <div style="margin-top:6px;">
-                A cell reading <strong>FREE</strong>, <strong>-</strong> or blank means the faculty is not teaching.
-                Long-form columns (<span class="mono">Faculty, Day, Period, Subject, Class, Room</span>) are also accepted.
+                Upload a timetable image, Excel, CSV, or PDF. The system will automatically detect and extract the timetable structure.
               </div>
             </div>
 
@@ -516,20 +533,24 @@ Prof. B. Kumar, FREE, FREE, Database Management Systems"></textarea>
 
       <!-- ---------------------- MASTER TIMETABLE --------------------- -->
       <section class="view" id="view-timetable">
-        <!-- Upload Master Timetable Card (Phase B1) -->
+        <!-- Upload Master Timetable Card (Phase B1 / Staging Workflow) -->
         <div class="card" id="hosUploadCard" style="margin-bottom: 20px;">
           <div class="card-head">
             <div>
               <h2>Upload Master Timetable</h2>
-              <p>Upload a branch timetable sheet as an image (PNG, JPG) or PDF document.</p>
+              <p>Upload a branch timetable sheet as an image (PNG, JPG, WebP), PDF, or spreadsheet (Excel, CSV).</p>
+            </div>
+            <div class="head-actions" id="hosPendingWrap">
+              <button type="button" class="btn btn-secondary btn-sm" id="btnHosCheckPending">Check Staged Timetables</button>
+              <span id="hosPendingCount" class="muted" style="font-size: 0.85rem;"></span>
             </div>
           </div>
           <div class="card-body">
             <form id="hosUploadForm" enctype="multipart/form-data">
               <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 12px;">
-                <input type="file" id="hosTimetableFile" name="timetable" accept=".png,.jpg,.jpeg,.pdf" style="display:none;" />
+                <input type="file" id="hosTimetableFile" name="timetable" accept=".png,.jpg,.jpeg,.webp,.pdf,.xlsx,.xls,.csv" style="display:none;" />
                 <button type="button" class="btn btn-secondary" id="btnHosChooseFile">Choose File</button>
-                <button type="submit" class="btn btn-primary" id="btnHosUpload" disabled>Upload</button>
+                <button type="submit" class="btn btn-primary" id="btnHosUpload" disabled>Preview Timetable</button>
               </div>
               <div style="display: flex; gap: 12px; margin-top: 10px; flex-wrap: wrap;">
                 <label class="field inline" id="hosUploadSemWrap"><span>Target Semester</span><select id="hosUploadSemester" name="semester"></select></label>
@@ -539,91 +560,150 @@ Prof. B. Kumar, FREE, FREE, Database Management Systems"></textarea>
                 Selected file: <span id="hosSelectedFileName" class="mono" style="font-weight: 600;">None</span>
               </div>
               <div id="hosUploadStatus" style="margin-top: 12px; display: none;"></div>
-              <div id="hosPendingWrap" style="margin-top: 14px; display: flex; align-items: center; gap: 10px;">
-                <button type="button" class="btn btn-secondary btn-sm" id="btnHosCheckPending">Check Staged Timetables</button>
-                <span id="hosPendingCount" class="muted" style="font-size: 0.85rem;"></span>
-              </div>
             </form>
-          </div>
-        </div>
 
-        <!-- Staged Timetable Review & Approval Card (Phase B2.5) -->
-        <div class="card" id="hosStagingCard" style="display: none; margin-bottom: 20px;">
-          <div class="card-head">
-            <div>
-              <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
-                <h2 style="margin: 0;">Review Staged Timetable</h2>
-                <span class="badge" id="stagingValidationBadge">VALID</span>
-                <span class="badge badge-neutral" id="stagingImportBadge">STAGED</span>
-              </div>
-              <p id="stagingMetaSubtitle" style="margin-top: 4px;">Extracted timetable review. Explicit HOS approval is required before importing into the live schedule.</p>
-            </div>
-            <div class="head-actions">
-              <button type="button" class="btn btn-sm btn-secondary" id="btnStagingClose">✕ Close</button>
-            </div>
-          </div>
-          <div class="card-body">
-            <!-- Metadata details -->
-            <div id="stagingDetailsBox" style="display: flex; flex-wrap: wrap; gap: 16px; padding: 12px 16px; background: var(--surface-subtle); border-radius: var(--radius-sm); margin-bottom: 14px; font-size: 0.88rem;">
-              <div><strong>Original File:</strong> <span id="stgFileName" class="mono">—</span></div>
-              <div><strong>Target Class:</strong> <span id="stgClass" class="mono">—</span></div>
-              <div><strong>Semester:</strong> <span id="stgSemester">—</span></div>
-              <div><strong>Academic Year:</strong> <span id="stgYear">—</span></div>
-              <div><strong>Slots Extracted:</strong> <span id="stgCount">—</span></div>
-            </div>
-
-            <!-- Unresolved Entities Banner -->
-            <div id="stagingUnresolvedBanner" style="display: none; margin-bottom: 16px; padding: 14px 18px; background: #fff8e6; border: 1px solid #f6c000; border-radius: var(--radius-sm);">
-              <div style="display: flex; align-items: flex-start; gap: 10px;">
-                <span style="font-size: 1.2rem;">⚠️</span>
-                <div style="flex: 1;">
-                  <strong style="color: #8c6200; font-size: 0.95rem;">Action Required: Unresolved Catalog References</strong>
-                  <p style="margin: 4px 0 10px; font-size: 0.86rem; color: #5c4100;">
-                    The following AI-extracted items could not be matched to your branch catalog. To protect catalog integrity, automatic creation is disabled. Map them to existing records below to enable approval.
-                  </p>
-                  <div id="stagingUnresolvedList" style="display: flex; flex-direction: column; gap: 8px;"></div>
+            <!-- Staged Timetable Review & Approval Section (Integrated Preview & Review) -->
+            <div id="hosStagingCard" style="display: none; margin-top: 18px; padding-top: 18px; border-top: 1px solid var(--border);">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; flex-wrap: wrap; gap: 8px;">
+                <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+                  <h3 style="margin: 0; font-size: 1.05rem;">Extracted Master Timetable Preview</h3>
+                  <span class="badge" id="stagingValidationBadge">VALID</span>
+                  <span class="badge badge-neutral" id="stagingImportBadge">STAGED</span>
+                  <span class="badge badge-primary" id="stgCountBadge">0 slots</span>
+                </div>
+                <div>
+                  <button type="button" class="btn btn-sm btn-secondary" id="btnStagingClose">✕ Dismiss Preview</button>
                 </div>
               </div>
-            </div>
+              <p id="stagingMetaSubtitle" class="muted" style="margin-bottom: 12px; font-size: 0.88rem;">
+                Review the extracted branch timetable slots below. You can click on any cell or ✎ Edit to correct details before importing.
+              </p>
 
-            <!-- Diagnostic Errors / Warnings -->
-            <div id="stagingAlertBox" style="display: none; margin-bottom: 14px;"></div>
-
-            <!-- Staged Schedule Preview Matrix -->
-            <div style="margin-bottom: 16px;">
-              <h3 style="font-size: 1rem; margin-bottom: 8px;">Extracted Schedule Preview</h3>
-              <div class="table-scroll">
-                <table class="timetable" id="stagingTable">
-                  <thead id="stgHead"></thead>
-                  <tbody id="stgBody"></tbody>
-                </table>
+              <!-- Metadata details -->
+              <div id="stagingDetailsBox" style="display: flex; flex-wrap: wrap; gap: 16px; padding: 10px 14px; background: var(--surface-subtle); border-radius: var(--radius-sm); margin-bottom: 14px; font-size: 0.85rem;">
+                <div><strong>Original File:</strong> <span id="stgFileName" class="mono">—</span></div>
+                <div><strong>Target Class:</strong> <span id="stgClass" class="mono">—</span></div>
+                <div><strong>Semester:</strong> <span id="stgSemester">—</span></div>
+                <div><strong>Academic Year:</strong> <span id="stgYear">—</span></div>
+                <div><strong>Slots Extracted:</strong> <span id="stgCount">—</span></div>
               </div>
-            </div>
 
-            <!-- Approval / Rejection Controls -->
-            <div style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 14px; padding-top: 14px; border-top: 1px solid var(--border);">
-              <div id="stagingNoticeText" style="font-size: 0.88rem; color: var(--ink-700);">
-                Review all periods and spans carefully before approving.
+              <!-- Unresolved Entities Banner -->
+              <div id="stagingUnresolvedBanner" style="display: none; margin-bottom: 16px; padding: 14px 18px; background: #fff8e6; border: 1px solid #f6c000; border-radius: var(--radius-sm);">
+                <div style="display: flex; align-items: flex-start; gap: 10px;">
+                  <span style="font-size: 1.2rem;">⚠️</span>
+                  <div style="flex: 1;">
+                    <strong style="color: #8c6200; font-size: 0.95rem;">Action Required: Unresolved Catalog References</strong>
+                    <p style="margin: 4px 0 10px; font-size: 0.86rem; color: #5c4100;">
+                      The following AI-extracted items could not be matched to your branch catalog. To protect catalog integrity, automatic creation is disabled. Map them to existing records below to enable approval.
+                    </p>
+                    <div id="stagingUnresolvedList" style="display: flex; flex-direction: column; gap: 8px;"></div>
+                  </div>
+                </div>
               </div>
-              <div style="display: flex; gap: 10px; align-items: center;">
-                <button type="button" class="btn btn-danger" id="btnStagingReject">Reject</button>
-                <button type="button" class="btn btn-primary" id="btnStagingApprove" disabled>Approve &amp; Import to Live Timetable</button>
-              </div>
-            </div>
 
-            <!-- Reject Reason Modal / Prompt Box -->
-            <div id="stagingRejectBox" style="display: none; margin-top: 14px; padding: 14px; background: var(--danger-050); border: 1px solid var(--danger-200); border-radius: var(--radius-sm);">
-              <label class="field">
-                <span>Reason for Rejection</span>
-                <input type="text" id="stagingRejectReason" placeholder="e.g. Needs revision, wrong semester sheet" />
-              </label>
-              <div style="display: flex; gap: 8px; margin-top: 8px;">
-                <button type="button" class="btn btn-danger btn-sm" id="btnStagingConfirmReject">Confirm Rejection</button>
-                <button type="button" class="btn btn-secondary btn-sm" id="btnStagingCancelReject">Cancel</button>
-              </div>
-            </div>
+              <!-- Diagnostic Errors / Warnings -->
+              <div id="stagingAlertBox" style="display: none; margin-bottom: 14px;"></div>
 
-            <div id="stagingActionStatus" style="margin-top: 12px; display: none;"></div>
+              <!-- Staged Schedule Preview Matrix -->
+              <div style="margin-bottom: 16px;">
+                <div class="table-scroll">
+                  <table class="timetable" id="stagingTable">
+                    <thead id="stgHead"></thead>
+                    <tbody id="stgBody"></tbody>
+                  </table>
+                </div>
+              </div>
+
+              <!-- Staged Timetable Cell Editor Modal -->
+              <div id="stagingCellModal" style="display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 10000; align-items: center; justify-content: center;">
+                <div class="card" style="width: 100%; max-width: 520px; margin: 20px; box-shadow: 0 10px 30px rgba(0,0,0,0.25); background: var(--surface);">
+                  <div class="card-head">
+                    <div>
+                      <h3 id="stagingCellModalTitle" style="margin: 0; font-size: 1.1rem;">Edit Timetable Slot</h3>
+                      <p id="stagingCellModalSubtitle" class="muted" style="margin-top: 4px; font-size: 0.85rem;">Modify slot details before approval.</p>
+                    </div>
+                    <div class="head-actions">
+                      <button type="button" class="btn btn-sm btn-secondary" id="btnStagingCellModalClose">✕</button>
+                    </div>
+                  </div>
+                  <div class="card-body">
+                    <form id="stagingCellEditForm">
+                      <input type="hidden" id="stgEditDay" />
+                      <input type="hidden" id="stgEditPeriod" />
+                      
+                      <div class="field-grid" style="grid-template-columns: 1fr 1fr; gap: 12px;">
+                        <label class="field" style="grid-column: span 2;">
+                          <span>Subject Name</span>
+                          <input type="text" id="stgEditSubject" required placeholder="e.g. Database Management Systems" />
+                        </label>
+                        <label class="field">
+                          <span>Subject Code (optional)</span>
+                          <input type="text" id="stgEditSubjectCode" placeholder="e.g. DBMS" />
+                        </label>
+                        <label class="field">
+                          <span>Faculty Name</span>
+                          <input type="text" id="stgEditFaculty" placeholder="e.g. Dr. A. Sharma" />
+                        </label>
+                        <label class="field">
+                          <span>Room Code</span>
+                          <input type="text" id="stgEditRoom" placeholder="e.g. C-302 / Lab-1" />
+                        </label>
+                        <label class="field">
+                          <span>Session Type</span>
+                          <select id="stgEditType">
+                            <option value="theory">Theory</option>
+                            <option value="lab">Lab</option>
+                            <option value="activity">Activity</option>
+                          </select>
+                        </label>
+                        <label class="field" style="grid-column: span 2;">
+                          <span>Span Until Period</span>
+                          <select id="stgEditSpanTo">
+                            <option value="">Single Period</option>
+                          </select>
+                        </label>
+                        <label class="field inline" style="grid-column: span 2; display: flex; align-items: center; gap: 8px; margin-top: 6px;">
+                          <input type="checkbox" id="stgEditIsFree" style="width: auto;" />
+                          <span style="font-size: 0.9rem;">Mark as Free / Empty Period</span>
+                        </label>
+                      </div>
+
+                      <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 18px; padding-top: 12px; border-top: 1px solid var(--border);">
+                        <button type="button" class="btn btn-secondary" id="btnStagingCellCancel">Cancel</button>
+                        <button type="submit" class="btn btn-primary" id="btnStagingCellSave">Save Cell Changes</button>
+                      </div>
+                      <div id="stagingCellStatus" style="margin-top: 10px; display: none;"></div>
+                    </form>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Approval / Rejection Controls -->
+              <div style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 14px; padding-top: 14px; border-top: 1px solid var(--border);">
+                <div id="stagingNoticeText" style="font-size: 0.88rem; color: var(--ink-700);">
+                  <strong>Approve Timetable:</strong> Review all periods, spans, and edits carefully before approving.
+                </div>
+                <div style="display: flex; gap: 10px; align-items: center;">
+                  <button type="button" class="btn btn-danger" id="btnStagingReject">Reject</button>
+                  <button type="button" class="btn btn-primary" id="btnStagingApprove" disabled>✓ Accept &amp; Import to Master Timetable</button>
+                </div>
+              </div>
+
+              <!-- Reject Reason Modal / Prompt Box -->
+              <div id="stagingRejectBox" style="display: none; margin-top: 14px; padding: 14px; background: var(--danger-050); border: 1px solid var(--danger-200); border-radius: var(--radius-sm);">
+                <label class="field">
+                  <span>Reason for Rejection</span>
+                  <input type="text" id="stagingRejectReason" placeholder="e.g. Needs revision, wrong semester sheet" />
+                </label>
+                <div style="display: flex; gap: 8px; margin-top: 8px;">
+                  <button type="button" class="btn btn-danger btn-sm" id="btnStagingConfirmReject">Confirm Rejection</button>
+                  <button type="button" class="btn btn-secondary btn-sm" id="btnStagingCancelReject">Cancel</button>
+                </div>
+              </div>
+
+              <div id="stagingActionStatus" style="margin-top: 12px; display: none;"></div>
+            </div>
           </div>
         </div>
 
@@ -631,11 +711,12 @@ Prof. B. Kumar, FREE, FREE, Database Management Systems"></textarea>
           <div class="card-head">
             <div>
               <h2>Master Timetable</h2>
-              <p>Every cell is clickable. Clicking sends its day and period to the availability engine.</p>
+              <p>Every cell is clickable. Click any period to check availability or edit with the Edit option.</p>
             </div>
             <div class="head-actions" style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px;">
               <span class="badge badge-primary" id="ttBranchBadge">Branch</span>
-              <button type="button" class="btn btn-sm btn-primary" id="ttManageBtn">+ Add / Edit Entry</button>
+              <button type="button" class="btn btn-sm btn-primary" id="btnTtEditMode">✏️ Edit Timetable</button>
+              <button type="button" class="btn btn-sm btn-secondary" id="ttManageBtn" style="display:none;">+ Add / Edit Entry</button>
               <label class="field inline" style="display:none;"><select id="ttDept"></select></label>
               <label class="field inline" id="ttYearWrap"><span>Year</span><select id="ttAcademicYear"></select></label>
               <label class="field inline" id="ttSemWrap"><span>Semester</span><select id="ttSemester"></select></label>
@@ -658,6 +739,38 @@ Prof. B. Kumar, FREE, FREE, Database Management Systems"></textarea>
               <span><i class="swatch swatch-sel"></i> Selected</span>
             </div>
             <div id="ttState" class="notice notice-info" style="margin-top:12px;">Loading timetable…</div>
+
+            <!-- Master Timetable Cell / Slot Edit Modal (Phase B4) -->
+            <div id="ttEditModal" style="display: none; margin-top: 16px; padding: 16px; background: var(--surface-subtle); border: 1px solid var(--border); border-radius: var(--radius-md);">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                <h3 style="margin: 0; font-size: 1.05rem;" id="ttEditModalTitle">✏️ Edit Master Timetable Slot</h3>
+                <button type="button" class="btn btn-sm btn-ghost" id="btnTtCloseEditModal">✕</button>
+              </div>
+              <form id="ttSlotEditForm">
+                <div class="field-grid" style="grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px;">
+                  <label class="field"><span>Day</span><select id="ttEditDay" required></select></label>
+                  <label class="field"><span>Period</span><select id="ttEditPeriod" required></select></label>
+                  <label class="field"><span>Subject</span><select id="ttEditSubject" required></select></label>
+                  <label class="field"><span>Faculty</span><select id="ttEditFaculty"></select></label>
+                  <label class="field"><span>Room</span><input type="text" id="ttEditRoom" placeholder="e.g. R-101" /></label>
+                  <label class="field"><span>Session Type</span>
+                    <select id="ttEditType">
+                      <option value="theory">Theory</option>
+                      <option value="lab">Laboratory</option>
+                      <option value="activity">Activity</option>
+                    </select>
+                  </label>
+                </div>
+                <div style="display: flex; gap: 10px; margin-top: 14px; align-items: center; justify-content: space-between; flex-wrap: wrap;">
+                  <div style="display: flex; gap: 8px;">
+                    <button type="submit" class="btn btn-primary" id="btnTtSaveSlot">Save Slot</button>
+                    <button type="button" class="btn btn-secondary" id="btnTtCancelSlot">Cancel</button>
+                  </div>
+                  <button type="button" class="btn btn-danger btn-sm" id="btnTtClearSlot">Clear Slot (Mark Free)</button>
+                </div>
+                <div id="ttEditStatus" style="margin-top: 10px; display: none;"></div>
+              </form>
+            </div>
           </div>
         </div>
       </section>

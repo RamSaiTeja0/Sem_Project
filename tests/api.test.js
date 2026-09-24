@@ -2,6 +2,10 @@
  * API tests — every documented endpoint, including Excel and CSV import.
  * Usage: node tests/api.test.js
  */
+process.env.DATABASE_URL = '';
+process.env.LOAD_DEMO_DATA = 'true';
+process.env.BRANCH_CODE = 'CME';
+process.env.BRANCH_NAME = 'Computer Engineering';
 const assert = require('assert');
 const path = require('path');
 const { spawn } = require('child_process');

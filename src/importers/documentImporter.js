@@ -94,7 +94,23 @@ function status() {
  * imports use, so documents get identical layout detection, day normalization
  * and validation — there is no separate document validation path.
  */
+const path = require('path');
+
+function isImageFile(filename, mimeType) {
+    const ext = path.extname(String(filename || '')).toLowerCase();
+    return ['.png', '.jpg', '.jpeg', '.webp'].includes(ext) || (mimeType && String(mimeType).startsWith('image/'));
+}
+
 async function parse(buffer, options = {}) {
+    const filename = options.filename || '';
+    const mimeType = options.mimeType || null;
+
+    // Route image uploads directly to Gemini Vision Stage 1 + Stage 2 pipeline
+    if (isImageFile(filename, mimeType) && (!overridden || options.geminiTransport || options.stage1Transport)) {
+        const imageImporter = require('./imageImporter');
+        return imageImporter.parse(buffer, options);
+    }
+
     const active = activeProvider();
 
     if (!active) {
@@ -157,5 +173,6 @@ async function parse(buffer, options = {}) {
 
 module.exports = {
     parse, setProvider, hasProvider, activeProvider, status,
+    isOverridden: () => overridden,
     SUPPORTED_EXTENSIONS, ALTERNATIVES
 };

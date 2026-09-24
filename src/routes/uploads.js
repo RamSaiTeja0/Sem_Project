@@ -34,8 +34,12 @@ const {
 ensureUploadDir();
 
 // Allowed timetable file extensions and mime types
-const ALLOWED_EXTS = new Set(['.png', '.jpg', '.jpeg', '.webp', '.pdf']);
-const ALLOWED_MIMES = new Set(['image/png', 'image/jpeg', 'image/pjpeg', 'image/webp', 'application/pdf']);
+const ALLOWED_EXTS = new Set(['.png', '.jpg', '.jpeg', '.webp', '.pdf', '.xlsx', '.xls', '.csv']);
+const ALLOWED_MIMES = new Set([
+    'image/png', 'image/jpeg', 'image/pjpeg', 'image/webp', 'application/pdf',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    'application/vnd.ms-excel', 'text/csv', 'application/csv'
+]);
 
 const storage = multer.diskStorage({
     destination: (req, file, cb) => {
@@ -66,8 +70,8 @@ const uploadMiddleware = multer({
             return cb(err);
         }
 
-        if (!ALLOWED_EXTS.has(ext) || !ALLOWED_MIMES.has(mime)) {
-            const err = new Error('Invalid file type. Allowed formats: PNG, JPG, JPEG, WEBP, PDF.');
+        if (!ALLOWED_EXTS.has(ext) && !ALLOWED_MIMES.has(mime)) {
+            const err = new Error('Invalid file type. Allowed formats: PNG, JPG, JPEG, WEBP, PDF, XLSX, XLS, CSV.');
             err.code = 'INVALID_FILE_TYPE';
             err.status = 400;
             return cb(err);

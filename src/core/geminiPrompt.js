@@ -81,10 +81,10 @@ function buildExtractionPrompt(uploadContext = {}) {
     return `You are a high-precision academic timetable vision and document analysis system.
 Analyze the attached timetable image or PDF document and extract its complete schedule into valid JSON following the strict B2.1 JSON contract below.
 
-AUTHORITATIVE UPLOAD CONTEXT (DO NOT OVERRIDE):
-- Expected Timetable Type: "${uploadType}"
+AUTHORITATIVE UPLOAD CONTEXT:
+- Expected Timetable Context: "${uploadType}"
 - Expected Department/Branch Code: "${dept}"
-${faculty ? `- Authoritative Faculty Name: "${faculty}"\n` : ''}${className ? `- Expected Class/Section Name: "${className}" (belongs under branch "${dept}")\n` : ''}
+${faculty ? `- Uploaded By Faculty: "${faculty}" (The image may be a multi-faculty class schedule OR a personal timetable; extract ALL entries for ALL faculty visible)\n` : ''}${className ? `- Expected Class/Section Name: "${className}" (belongs under branch "${dept}")\n` : ''}
 CRITICAL RULES & GENERAL EXTRACTION INSTRUCTIONS:
 
 1. OUTPUT FORMAT:
@@ -177,17 +177,17 @@ function buildVerificationPrompt(uploadContext = {}, stage1Json = {}) {
     const uploadType = uploadContext.uploadType || 'MASTER_TIMETABLE';
     const faculty = uploadContext.facultyName || null;
     const className = uploadContext.className || null;
-    const stage1Text = typeof stage1Json === 'string' ? stage1Json : JSON.stringify(stage1Json, null, 2);
+    const stage1Text = typeof stage1Json === 'string' ? stage1Json : JSON.stringify(stage1Json);
 
     return `You are a high-precision academic timetable verification, error-correction, and visual structure analysis system.
 You are given the ORIGINAL timetable document image (attached) AND a STAGE 1 DRAFT JSON previously extracted from it.
 
 Your objective is to inspect the original image and verify/correct the Stage 1 JSON to produce an accurate, complete, and verified B2.1 JSON representation.
 
-AUTHORITATIVE UPLOAD CONTEXT (DO NOT OVERRIDE):
-- Expected Timetable Type: "${uploadType}"
+AUTHORITATIVE UPLOAD CONTEXT:
+- Expected Timetable Context: "${uploadType}"
 - Expected Department/Branch Code: "${dept}"
-${faculty ? `- Authoritative Faculty Name: "${faculty}"\n` : ''}${className ? `- Expected Class/Section Name: "${className}" (belongs under branch "${dept}")\n` : ''}
+${faculty ? `- Uploaded By Faculty: "${faculty}" (The image may be a multi-faculty class schedule OR a personal timetable; verify ALL entries for ALL faculty visible)\n` : ''}${className ? `- Expected Class/Section Name: "${className}" (belongs under branch "${dept}")\n` : ''}
 STAGE 1 DRAFT JSON TO VERIFY:
 ${stage1Text}
 
@@ -242,9 +242,6 @@ CRITICAL VERIFICATION & STRUCTURE PRESERVATION INSTRUCTIONS:
    - OUTPUT ONLY VALID JSON adhering to the Phase B2.1 JSON schema.
    - DO NOT wrap the output in Markdown code blocks (do NOT use \`\`\`json or \`\`\`).
    - DO NOT include introductory, explanatory, or concluding text. Output JSON only.
-
-EXACT REQUIRED JSON SCHEMA AND STRUCTURE:
-${JSON.stringify(B2_1_SAMPLE_SCHEMA, null, 2)}
 
 Examine the attached original image and Stage 1 JSON draft, perform complete verification and legend resolution, and output the corrected B2.1 JSON:`;
 }

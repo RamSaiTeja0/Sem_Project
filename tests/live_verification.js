@@ -9,7 +9,7 @@ const { spawn } = require('child_process');
 const { waitForServer } = require('./helpers');
 
 const PORT = process.env.TEST_PORT || 3405;
-const BASE_URL = process.env.BASE_URL || `http://localhost:${PORT}`;
+const BASE_URL = process.env.BASE_URL || `http://127.0.0.1:${PORT}`;
 
 function request(path, options = {}) {
     return new Promise((resolve, reject) => {

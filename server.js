@@ -28,6 +28,7 @@ const facultyRequestRoutes = require('./src/routes/facultyRequests');
 const attendanceRoutes = require('./src/routes/attendance');
 const invigilationRoutes = require('./src/routes/invigilation');
 const substitutionRoutes = require('./src/routes/substitutions');
+const facultyTimetableRoutes = require('./src/routes/facultyTimetable');
 
 const app = express();
 
@@ -129,6 +130,7 @@ app.get(['/dashboard', '/app', '/index.html'], requireAuth, (req, res) => {
 app.use('/api/timetable/import', requireAuth, importRoutes);
 app.use('/api/timetable/entries', requireAuth, entryRoutes);
 app.use('/api/timetable', requireAuth, timetableRoutes);
+app.use('/api/faculty/timetable', requireAuth, facultyTimetableRoutes);
 app.use('/api/faculty', requireAuth, facultyRoutes);
 app.use('/api/availability', requireAuth, availabilityRoutes);
 app.use('/api/attendance', requireAuth, attendanceRoutes);

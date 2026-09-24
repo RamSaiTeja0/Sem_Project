@@ -11,10 +11,10 @@ const store = require('../data/store');
 const CONTRACT_VERSION = '2.1';
 const ALLOWED_TIMETABLE_TYPES = new Set(['MASTER_TIMETABLE', 'FACULTY_TIMETABLE']);
 const ALLOWED_SESSION_TYPES = new Set(['theory', 'lab', 'activity']);
-const NON_FACULTY_PATTERN = /\b(library|counselling|counseling|tpc|placement|training|sports|games|seminar|mentoring|assembly|activity|break|lunch)\b/i;
+const NON_FACULTY_PATTERN = /\b(library|counselling|counseling|tpc|placement|training|sports|games|seminar|mentoring|assembly|activity|break|lunch|project|tutorial|remedial|ncc|nss|yoga|club|lab|laboratory|practical|workshop|drawing)\b/i;
 
 function isNonFacultyActivity(subject, type) {
-    return type === 'activity' || NON_FACULTY_PATTERN.test(subject || '');
+    return type === 'activity' || type === 'lab' || NON_FACULTY_PATTERN.test(subject || '');
 }
 
 /**
@@ -55,9 +55,9 @@ function validateExtractedContract(payload, uploadRecord = null, options = {}) {
 
     // 3. Department / Branch code check
     const deptCode = payload.department_code ? String(payload.department_code).trim().toUpperCase() : '';
-    if (!deptCode || !/^[A-Z0-9-]{2,16}$/.test(deptCode)) {
-        errors.push('department_code is required and must be 2–16 alphanumeric characters or hyphens.');
-        code = code || 'INVALID_DEPARTMENT_CODE';
+    if (!deptCode || deptCode === 'UNKNOWN' || deptCode === 'UNRESOLVED' || !/^[A-Z0-9_-]{2,16}$/.test(deptCode)) {
+        errors.push('The timetable branch could not be verified from the uploaded document. Branch information is unresolved.');
+        code = code || 'UNRESOLVED_BRANCH';
     }
 
     // 4. Authoritative Upload Metadata Checks
@@ -65,8 +65,10 @@ function validateExtractedContract(payload, uploadRecord = null, options = {}) {
         // Branch Authority check
         if (uploadRecord.departmentCode) {
             const authDept = String(uploadRecord.departmentCode).trim().toUpperCase();
-            if (deptCode && deptCode !== authDept) {
-                errors.push(`Branch mismatch: document claims branch "${deptCode}", but upload belongs to branch "${authDept}".`);
+            if (deptCode && deptCode !== authDept && deptCode !== 'UNKNOWN' && deptCode !== 'UNRESOLVED') {
+                errors.push('This timetable belongs to another branch and cannot be added to your branch Master Timetable.');
+                errors.push(`Detected branch: ${deptCode}`);
+                errors.push(`Your branch: ${authDept}`);
                 code = 'BRANCH_MISMATCH';
             }
         }
@@ -145,6 +147,13 @@ function validateExtractedContract(payload, uploadRecord = null, options = {}) {
     }
 
     // 6. Detailed Entry Validation & Internal Slot Conflict Detection
+    const timetableType = payload.timetable_type ||
+        (uploadRecord && uploadRecord.uploadType) ||
+        (options && (options.timetableType || options.uploadType));
+
+    const isFacultyTimetable = timetableType === 'FACULTY_TIMETABLE' ||
+        (options && (options.isFacultyTimetable === true || options.isFaculty === true));
+
     const classSlotSeen = new Map();
     const facultySlotSeen = new Map();
     const roomSlotSeen = new Map();
@@ -205,21 +214,21 @@ function validateExtractedContract(payload, uploadRecord = null, options = {}) {
             code = code || 'MISSING_REQUIRED_FIELDS';
         }
 
-        // Class name resolution
+        // Class name resolution (strictly required for MASTER_TIMETABLE, optional for FACULTY_TIMETABLE)
         const className = (entry.class_name ? String(entry.class_name).trim() : null) || rootClass;
-        if (!className) {
+        if (!className && !isFacultyTimetable) {
             errors.push(`Entry ${line}: class_name is required for scheduled slot.`);
             code = code || 'MISSING_REQUIRED_FIELDS';
         }
 
         // Faculty name resolution
         let faculty = entry.faculty_name ? String(entry.faculty_name).trim() : null;
-        if (!faculty && payload.timetable_type === 'FACULTY_TIMETABLE') {
-            faculty = rootFaculty || (uploadRecord && uploadRecord.facultyId);
+        if (!faculty && isFacultyTimetable) {
+            faculty = rootFaculty || (uploadRecord && (uploadRecord.facultyId || uploadRecord.facultyName)) || (options && (options.facultyName || options.facultyId));
         }
 
         const isActivity = isNonFacultyActivity(subject, sessionType);
-        if (!isActivity && !faculty) {
+        if (!isActivity && !faculty && !isFacultyTimetable) {
             errors.push(`Entry ${line}: faculty_name is required for non-activity class.`);
             code = code || 'MISSING_FACULTY';
         }
@@ -255,7 +264,7 @@ function validateExtractedContract(payload, uploadRecord = null, options = {}) {
                     if (facultySlotSeen.has(facKey)) {
                         const clash = {
                             code: 'FACULTY_BUSY',
-                            message: `Faculty "${faculty}" is double-booked at ${normDay} P${p} (${facultySlotSeen.get(facKey)} vs ${subject} [${className}])`
+                            message: `Faculty "${faculty}" is double-booked at ${normDay} P${p} (${facultySlotSeen.get(facKey)} vs ${subject}${className ? ` [${className}]` : ''})`
                         };
                         conflicts.push(clash);
                         code = code || 'SLOT_CONFLICT';
@@ -270,12 +279,12 @@ function validateExtractedContract(payload, uploadRecord = null, options = {}) {
                     if (roomSlotSeen.has(roomKey)) {
                         const clash = {
                             code: 'ROOM_BUSY',
-                            message: `Room "${room}" is double-booked at ${normDay} P${p} (${roomSlotSeen.get(roomKey)} vs ${className})`
+                            message: `Room "${room}" is double-booked at ${normDay} P${p} (${roomSlotSeen.get(roomKey)} vs ${className || subject || 'class'})`
                         };
                         conflicts.push(clash);
                         code = code || 'SLOT_CONFLICT';
                     } else {
-                        roomSlotSeen.set(roomKey, className);
+                        roomSlotSeen.set(roomKey, className || subject || 'class');
                     }
                 }
             }
@@ -299,8 +308,8 @@ function validateExtractedContract(payload, uploadRecord = null, options = {}) {
             const className = (entry.class_name ? String(entry.class_name).trim() : null) || rootClass;
             const subject = entry.subject_name ? String(entry.subject_name).trim() : null;
             let faculty = entry.faculty_name ? String(entry.faculty_name).trim() : null;
-            if (!faculty && payload.timetable_type === 'FACULTY_TIMETABLE') {
-                faculty = rootFaculty || (uploadRecord && uploadRecord.facultyId);
+            if (!faculty && isFacultyTimetable) {
+                faculty = rootFaculty || (uploadRecord && (uploadRecord.facultyId || uploadRecord.facultyName)) || (options && (options.facultyName || options.facultyId));
             }
 
             if (knownClasses.length > 0 && className && !knownClasses.some(c => c.toUpperCase() === className.toUpperCase())) {

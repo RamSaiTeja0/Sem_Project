@@ -132,6 +132,13 @@ function isTransientError(status, errorBody = null) {
     return false;
 }
 
+const SUPPORTED_GEMINI_MODELS = [
+    'gemini-3.1-flash-lite',
+    'gemini-3.1-flash-lite-preview',
+    'gemini-flash-latest',
+    'gemini-flash-lite-latest'
+];
+
 /**
  * Internal executor for multimodal Gemini API requests with exponential backoff & model fallback.
  *
@@ -157,17 +164,19 @@ async function executeGeminiMultimodal(executionParams, options = {}) {
     }
 
     const apiKey = (options.apiKey !== undefined) ? options.apiKey : (config.geminiApiKey || process.env.GEMINI_API_KEY);
-    const model = options.model || config.geminiModel || process.env.GEMINI_MODEL || 'gemini-3-flash-preview';
+    const primaryModel = options.model || config.geminiModel || process.env.GEMINI_MODEL || 'gemini-3.1-flash-lite';
     const baseUrl = (options.baseUrl || config.geminiBaseUrl || 'https://generativelanguage.googleapis.com').replace(/\/$/, '');
-    const timeoutMs = options.timeoutMs || config.geminiTimeoutMs || 60000;
-    const maxRetries = Number.isInteger(options.maxRetries) ? options.maxRetries : 3;
+    const timeoutMs = options.timeoutMs || config.geminiTimeoutMs || 35000;
+    const maxRetries = Number.isInteger(options.maxRetries) ? options.maxRetries : 2;
     const initialDelayMs = Number.isInteger(options.initialDelayMs) ? options.initialDelayMs : 1000;
+    const maxDurationMs = options.maxDurationMs || 65000;
+    const deadline = Date.now() + maxDurationMs;
 
     // Check custom mock transport first (allows offline testing)
     if (typeof options.customTransport === 'function') {
         const mockRaw = await options.customTransport({
             stage,
-            model,
+            model: primaryModel,
             fileBuffer,
             mimeType,
             uploadContext,
@@ -204,101 +213,107 @@ async function executeGeminiMultimodal(executionParams, options = {}) {
         ],
         generationConfig: {
             responseMimeType: 'application/json',
-            temperature: 0.1,
-            thinkingConfig: {
-                thinkingBudget: 0
-            }
+            temperature: 0.1
         }
     };
 
-    const targetUrl = `${baseUrl}/v1beta/models/${encodeURIComponent(model)}:generateContent`;
     const headers = {
         'x-goog-api-key': apiKey.trim()
     };
 
+    const httpPost = options.postJson || postJson;
+
+    // Prioritized model candidate cascade
+    const modelsToTry = Array.from(new Set([
+        primaryModel,
+        ...SUPPORTED_GEMINI_MODELS
+    ]));
+
     let lastError = null;
     let response = null;
 
-    // Bounded exponential backoff retry loop
+    // Bounded multi-round retry loop across prioritized model cascade
+    retryLoop:
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
-        try {
-            response = await postJson(targetUrl, headers, JSON.stringify(requestPayload), timeoutMs);
-
-            // Automatic fallback if model is unavailable or overloaded (404 / 503)
-            if (response.body && response.body.error) {
-                const msg = String(response.body.error.message || '');
-                if (/is no longer available|experiencing high demand|not found/i.test(msg) || response.status === 404 || response.status === 503) {
-                    const fallbackModels = ['gemini-3-flash-preview', 'gemini-3.1-flash-lite-preview', 'gemini-3.6-flash'];
-                    for (const fallbackModel of fallbackModels) {
-                        if (model !== fallbackModel) {
-                            const fallbackUrl = `${baseUrl}/v1beta/models/${encodeURIComponent(fallbackModel)}:generateContent`;
-                            const fallbackRes = await postJson(fallbackUrl, headers, JSON.stringify(requestPayload), timeoutMs);
-                            if (fallbackRes.status >= 200 && fallbackRes.status < 300) {
-                                response = fallbackRes;
-                                break;
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Success condition
-            if (response.status >= 200 && response.status < 300) {
-                lastError = null;
-                break;
-            }
-
-            // Authentication failure (non-retryable)
-            if (response.status === 401 || response.status === 403) {
-                throw new GeminiExtractionError(
-                    'Gemini API authentication failed: invalid API key or insufficient permissions.',
-                    'GEMINI_KEY_INVALID',
-                    401
-                );
-            }
-
-            // Check if transient error eligible for retry
-            if (isTransientError(response.status, response.body)) {
-                const errorMsg = (response.body && response.body.error && response.body.error.message)
-                    || `Gemini API returned HTTP ${response.status}`;
+        for (let mIdx = 0; mIdx < modelsToTry.length; mIdx++) {
+            if (Date.now() >= deadline) {
                 lastError = new GeminiExtractionError(
-                    `Gemini API temporary error: ${errorMsg}`,
-                    response.status === 429 ? 'GEMINI_RATE_LIMIT' : 'GEMINI_SERVICE_UNAVAILABLE',
-                    response.status,
-                    response.body
+                    'Gemini extraction is taking longer than expected. Please try again.',
+                    'GEMINI_TIMEOUT',
+                    504
                 );
+                break retryLoop;
+            }
 
-                if (attempt < maxRetries) {
-                    const backoffMs = initialDelayMs * Math.pow(2, attempt - 1) + Math.floor(Math.random() * 200);
-                    await sleep(backoffMs);
+            const currentModel = modelsToTry[mIdx];
+            const targetUrl = `${baseUrl}/v1beta/models/${encodeURIComponent(currentModel)}:generateContent`;
+            try {
+                const res = await httpPost(targetUrl, headers, JSON.stringify(requestPayload), timeoutMs);
+
+                // Authentication failure (non-retryable, fail immediately)
+                if (res.status === 401 || res.status === 403) {
+                    throw new GeminiExtractionError(
+                        'Gemini API authentication failed: invalid API key or insufficient permissions.',
+                        'GEMINI_KEY_INVALID',
+                        401
+                    );
+                }
+
+                // Success condition
+                if (res.status >= 200 && res.status < 300) {
+                    response = res;
+                    lastError = null;
+                    break retryLoop;
+                }
+
+                // Transient error / high demand: log candidate failure, pause briefly, then try next model
+                if (isTransientError(res.status, res.body) || res.status === 404) {
+                    const errorMsg = (res.body && res.body.error && res.body.error.message)
+                        || `Gemini API returned HTTP ${res.status}`;
+                    lastError = new GeminiExtractionError(
+                        `Gemini API temporary error: ${errorMsg}`,
+                        res.status === 429 ? 'GEMINI_RATE_LIMIT' : 'GEMINI_SERVICE_UNAVAILABLE',
+                        res.status,
+                        res.body
+                    );
+
+                    // Add a brief pacing delay between candidate models on transient failures to prevent bursting
+                    if (mIdx < modelsToTry.length - 1 && Date.now() + 1200 < deadline) {
+                        await sleep(1200);
+                    }
+                    continue;
+                } else {
+                    const errorMsg = (res.body && res.body.error && res.body.error.message)
+                        || `Gemini API returned HTTP ${res.status}`;
+                    lastError = new GeminiExtractionError(
+                        `Gemini API error: ${errorMsg}`,
+                        'GEMINI_API_ERROR',
+                        res.status,
+                        res.body
+                    );
                     continue;
                 }
-            } else {
-                // Non-retryable error
-                const errorMsg = (response.body && response.body.error && response.body.error.message)
-                    || `Gemini API returned HTTP ${response.status}`;
-                throw new GeminiExtractionError(
-                    `Gemini API error: ${errorMsg}`,
-                    'GEMINI_API_ERROR',
-                    response.status,
-                    response.body
-                );
-            }
-        } catch (netErr) {
-            if (netErr instanceof GeminiExtractionError && (netErr.code === 'GEMINI_KEY_INVALID' || netErr.code === 'GEMINI_API_ERROR')) {
-                throw netErr;
-            }
-            lastError = netErr;
-            if (attempt < maxRetries) {
-                const backoffMs = initialDelayMs * Math.pow(2, attempt - 1) + Math.floor(Math.random() * 200);
-                await sleep(backoffMs);
+            } catch (netErr) {
+                if (netErr instanceof GeminiExtractionError && (netErr.code === 'GEMINI_KEY_INVALID' || netErr.code === 'GEMINI_API_ERROR')) {
+                    throw netErr;
+                }
+                lastError = netErr;
+                if (mIdx < modelsToTry.length - 1 && Date.now() + 1000 < deadline) {
+                    await sleep(1000);
+                }
                 continue;
             }
+        }
+
+        // If all models in the cascade failed on this attempt, back off before the next attempt round
+        if (attempt < maxRetries && Date.now() + 1500 < deadline) {
+            const backoffMs = Math.min(initialDelayMs * Math.pow(2, attempt - 1), 4000) + Math.floor(Math.random() * 300);
+            await sleep(backoffMs);
         }
     }
 
     if (lastError || !response || response.status < 200 || response.status >= 300) {
-        throw lastError || new GeminiExtractionError('Gemini API extraction failed after retries.', 'GEMINI_EXTRACTION_FAILED', 502);
+        throw lastError || new GeminiExtractionError('Gemini extraction is taking longer than expected. Please try again.', 'GEMINI_EXTRACTION_FAILED', 502);
     }
 
     // Parse candidate text from Gemini response structure

@@ -56,6 +56,7 @@ async function withTransaction(fn) {
     const p = getPool();
     if (!p) throw new Error('DATABASE_URL is not configured');
     const client = await p.connect();
+    client.on('error', err => console.error('[db] client socket error:', err.message));
     try {
         await client.query('BEGIN');
         const result = await fn(client);

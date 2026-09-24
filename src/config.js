@@ -60,8 +60,8 @@ const config = {
      * is a secret — it is never logged, and .env is git-ignored.
      */
     databaseUrl: (process.env.DATABASE_URL || '').trim() || null,
-    dbPoolMax: intOr(process.env.DB_POOL_MAX, 5),
-    dbConnectTimeoutMs: intOr(process.env.DB_CONNECT_TIMEOUT_MS, 10000),
+    dbPoolMax: intOr(process.env.DB_POOL_MAX, 20),
+    dbConnectTimeoutMs: intOr(process.env.DB_CONNECT_TIMEOUT_MS, 20000),
     /** Create tables and insert the demo rows on startup when the DB is empty (default false). */
     dbAutoSeed: boolOr(process.env.DB_AUTO_SEED, false),
 
@@ -88,7 +88,7 @@ const config = {
      * Secret key is read from environment only, never exposed to client or logs.
      */
     geminiApiKey: (process.env.GEMINI_API_KEY || '').trim() || null,
-    geminiModel: (process.env.GEMINI_MODEL || 'gemini-3-flash-preview').trim(),
+    geminiModel: (process.env.GEMINI_MODEL || 'gemini-3.1-flash-lite').trim(),
     geminiBaseUrl: (process.env.GEMINI_BASE_URL || 'https://generativelanguage.googleapis.com').replace(/\/$/, ''),
     geminiTimeoutMs: intOr(process.env.GEMINI_TIMEOUT_MS, 120000),
 

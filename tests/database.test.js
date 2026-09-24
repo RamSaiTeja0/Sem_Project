@@ -249,9 +249,9 @@ async function run() {
 
     const dbState = await store.initFromDatabase();
     assert.ok(dbState.enabled, 'the store must be serving from the database: ' + JSON.stringify(dbState));
-    server = app.listen(0);
+    server = app.listen(0, '127.0.0.1');
     await new Promise(resolve => server.once('listening', resolve));
-    base = `http://localhost:${server.address().port}`;
+    base = `http://127.0.0.1:${server.address().port}`;
 
     const freeClass = TEST_CLASS_1;
     const otherClasses = [TEST_CLASS_2];
