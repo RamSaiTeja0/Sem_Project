@@ -9,9 +9,8 @@
  * 5. Faculty My Timetable Upload (preview -> confirm -> saves to My Timetable only, keeps official Master Timetable untouched).
  */
 
-require('dotenv').config();
-const CONNECTION = process.env.TEST_DATABASE_URL || process.env.DATABASE_URL || '';
-if (CONNECTION) process.env.DATABASE_URL = CONNECTION;
+const { verifySafetyGuard } = require('./testDbGuard');
+verifySafetyGuard();
 
 const assert = require('assert');
 const http = require('http');
@@ -505,7 +504,9 @@ async function runTest() {
     }
 }
 
-runTest().catch(err => {
+runTest().then(() => {
+    process.exit(0);
+}).catch(err => {
     console.error('Test failure:', err);
     process.exit(1);
 });

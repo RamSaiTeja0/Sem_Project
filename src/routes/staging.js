@@ -444,33 +444,73 @@ async function registerEntityIntoCatalog(entityType, extractedText, extra = {}, 
                     const m = code.match(/[-_]([A-Za-z0-9])$/);
                     if (m) sec = m[1].toUpperCase();
                 }
+                if (!sec) sec = 'A';
                 const yr = extra.academicYear ? String(extra.academicYear).trim() : (extra.academic_year ? String(extra.academic_year).trim() : null);
 
-                let existing = await client.query('SELECT id, code FROM classes WHERE UPPER(code) = UPPER($1)', [code]);
-                if (!existing.rows.length && deptId && semNum && sec) {
-                    existing = await client.query('SELECT id, code FROM classes WHERE department_id = $1 AND semester = $2 AND (section = $3 OR UPPER(code) LIKE $4) LIMIT 1', [deptId, semNum, sec, `%-${sec}`]);
+                // 1. Check exact (dept, year variants, sem, sec) match
+                const yrVariants = repository.normalizeAcademicYearVariants ? repository.normalizeAcademicYearVariants(yr) : (yr ? [yr] : []);
+                let existing = null;
+                if (deptId && semNum && sec) {
+                    if (yrVariants.length > 0) {
+                        const scopeQ = await client.query(
+                            `SELECT id, code, department_id, academic_year, semester, section 
+                               FROM classes 
+                              WHERE department_id = $1 
+                                AND semester = $2 
+                                AND UPPER(TRIM(section)) = UPPER(TRIM($3))
+                                AND (academic_year = ANY($4) OR academic_year IS NULL)
+                              ORDER BY CASE WHEN academic_year = ANY($4) THEN 0 ELSE 1 END, id ASC 
+                              LIMIT 1`,
+                            [deptId, semNum, sec, yrVariants]
+                        );
+                        if (scopeQ.rows.length) existing = scopeQ.rows[0];
+                    } else {
+                        const scopeQ = await client.query(
+                            `SELECT id, code, department_id, academic_year, semester, section 
+                               FROM classes 
+                              WHERE department_id = $1 
+                                AND semester = $2 
+                                AND UPPER(TRIM(section)) = UPPER(TRIM($3))
+                              ORDER BY id ASC 
+                              LIMIT 1`,
+                            [deptId, semNum, sec]
+                        );
+                        if (scopeQ.rows.length) existing = scopeQ.rows[0];
+                    }
                 }
-                if (existing.rows.length > 0) {
-                    await client.query(`
-                        UPDATE classes
-                           SET semester = COALESCE($2, semester),
-                               academic_year = COALESCE($3, academic_year),
-                               section = COALESCE($4, section),
-                               department_id = COALESCE($5, department_id)
-                         WHERE id = $1
-                    `, [existing.rows[0].id, semNum, yr, sec, deptId]);
-                    return existing.rows[0];
+
+                // 2. Check exact code match if not found by scope
+                if (!existing && code) {
+                    const codeQ = await client.query('SELECT id, code, department_id, academic_year, semester, section FROM classes WHERE UPPER(TRIM(code)) = UPPER(TRIM($1)) LIMIT 1', [code]);
+                    if (codeQ.rows.length) {
+                        const found = codeQ.rows[0];
+                        if (!deptId || !found.department_id || found.department_id === deptId) {
+                            if ((!found.semester || found.semester === semNum) && (!found.section || found.section === sec)) {
+                                existing = found;
+                            }
+                        }
+                    }
                 }
+
+                if (existing) {
+                    if (!existing.academic_year && yr) {
+                        await client.query('UPDATE classes SET academic_year = $1 WHERE id = $2', [yr, existing.id]);
+                        existing.academic_year = yr;
+                    }
+                    return existing;
+                }
+
+                let finalCode = code;
+                const codeCheck = await client.query('SELECT id FROM classes WHERE UPPER(TRIM(code)) = UPPER(TRIM($1))', [finalCode]);
+                if (codeCheck.rows.length > 0) {
+                    finalCode = `${code}-SEM${semNum || 1}-${sec || 'A'}-${yr || 'AY'}`;
+                }
+
                 const res = await client.query(
                     `INSERT INTO classes (code, department_id, semester, academic_year, section)
                      VALUES (UPPER($1), $2, $3, $4, $5)
-                     ON CONFLICT (code) DO UPDATE SET
-                         department_id = COALESCE(classes.department_id, EXCLUDED.department_id),
-                         semester = COALESCE(EXCLUDED.semester, classes.semester),
-                         academic_year = COALESCE(EXCLUDED.academic_year, classes.academic_year),
-                         section = COALESCE(EXCLUDED.section, classes.section)
                      RETURNING id, code`,
-                    [code, deptId, semNum, yr, sec]
+                    [finalCode, deptId, semNum, yr, sec]
                 );
                 return res.rows[0];
             } else if (type === 'subject') {
@@ -478,14 +518,14 @@ async function registerEntityIntoCatalog(entityType, extractedText, extra = {}, 
                 const code = String(extra.code || name.replace(/[^A-Z0-9]/gi, '').slice(0, 10).toUpperCase() || 'SUBJ');
                 const subjectType = String(extra.type || (/lab|practical|workshop|drawing/i.test(name) ? 'lab' : 'theory')).toLowerCase();
                 const existing = await client.query(
-                    'SELECT id, code, name FROM subjects WHERE UPPER(code) = UPPER($1) OR UPPER(name) = UPPER($2) LIMIT 1',
-                    [code, name]
+                    'SELECT id, code, name FROM subjects WHERE (UPPER(code) = UPPER($1) OR UPPER(name) = UPPER($2)) AND (department_id = $3 OR department_id IS NULL) LIMIT 1',
+                    [code, name, deptId]
                 );
                 if (existing.rows.length > 0) return existing.rows[0];
                 const res = await client.query(
                     `INSERT INTO subjects (code, name, department_id, subject_type)
                      VALUES (UPPER($1), $2, $3, $4)
-                     ON CONFLICT (code) DO UPDATE SET name = EXCLUDED.name, department_id = COALESCE(subjects.department_id, EXCLUDED.department_id)
+                     ON CONFLICT (code) DO UPDATE SET name = EXCLUDED.name, department_id = COALESCE(EXCLUDED.department_id, subjects.department_id)
                      RETURNING id, code, name`,
                     [code, name, deptId, subjectType]
                 );
@@ -494,14 +534,14 @@ async function registerEntityIntoCatalog(entityType, extractedText, extra = {}, 
                 const name = String(extra.name || extractedText).trim();
                 const code = String(extra.code || (branch + '_' + name.replace(/[^A-Z0-9]/gi, '_').toUpperCase()).slice(0, 30));
                 const existing = await client.query(
-                    'SELECT id, code, name FROM faculty WHERE UPPER(code) = UPPER($1) OR UPPER(name) = UPPER($2) LIMIT 1',
-                    [code, name]
+                    'SELECT id, code, name FROM faculty WHERE (UPPER(code) = UPPER($1) OR UPPER(name) = UPPER($2)) AND (department_id = $3 OR department_id IS NULL) LIMIT 1',
+                    [code, name, deptId]
                 );
                 if (existing.rows.length > 0) return existing.rows[0];
                 const res = await client.query(
                     `INSERT INTO faculty (code, name, department_id, designation, status, max_weekly_periods)
                      VALUES ($1, $2, $3, $4, 'active', 28)
-                     ON CONFLICT (code) DO UPDATE SET name = EXCLUDED.name, department_id = COALESCE(faculty.department_id, EXCLUDED.department_id)
+                     ON CONFLICT (code) DO UPDATE SET name = EXCLUDED.name, department_id = COALESCE(EXCLUDED.department_id, faculty.department_id)
                      RETURNING id, code, name`,
                     [code, name, deptId, extra.designation || 'Faculty']
                 );
@@ -735,10 +775,22 @@ router.post('/:uploadId/approve', async (req, res) => {
             });
         }
 
-        // 4. Entity Resolution Gate: Strictly block if unresolved entities remain
+        // 4. Determine Authoritative Target Scope
+        const currentUserId = req.session.userId || req.session.username || req.session.id;
+        const targetScope = (req.body && req.body.targetScope) ? req.body.targetScope : {
+            branch: (req.body && (req.body.targetBranch || req.body.branch || req.body.departmentCode)) || upload.departmentCode,
+            academicYear: (req.body && (req.body.targetAcademicYear || req.body.academicYear)) || upload.academicYear,
+            semester: (req.body && (req.body.targetSemester || req.body.semester)) || upload.semester,
+            section: (req.body && (req.body.targetSection || req.body.section)) || upload.section,
+            className: (req.body && (req.body.targetClass || req.body.className)) || upload.targetClass
+        };
+
+        const targetBranchCode = targetScope.branch || upload.departmentCode;
+
+        // 5. Entity Resolution Gate: Strictly block if unresolved entities remain
         const resolution = await resolveContract(
             staging.extractedJson,
-            upload.departmentCode,
+            targetBranchCode,
             staging.entityMappings || {}
         );
 
@@ -750,15 +802,16 @@ router.post('/:uploadId/approve', async (req, res) => {
             });
         }
 
-        // 5. Transactional Import Execution
-        const currentUserId = req.session.userId || req.session.username || req.session.id;
+        // 6. Transactional Import Execution
+
         let importResult;
         if (db.isConfigured() && store.usingDatabase) {
             importResult = await repository.importStagedTimetable({
                 uploadRecord: upload,
                 stagedContract: staging.extractedJson,
                 resolvedMap: resolution.resolvedMap,
-                userId: currentUserId
+                userId: currentUserId,
+                targetScope
             });
             // Reload store cache from PostgreSQL
             await store.reloadFromDatabase();
@@ -767,7 +820,8 @@ router.post('/:uploadId/approve', async (req, res) => {
                 uploadRecord: upload,
                 stagedContract: staging.extractedJson,
                 resolvedMap: resolution.resolvedMap,
-                userId: currentUserId
+                userId: currentUserId,
+                targetScope
             });
         }
 
@@ -803,20 +857,22 @@ router.post('/:uploadId/approve', async (req, res) => {
         // 7. Update Upload Record status to PROCESSED
         await updateUploadStatus(uploadId, 'PROCESSED');
 
+        const finalScope = (importResult && importResult.scope) || {
+            branch: upload.departmentCode,
+            semester: staging.extractedJson.semester || 'SEM-1',
+            section: staging.extractedJson.section || 'A',
+            academicYear: staging.extractedJson.academic_year || null,
+            className: staging.extractedJson.class_name
+        };
+
         return res.json({
             success: true,
             uploadId,
             importStatus: 'IMPORTED',
             importedCount: importResult.importedCount,
-            targetClass: staging.extractedJson.class_name,
-            department: upload.departmentCode,
-            scope: {
-                branch: upload.departmentCode,
-                semester: staging.extractedJson.semester,
-                section: staging.extractedJson.section,
-                academicYear: staging.extractedJson.academic_year,
-                className: staging.extractedJson.class_name
-            },
+            targetClass: finalScope.className,
+            department: finalScope.branch,
+            scope: finalScope,
             reviewedBy: currentUserId,
             importedAt: nowIso,
             message: `Timetable approved successfully. ${importResult.importedCount} period slots imported into the live schedule.`

@@ -342,14 +342,19 @@
             hosUploadCard.style.display = isHOS ? '' : 'none';
         }
 
-        var hosStagingCard = el('hosStagingCard');
-        if (hosStagingCard && !isHOS) {
-            hosStagingCard.style.display = 'none';
+        var hosPreviewCard = el('hosPreviewCard') || el('hosStagingCard');
+        if (hosPreviewCard && !isHOS) {
+            hosPreviewCard.style.display = 'none';
         }
 
         var ttEditModal = el('ttEditModal');
         if (ttEditModal && !isHOS) {
             ttEditModal.style.display = 'none';
+        }
+
+        var ttBottomActionsCard = el('ttBottomActionsCard');
+        if (ttBottomActionsCard) {
+            ttBottomActionsCard.style.display = isHOS ? '' : 'none';
         }
 
         var deptCode = state.user ? state.user.department : 'Branch';
@@ -3698,10 +3703,22 @@
         var uploadId = pending.uploadId || null;
         var approvePromise;
         if (uploadId) {
+            var targetYear = (el('ttAcademicYear') && el('ttAcademicYear').value) || '';
+            var targetSem = (el('ttSemester') && el('ttSemester').value) || '';
+            var targetSec = (el('ttSection') && el('ttSection').value) || '';
+            var targetDept = (el('ttDept') && el('ttDept').value) || (state.user && state.user.department) || '';
+            var targetScope = {
+                academicYear: targetYear || undefined,
+                semester: targetSem || undefined,
+                section: targetSec || undefined,
+                branch: targetDept || undefined
+            };
+
             // Explicit HOD Approval via staging API
             approvePromise = fetch('/api/staging/' + encodeURIComponent(uploadId) + '/approve', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' }
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ targetScope: targetScope })
             }).then(function (res) {
                 return res.json().catch(function () { return null; }).then(function (body) {
                     return { ok: res.ok, status: res.status, body: body };
@@ -3762,10 +3779,9 @@
                 academicYear: pending.stagedContract.academic_year
             } : null);
 
-            return bootstrap().then(function () {
-                if (preferredScope) {
-                    return loadTimetableScopes(preferredScope);
-                }
+            return loadTimetableScopes(preferredScope).then(function () {
+                loadDashboard();
+                loadManageList();
             });
         }).catch(function (err) {
             workflowStep('preview', true);
@@ -3838,46 +3854,62 @@
                 }
             }
 
-            if (yearEl && data.academicYears && data.academicYears.length) {
-                var selectedYear = (data.academicYears.indexOf(currentYear) >= 0) ? currentYear : data.academicYears[0];
-                fillSelect(yearEl, data.academicYears.map(function (y) {
+            if (yearEl) {
+                var yearOptions = (data && data.academicYears && data.academicYears.length) ? data.academicYears.slice() : [];
+                if (currentYear && yearOptions.indexOf(currentYear) < 0) {
+                    yearOptions.unshift(currentYear);
+                }
+                var selectedYear = currentYear || yearOptions[0] || '2024-2027';
+                fillSelect(yearEl, yearOptions.map(function (y) {
                     return { value: y, label: y };
                 }), selectedYear);
+                yearEl.value = selectedYear;
             }
 
-            if (semEl && data.semesters && data.semesters.length) {
+            if (semEl) {
+                var semOptions = (data && data.semesters && data.semesters.length) ? data.semesters.slice() : ['SEM-1', 'SEM-2', 'SEM-3', 'SEM-4', 'SEM-5', 'SEM-6'];
                 var normSem = currentSem;
                 var currentSemNum = parseSemesterNumber(normSem);
-                if (normSem && data.semesters.indexOf(normSem) < 0) {
-                    var match = data.semesters.find(function (s) {
+                if (normSem) {
+                    var match = semOptions.find(function (s) {
                         if (s.toLowerCase() === String(normSem).toLowerCase()) return true;
                         var sNum = parseSemesterNumber(s);
                         return (sNum != null && currentSemNum != null && sNum === currentSemNum);
                     });
-                    if (match) normSem = match;
+                    if (match) {
+                        normSem = match;
+                    } else {
+                        semOptions.unshift(normSem);
+                    }
                 }
-                var selectedSem = (normSem && data.semesters.indexOf(normSem) >= 0) ? normSem : data.semesters[0];
-                fillSelect(semEl, data.semesters.map(function (s) {
+                var selectedSem = (normSem && semOptions.indexOf(normSem) >= 0) ? normSem : semOptions[0];
+                fillSelect(semEl, semOptions.map(function (s) {
                     return { value: s, label: s };
                 }), selectedSem);
+                semEl.value = selectedSem;
             }
 
-            if (secEl && data.sections && data.sections.length) {
-                var normSec = currentSec ? String(currentSec).toUpperCase().replace(/^(?:SEC(?:TION)?[-_\s]*)/, '') : null;
-                var selectedSec = (normSec && data.sections.indexOf(normSec) >= 0) ? normSec : data.sections[0];
-                fillSelect(secEl, data.sections.map(function (sec) {
+            if (secEl) {
+                var secOptions = (data && data.sections && data.sections.length) ? data.sections.slice() : ['A', 'B', 'C'];
+                var normSec = currentSec ? String(currentSec).toUpperCase().replace(/^(?:SEC(?:TION)?[-_\s]*)/, '') : 'A';
+                if (normSec && secOptions.indexOf(normSec) < 0) {
+                    secOptions.push(normSec);
+                }
+                var selectedSec = (normSec && secOptions.indexOf(normSec) >= 0) ? normSec : secOptions[0];
+                fillSelect(secEl, secOptions.map(function (sec) {
                     return { value: sec, label: 'Section ' + sec };
                 }), selectedSec);
+                secEl.value = selectedSec;
             }
 
             var uploadSem = el('hosUploadSemester');
             var uploadSec = el('hosUploadSection');
-            if (uploadSem && data.semesters) {
+            if (uploadSem && data && data.semesters) {
                 fillSelect(uploadSem, [{ value: '', label: '— Auto Detect —' }].concat(data.semesters.map(function (s) {
                     return { value: s, label: s };
                 })), uploadSem.value || '');
             }
-            if (uploadSec && data.sections) {
+            if (uploadSec && data && data.sections) {
                 fillSelect(uploadSec, [{ value: '', label: '— Auto Detect —' }].concat(data.sections.map(function (sec) {
                     return { value: sec, label: 'Section ' + sec };
                 })), uploadSec.value || '');
@@ -3885,22 +3917,27 @@
 
             describeTimetableClass();
             return loadGrid(ttQuery(), 'ttHead', 'ttBody', jumpToAvailability);
-        }).catch(function () {});
+        }).catch(function (err) {
+            console.error('loadTimetableScopes error:', err);
+        });
     }
 
     /**
      * Rebuild the Master Timetable's class list for the chosen department,
      * keeping the current class selected when it belongs to that department.
      */
-    function applyTimetableDepartment() {
-        var wanted = (el('ttDept') && el('ttDept').value) || '';
+    function applyTimetableDepartment(preferredScope) {
+        var wanted = (preferredScope && preferredScope.branch) || (el('ttDept') && el('ttDept').value) || '';
+        if (wanted && el('ttDept')) {
+            el('ttDept').value = wanted;
+        }
         var meta = state.meta || { classes: [], primaryClass: null };
         var classes = meta.classes.filter(function (code) {
             return !wanted || getClassDepartment(code) === wanted;
         });
         if (!wanted && !classes.length) classes = meta.classes.slice();
 
-        var previous = (el('ttView').value || '').replace(/^class:/, '');
+        var previous = (preferredScope && preferredScope.className) || (el('ttView').value || '').replace(/^class:/, '');
         var keep = classes.indexOf(previous) >= 0 ? previous : classes[0];
         fillSelect(el('ttView'), classes.map(function (c) {
             var info = state.classMeta[c] || {};
@@ -3911,7 +3948,7 @@
             };
         }), keep ? ('class:' + keep) : '');
         describeTimetableClass();
-        return loadTimetableScopes();
+        return loadTimetableScopes(preferredScope);
     }
 
     /** The one-line academic context under the Master Timetable heading. */
@@ -4138,6 +4175,7 @@
     }
 
     function bootstrap() {
+        var preferredScope = arguments[0];
         initFacultyManagementEvents();
         return getJson(API.meta).then(function (meta) {
             state.meta = meta;
@@ -4217,7 +4255,7 @@
                 reference.classes.forEach(function (c) { state.classMeta[c.code] = c; });
             }
 
-            applyTimetableDepartment();
+            applyTimetableDepartment(preferredScope);
             applyAvailabilityDepartment();
 
             var note = el('formatNote');
@@ -5327,12 +5365,15 @@
 
                     var formData = new FormData();
                     formData.append('timetable', file);
-                    if (el('hosUploadSemester') && el('hosUploadSemester').value) {
-                        formData.append('semester', el('hosUploadSemester').value);
-                    }
-                    if (el('hosUploadSection') && el('hosUploadSection').value) {
-                        formData.append('section', el('hosUploadSection').value);
-                    }
+                    var targetYear = (el('ttAcademicYear') && el('ttAcademicYear').value) || '';
+                    var targetSem = (el('ttSemester') && el('ttSemester').value) || (el('hosUploadSemester') && el('hosUploadSemester').value) || '';
+                    var targetSec = (el('ttSection') && el('ttSection').value) || (el('hosUploadSection') && el('hosUploadSection').value) || '';
+                    var targetDept = (el('ttDept') && el('ttDept').value) || (state.user && state.user.department) || '';
+
+                    if (targetYear) formData.append('academicYear', targetYear);
+                    if (targetSem) formData.append('semester', targetSem);
+                    if (targetSec) formData.append('section', targetSec);
+                    if (targetDept) formData.append('departmentCode', targetDept);
 
                     fetch('/api/timetable/import/preview', {
                         method: 'POST',
@@ -5352,9 +5393,31 @@
                                     '<div class="notice notice-success" style="margin-top:10px;">' +
                                     '<strong>Extraction complete!</strong> Found ' + slotCount + ' scheduled slot(s). Review and edit the timetable below before approving.' +
                                     '</div>';
+
+                                var hosPreviewCard = el('hosPreviewCard') || el('hosStagingCard');
+                                if (hosPreviewCard) {
+                                    hosPreviewCard.style.display = 'block';
+                                    var countBadge = el('hosPreviewCountBadge') || el('stgCountBadge');
+                                    if (countBadge) countBadge.textContent = slotCount + ' slots';
+                                }
+
+                                var contract = res.body.rawContract || (res.body.report && res.body.report.contract) || {};
+                                if (contract && (contract.entries || contract.days)) {
+                                    currentStagingContract = contract;
+                                    renderStagingGrid(contract);
+                                }
+
                                 if (res.body && res.body.uploadId) {
+                                    currentStagingUploadId = res.body.uploadId;
                                     loadStagedTimetable(res.body.uploadId);
                                     refreshPendingStaging();
+                                }
+
+                                var btnApprove = el('btnStagingApprove');
+                                if (btnApprove) {
+                                    btnApprove.disabled = false;
+                                    btnApprove.textContent = '✓ Accept & Import to Master Timetable';
+                                    btnApprove.className = 'btn btn-primary';
                                 }
                             } else {
                                 var errMsg = (res.body && res.body.error) || 'Upload extraction failed.';
@@ -5751,7 +5814,11 @@
 
                         var spanBadge = (colspan > 1) ? '<span class="badge" style="background:#f3e8ff; color:#6b21a8; font-size:0.7rem; padding:2px 6px;">Spans P' + p + '–P' + spanTo + '</span>' : '';
 
-                        var facultyText = entry.faculty_name ? ('<div style="font-size:0.8rem; color:var(--ink-700); margin-top:2px;">' + esc(entry.faculty_name) + '</div>') : '<div style="font-size:0.78rem; color:var(--ink-500); margin-top:2px;"><em>Unassigned</em></div>';
+                        var facultyText = entry.faculty_name
+                            ? ('<div style="font-size:0.8rem; color:var(--ink-700); margin-top:2px;">' + esc(entry.faculty_name) + '</div>')
+                            : (entry.session_type === 'activity'
+                                ? '<div style="font-size:0.78rem; color:var(--ink-500); margin-top:2px;"><em>No faculty required</em></div>'
+                                : '<div style="font-size:0.78rem; color:#b45309; font-weight:600; margin-top:2px;"><span class="badge" style="background:#fef3c7; color:#b45309; font-size:0.7rem; padding:1px 5px;">Needs review</span></div>');
 
                         var roomText = entry.room_code ? ('<div style="font-size:0.75rem; color:var(--ink-600); margin-top:2px;">Room: ' + esc(entry.room_code) + '</div>') : '';
 
@@ -5790,7 +5857,7 @@
 
             function loadStagedTimetable(uploadId) {
                 currentStagingUploadId = uploadId;
-                var stagingCard = el('hosStagingCard');
+                var stagingCard = el('hosPreviewCard') || el('hosStagingCard');
                 if (!stagingCard) return;
                 stagingCard.style.display = 'block';
 
@@ -5833,7 +5900,7 @@
                     if (stgSemester) stgSemester.textContent = contract.semester != null ? ('Semester ' + contract.semester) : '—';
                     if (stgYear) stgYear.textContent = contract.academic_year || '—';
                     if (stgCount) stgCount.textContent = (contract.entries && contract.entries.length) || 0;
-                    var stgCountBadge = el('stgCountBadge');
+                    var stgCountBadge = el('hosPreviewCountBadge') || el('stgCountBadge');
                     if (stgCountBadge) stgCountBadge.textContent = ((contract.entries && contract.entries.length) || 0) + ' slots';
 
                     if (validationBadge) {
@@ -5960,7 +6027,7 @@
             var btnStgClose = el('btnStagingClose');
             if (btnStgClose) {
                 btnStgClose.addEventListener('click', function () {
-                    var card = el('hosStagingCard');
+                    var card = el('hosPreviewCard') || el('hosStagingCard');
                     if (card) card.style.display = 'none';
                 });
             }
@@ -5976,9 +6043,21 @@
                     btnStgApprove.textContent = 'Importing…';
                     var actionStatus = el('stagingActionStatus');
 
+                    var targetYear = (el('ttAcademicYear') && el('ttAcademicYear').value) || '';
+                    var targetSem = (el('ttSemester') && el('ttSemester').value) || '';
+                    var targetSec = (el('ttSection') && el('ttSection').value) || '';
+                    var targetDept = (el('ttDept') && el('ttDept').value) || (state.user && state.user.department) || '';
+                    var targetScope = {
+                        academicYear: targetYear || undefined,
+                        semester: targetSem || undefined,
+                        section: targetSec || undefined,
+                        branch: targetDept || undefined
+                    };
+
                     fetch('/api/staging/' + encodeURIComponent(currentStagingUploadId) + '/approve', {
                         method: 'POST',
-                        headers: { 'Content-Type': 'application/json' }
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ targetScope: targetScope })
                     }).then(function (r) {
                         return r.json().catch(function () { return {}; }).then(function (body) {
                             return { ok: r.ok, status: r.status, body: body };
@@ -5991,9 +6070,9 @@
                                 loadStagedTimetable(currentStagingUploadId);
                                 refreshPendingStaging();
                                 var approvedScope = res.body && res.body.scope;
-                                bootstrap().then(function () {
-                                    if (approvedScope) loadTimetableScopes(approvedScope);
+                                return loadTimetableScopes(approvedScope).then(function () {
                                     loadDashboard();
+                                    loadManageList();
                                 });
                             } else {
                                 actionStatus.innerHTML = '<div class="notice notice-danger"><strong>Import Failed:</strong> ' + esc(res.body.error || 'Failed to import timetable.') + '</div>';

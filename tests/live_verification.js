@@ -500,7 +500,10 @@ if (process.env.BASE_URL) {
 
     waitForServer(BASE_URL)
         .then(runLiveVerification)
-        .then(() => server.kill())
+        .then(() => {
+            server.kill();
+            process.exit(0);
+        })
         .catch(err => {
             console.error('VERIFICATION FAILED:', err);
             if (log) console.error('\nServer output:\n' + log);

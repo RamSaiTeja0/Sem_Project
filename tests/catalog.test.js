@@ -15,13 +15,15 @@ const path = require('path');
 const { spawn } = require('child_process');
 const { check, checkAsync, counts, request, waitForServer } = require('./helpers');
 
-const CONNECTION = process.env.TEST_DATABASE_URL || process.env.DATABASE_URL || '';
+const { normalizeDbTarget } = require('./testDbGuard');
+let CONNECTION = '';
+if (process.env.TEST_DATABASE_URL) {
+    const { verifySafetyGuard } = require('./testDbGuard');
+    const guard = verifySafetyGuard();
+    CONNECTION = guard.testDatabaseUrl;
+}
 const PORT = process.env.TEST_PORT || 3394;
 const BASE = `http://localhost:${PORT}`;
-
-// The modules below read configuration at require time, so the connection
-// string has to be in the environment before any of them is loaded.
-if (CONNECTION) process.env.DATABASE_URL = CONNECTION;
 
 const get = p => request(BASE, 'GET', p);
 const post = (p, b) => request(BASE, 'POST', p, b);

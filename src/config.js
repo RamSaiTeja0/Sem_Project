@@ -59,7 +59,12 @@ const config = {
      * on the bundled demo dataset held in memory, exactly as before. The value
      * is a secret — it is never logged, and .env is git-ignored.
      */
-    databaseUrl: (process.env.DATABASE_URL || '').trim() || null,
+    get databaseUrl() {
+        return (process.env.DATABASE_URL || '').trim() || null;
+    },
+    set databaseUrl(val) {
+        process.env.DATABASE_URL = val ? String(val).trim() : '';
+    },
     dbPoolMax: intOr(process.env.DB_POOL_MAX, 20),
     dbConnectTimeoutMs: intOr(process.env.DB_CONNECT_TIMEOUT_MS, 20000),
     /** Create tables and insert the demo rows on startup when the DB is empty (default false). */

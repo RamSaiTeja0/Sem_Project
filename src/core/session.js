@@ -89,7 +89,19 @@ function parseCookies(header) {
  */
 function middleware(req, res, next) {
     req.cookies = parseCookies(req.headers.cookie);
-    req.session = verify(req.cookies[COOKIE_NAME]);
+    const sessionPayload = verify(req.cookies[COOKIE_NAME]);
+    if (sessionPayload) {
+        const users = require('../data/users');
+        const userExists = users.findByUsername(sessionPayload.username) || (sessionPayload.id && users.findById(sessionPayload.id));
+        if (userExists) {
+            req.session = sessionPayload;
+        } else {
+            req.session = null;
+            res.setHeader('Set-Cookie', `${COOKIE_NAME}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`);
+        }
+    } else {
+        req.session = null;
+    }
 
     res.startSession = user => {
         const maxAge = config.sessionHours * 3600;

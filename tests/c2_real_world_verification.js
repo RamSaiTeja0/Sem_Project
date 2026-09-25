@@ -15,7 +15,9 @@
  *   I. Persistence verification (simulate restart, verify data survives)
  *   J. Scoped cleanup of temporary test records (C2_* prefix)
  */
-require('dotenv').config();
+const { verifySafetyGuard } = require('./testDbGuard');
+verifySafetyGuard();
+
 const http = require('http');
 const assert = require('assert');
 const { app } = require('../server');

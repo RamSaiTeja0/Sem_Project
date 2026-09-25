@@ -133,10 +133,12 @@ function handleUpload(action) {
             const reqSem = req.body && req.body.semester ? String(req.body.semester).trim() : null;
             const reqSec = req.body && req.body.section ? String(req.body.section).trim().toUpperCase() : null;
             const reqYear = req.body && req.body.academicYear ? String(req.body.academicYear).trim() : null;
-            const sessionDept = (req.session && req.session.department) ? String(req.session.department).toUpperCase() : null;
+            const reqClass = req.body && (req.body.targetClass || req.body.className || req.body.defaultClass) ? String(req.body.targetClass || req.body.className || req.body.defaultClass).trim() : null;
+            const sessionDept = (req.session && req.session.department) ? String(req.session.department).toUpperCase() : ((req.body && (req.body.departmentCode || req.body.department || req.body.branch)) ? String(req.body.departmentCode || req.body.department || req.body.branch).toUpperCase() : null);
 
             const result = await importer[action](req.file.buffer, req.file.originalname, {
-                defaultClass: resolved.code,
+                defaultClass: resolved.code || reqClass,
+                targetClass: reqClass || resolved.code,
                 semester: reqSem,
                 section: reqSec,
                 academicYear: reqYear,

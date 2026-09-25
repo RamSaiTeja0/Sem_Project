@@ -11,9 +11,8 @@
  * G. A second branch cannot see the first branch's timetable.
  */
 
-require('dotenv').config();
-const CONNECTION = process.env.TEST_DATABASE_URL || process.env.DATABASE_URL || '';
-if (CONNECTION) process.env.DATABASE_URL = CONNECTION;
+const { verifySafetyGuard } = require('./testDbGuard');
+verifySafetyGuard();
 
 const assert = require('assert');
 const http = require('http');
@@ -319,15 +318,15 @@ async function runRegressionTests() {
         const busyInMon1 = (availMon1.body.busy || []).some(f => f.name === facNameA || f.faculty === facNameA);
         assert.strictEqual(busyInMon1, true, `Faculty ${facNameA} must be listed in busy list on Monday P1`);
 
-        // Wednesday P1: facNameA is free
-        const availWed1 = await call('POST', '/api/availability', {
-            day: 'Wednesday',
+        // Tuesday P1: facNameA is free (teaches Tuesday P3-5 lab)
+        const availTue1 = await call('POST', '/api/availability', {
+            day: 'Tuesday',
             period: 1,
             class: classNameA
         }, cookieA);
-        assert.strictEqual(availWed1.status, 200);
-        const freeInWed1 = (availWed1.body.available || []).some(f => f.name === facNameA || f.faculty === facNameA);
-        assert.strictEqual(freeInWed1, true, `Faculty ${facNameA} should be free on Wednesday P1`);
+        assert.strictEqual(availTue1.status, 200);
+        const freeInTue1 = (availTue1.body.available || []).some(f => f.name === facNameA || f.faculty === facNameA);
+        assert.strictEqual(freeInTue1, true, `Faculty ${facNameA} should be free on Tuesday P1`);
         console.log('✓ Test E Passed: Availability correctly reflects approved timetable.');
 
         // ----------------------------------------------------
@@ -370,7 +369,9 @@ async function runRegressionTests() {
     }
 }
 
-runRegressionTests().catch(err => {
+runRegressionTests().then(() => {
+    process.exit(0);
+}).catch(err => {
     console.error('\nRegression Test Failed:\n', err);
     process.exit(1);
 });

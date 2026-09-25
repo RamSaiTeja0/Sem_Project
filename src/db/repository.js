@@ -41,6 +41,30 @@ function parseSemesterNumber(val) {
     return null;
 }
 
+/**
+ * Normalizes academic year strings and produces variants (e.g. '2026-27' <-> '2026-2027').
+ */
+function normalizeAcademicYearVariants(val) {
+    if (!val) return [];
+    const clean = String(val).trim();
+    if (!clean) return [];
+    const variants = new Set([clean]);
+    // 2026-2027 -> 2026-27
+    const m1 = clean.match(/^(\d{4})\s*[-/]\s*(\d{4})$/);
+    if (m1) {
+        variants.add(`${m1[1]}-${m1[2].slice(2)}`);
+        variants.add(`${m1[1]}-${m1[2]}`);
+    }
+    // 2026-27 -> 2026-2027
+    const m2 = clean.match(/^(\d{4})\s*[-/]\s*(\d{2})$/);
+    if (m2) {
+        const century = m2[1].slice(0, 2);
+        variants.add(`${m2[1]}-${m2[2]}`);
+        variants.add(`${m2[1]}-${century}${m2[2]}`);
+    }
+    return Array.from(variants);
+}
+
 /** Is there anything in the database yet? Drives "seed only when empty". */
 async function isEmpty() {
     const { rows } = await db.query('SELECT COUNT(*)::int AS n FROM timetable');
@@ -191,7 +215,18 @@ async function loadSource(meta) {
             maxWeeklyPeriods: f.max_weekly_periods,
             status: f.status
         })),
-        classes
+        classes,
+        entries: entryRows.rows.map(r => ({
+            id: r.id,
+            className: r.class_code,
+            class: r.class_code,
+            day: r.day_of_week,
+            period: r.period,
+            subject: r.subject,
+            faculty: r.faculty || null,
+            room: r.room || null,
+            type: r.session_type || 'theory'
+        }))
     };
 }
 
@@ -782,7 +817,7 @@ async function addSubject(subject) {
         const { rows } = await client.query(`
             INSERT INTO subjects (code, name, department_id, subject_type)
             VALUES (UPPER($1), $2, $3, $4)
-            RETURNING code, name, subject_type AS type`,
+            RETURNING id, code, name, subject_type AS type`,
             [subject.code, subject.name, deptRow.rows[0].id, subject.type || 'theory']);
         return { ...rows[0], department: String(subject.department).toUpperCase() };
     });
@@ -907,7 +942,7 @@ async function resolveOrCreateClass({ branch, academicYear, semester, section })
     return db.withTransaction(async client => {
         const branchCode = String(branch || '').trim().toUpperCase();
         const semNum = parseSemesterNumber(semester);
-        let secStr = section ? String(section).trim().toUpperCase().replace(/^(?:SEC(?:TION)?[-_\s]*)/, '') : null;
+        let secStr = section ? String(section).trim().toUpperCase().replace(/^(?:SEC(?:TION)?[-_\s]*)/, '') : 'A';
         const yrStr = academicYear ? String(academicYear).trim() : null;
 
         // 1. Resolve department ID
@@ -926,101 +961,78 @@ async function resolveOrCreateClass({ branch, academicYear, semester, section })
             }
         }
 
-        // 2. Query existing classes for this department (prioritize classes that have timetable entries)
-        const classQuery = deptId
-            ? await client.query(`
-                SELECT c.id, c.code, c.semester, c.academic_year AS "academicYear", c.section,
-                       d.code AS department,
-                       (SELECT COUNT(*)::int FROM timetable WHERE class_id = c.id) AS entry_count
-                  FROM classes c
-                  JOIN departments d ON d.id = c.department_id
-                 WHERE c.department_id = $1
-                 ORDER BY (SELECT COUNT(*)::int FROM timetable WHERE class_id = c.id) DESC, c.id ASC
-            `, [deptId])
-            : await client.query(`
-                SELECT c.id, c.code, c.semester, c.academic_year AS "academicYear", c.section,
-                       d.code AS department,
-                       (SELECT COUNT(*)::int FROM timetable WHERE class_id = c.id) AS entry_count
-                  FROM classes c
-                  LEFT JOIN departments d ON d.id = c.department_id
-                 ORDER BY (SELECT COUNT(*)::int FROM timetable WHERE class_id = c.id) DESC, c.id ASC
-            `);
-
-        const allRows = classQuery.rows;
-
-        // Find match by numeric semester and section
-        let matched = allRows.find(c => {
-            const cSemNum = parseSemesterNumber(c.semester);
-            let cSec = c.section ? String(c.section).trim().toUpperCase().replace(/^(?:SEC(?:TION)?[-_\s]*)/, '') : null;
-            if (!cSec && c.code) {
-                const m = c.code.match(/[-_]([A-Za-z0-9])$/);
-                if (m) cSec = m[1].toUpperCase();
+        // 2. Authoritative exact scope check: (department_id, academic_year, semester, section)
+        if (deptId && semNum && secStr) {
+            const yrVariants = normalizeAcademicYearVariants(yrStr);
+            let exactQ;
+            if (yrVariants.length > 0) {
+                exactQ = await client.query(
+                    `SELECT id, code, semester, academic_year AS "academicYear", section 
+                       FROM classes 
+                      WHERE department_id = $1 
+                        AND semester = $2 
+                        AND UPPER(TRIM(section)) = UPPER(TRIM($3))
+                        AND (academic_year = ANY($4) OR academic_year IS NULL)
+                      ORDER BY CASE WHEN academic_year = ANY($4) THEN 0 ELSE 1 END, id ASC 
+                      LIMIT 1`,
+                    [deptId, semNum, secStr, yrVariants]
+                );
+            } else {
+                exactQ = await client.query(
+                    `SELECT id, code, semester, academic_year AS "academicYear", section 
+                       FROM classes 
+                      WHERE department_id = $1 
+                        AND semester = $2 
+                        AND UPPER(TRIM(section)) = UPPER(TRIM($3))
+                      ORDER BY id ASC 
+                      LIMIT 1`,
+                    [deptId, semNum, secStr]
+                );
             }
-            const semMatch = (semNum != null) ? (cSemNum === semNum) : true;
-            const secMatch = (secStr != null) ? (cSec === secStr) : true;
-            return semMatch && secMatch;
-        });
 
-        // Fallback: match by class code ending with section
-        if (!matched && secStr) {
-            matched = allRows.find(c => {
-                const upperCode = c.code.toUpperCase();
-                const codeSec = upperCode.endsWith(`-${secStr}`) || upperCode.endsWith(secStr);
-                const codeSem = semNum ? (upperCode.includes(`SEM${semNum}`) || upperCode.includes(`SEM-${semNum}`) || upperCode.includes(`${semNum}`)) : true;
-                return codeSec && codeSem;
-            });
+            if (exactQ.rows.length) {
+                const found = exactQ.rows[0];
+                if (!found.academicYear && yrStr) {
+                    await client.query('UPDATE classes SET academic_year = $1 WHERE id = $2', [yrStr, found.id]);
+                    found.academicYear = yrStr;
+                }
+                return { ...found, department: branchCode };
+            }
         }
 
-        // Fallback 2: match active class with timetable entries for this semester
-        if (!matched && semNum != null) {
-            matched = allRows.find(c => {
-                const cSemNum = parseSemesterNumber(c.semester);
-                return cSemNum === semNum && (parseInt(c.entry_count, 10) || 0) > 0;
-            });
+        // 3. Fallback: match by class code ending with section if no scope conflict
+        const generatedCode = `${branchCode}${semNum ? '-SEM' + semNum : ''}${secStr ? '-' + secStr : ''}` || 'CLASS-1';
+        const codeQ = await client.query(
+            `SELECT id, code, semester, academic_year AS "academicYear", section 
+               FROM classes 
+              WHERE UPPER(TRIM(code)) = UPPER(TRIM($1)) 
+                AND (department_id = $2 OR department_id IS NULL)
+              LIMIT 1`,
+            [generatedCode, deptId]
+        );
+        if (codeQ.rows.length) {
+            const found = codeQ.rows[0];
+            if ((!found.semester || found.semester === semNum) && (!found.section || found.section === secStr)) {
+                if (!found.academicYear && yrStr) {
+                    await client.query('UPDATE classes SET academic_year = $1 WHERE id = $2', [yrStr, found.id]);
+                    found.academicYear = yrStr;
+                }
+                return { ...found, department: branchCode };
+            }
         }
 
-        // If matched, backfill any missing semester/section/academic_year
-        if (matched) {
-            const updates = [];
-            const vals = [matched.id];
-            let idx = 2;
-            if (matched.semester == null && semNum != null) {
-                updates.push(`semester = $${idx++}`);
-                vals.push(semNum);
-                matched.semester = semNum;
-            }
-            if (!matched.section && secStr) {
-                updates.push(`section = $${idx++}`);
-                vals.push(secStr);
-                matched.section = secStr;
-            }
-            if (!matched.academicYear && yrStr) {
-                updates.push(`academic_year = $${idx++}`);
-                vals.push(yrStr);
-                matched.academicYear = yrStr;
-            }
-            if (updates.length > 0) {
-                await client.query(`UPDATE classes SET ${updates.join(', ')} WHERE id = $1`, vals);
-            }
-            return {
-                ...matched,
-                department: branchCode || matched.department
-            };
+        // 4. Create class only if genuinely non-existent
+        let finalCode = generatedCode;
+        const codeCheck = await client.query('SELECT id FROM classes WHERE UPPER(TRIM(code)) = UPPER(TRIM($1))', [finalCode]);
+        if (codeCheck.rows.length > 0) {
+            finalCode = `${branchCode || 'GEN'}-SEM${semNum || 1}-${secStr || 'A'}-${yrStr || 'AY'}`;
         }
-
-        // If not matched, generate class code and insert
-        const semClean = semNum ? `SEM${semNum}` : '';
-        const generatedCode = `${branchCode}${semClean ? '-' + semClean : ''}${secStr ? '-' + secStr : ''}` || 'CLASS-1';
 
         const ins = await client.query(`
             INSERT INTO classes (code, department_id, semester, academic_year, section)
             VALUES ($1, $2, $3, $4, $5)
-            ON CONFLICT (code) DO UPDATE SET
-                semester = COALESCE(EXCLUDED.semester, classes.semester),
-                academic_year = COALESCE(EXCLUDED.academic_year, classes.academic_year),
-                section = COALESCE(EXCLUDED.section, classes.section)
             RETURNING id, code, semester, academic_year AS "academicYear", section
-        `, [generatedCode, deptId, semNum, yrStr, secStr]);
+        `, [finalCode, deptId, semNum, yrStr, secStr]);
 
         return {
             ...ins.rows[0],
@@ -1116,7 +1128,7 @@ async function addFaculty(member) {
                                  max_weekly_periods, status)
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
             RETURNING id`,
-            [member.id, member.name, dept.rows[0].id, member.designation, member.email,
+            [member.id || member.code, member.name, dept.rows[0].id, member.designation, member.email,
              member.phone, member.maxWeeklyPeriods, member.status]);
 
         // A sign-in account, matching how the demo directory derives one per
@@ -1277,10 +1289,100 @@ async function activateFaculty(id, branchCode) {
     });
 }
 
-async function importStagedTimetable({ uploadRecord, stagedContract, resolvedMap, userId }) {
+async function importStagedTimetable(options) {
+    let uploadRecord;
+    let stagedContract;
+    let resolvedMap;
+    let userId;
+    let targetScope;
+
+    if (typeof options === 'string') {
+        const uploadId = options;
+        const uploadRes = await db.query('SELECT * FROM timetable_uploads WHERE upload_id = $1', [uploadId]);
+        if (!uploadRes.rows.length) {
+            const err = new Error(`Upload not found: ${uploadId}`);
+            err.code = 'NOT_FOUND';
+            throw err;
+        }
+        const row = uploadRes.rows[0];
+        uploadRecord = {
+            uploadId: row.upload_id,
+            departmentCode: row.department_code,
+            uploadType: row.upload_type,
+            originalFilename: row.original_filename
+        };
+        const stagingRes = await db.query('SELECT * FROM timetable_staging WHERE upload_id = $1', [uploadId]);
+        if (!stagingRes.rows.length) {
+            const err = new Error(`Staging record not found for upload: ${uploadId}`);
+            err.code = 'NOT_FOUND';
+            throw err;
+        }
+        stagedContract = stagingRes.rows[0].extracted_json;
+        const entityResolver = require('../core/entityResolver');
+        const resObj = await entityResolver.resolveContract(stagedContract, uploadRecord.departmentCode, stagingRes.rows[0].entity_mappings || {});
+        resolvedMap = resObj.resolvedMap;
+        targetScope = {
+            branch: uploadRecord.departmentCode,
+            academicYear: stagedContract.academic_year || stagedContract.academicYear,
+            semester: stagedContract.semester,
+            section: stagedContract.section,
+            className: stagedContract.class_name || stagedContract.className
+        };
+    } else {
+        uploadRecord = options.uploadRecord || {};
+        stagedContract = options.stagedContract || {};
+        resolvedMap = options.resolvedMap;
+        userId = options.userId;
+        targetScope = options.targetScope;
+
+        if (!resolvedMap || Object.keys(resolvedMap).length === 0) {
+            const targetDeptForRes = String(
+                (targetScope && (targetScope.branch || targetScope.departmentCode || targetScope.department)) ||
+                uploadRecord.departmentCode ||
+                uploadRecord.branchId ||
+                stagedContract.department_code ||
+                stagedContract.branch_code ||
+                ''
+            ).toUpperCase();
+            const entityResolver = require('../core/entityResolver');
+            const resObj = await entityResolver.resolveContract(stagedContract, targetDeptForRes, { useDatabase: true });
+            resolvedMap = resObj.resolvedMap;
+        }
+    }
+
     return db.withTransaction(async client => {
-        const className = stagedContract.class_name;
-        const targetDept = String(uploadRecord.departmentCode || '').toUpperCase();
+        // Authoritative Target Scope (HOD-selected target scope takes precedence over extracted metadata)
+        const targetDept = String(
+            (targetScope && (targetScope.branch || targetScope.departmentCode || targetScope.department)) ||
+            uploadRecord.departmentCode ||
+            uploadRecord.branchId ||
+            stagedContract.department_code ||
+            stagedContract.branch_code ||
+            ''
+        ).toUpperCase();
+
+        const targetYr = (targetScope && targetScope.academicYear)
+            ? String(targetScope.academicYear).trim()
+            : (uploadRecord.academicYear
+                ? String(uploadRecord.academicYear).trim()
+                : (stagedContract.academic_year ? String(stagedContract.academic_year).trim() : null));
+
+        const rawSem = (targetScope && targetScope.semester) || uploadRecord.semester || stagedContract.semester;
+        const stagedSemNum = parseSemesterNumber(rawSem);
+
+        let rawSec = (targetScope && targetScope.section) || uploadRecord.section || stagedContract.section;
+        let stagedSec = rawSec ? String(rawSec).trim().toUpperCase().replace(/^(?:SEC(?:TION)?[-_\s]*)/, '') : null;
+        
+        const rawClassName = (targetScope && (targetScope.className || targetScope.targetClass)) || uploadRecord.targetClass || stagedContract.class_name;
+        if (!stagedSec && rawClassName) {
+            const m = String(rawClassName).match(/[-_]([A-Za-z0-9])$/);
+            if (m) stagedSec = m[1].toUpperCase();
+        }
+        if (!stagedSec) stagedSec = 'A';
+
+        const className = (targetScope && (targetScope.className || targetScope.targetClass))
+            ? String(targetScope.className || targetScope.targetClass).trim()
+            : (stagedContract.class_name || (targetDept && stagedSemNum && stagedSec ? `${targetDept}-SEM${stagedSemNum}-${stagedSec}` : 'CLASS-A'));
 
         // 1. Lock staging row to ensure idempotency
         const stagingLock = await client.query(
@@ -1294,175 +1396,401 @@ async function importStagedTimetable({ uploadRecord, stagedContract, resolvedMap
             throw err;
         }
 
-        // 2. Resolve class ID (class must already exist or be auto-created)
+        // 2. Resolve class ID (reuse matching class for authoritative scope or auto-create if non-existent)
         const targetDeptId = targetDept ? await departmentId(client, targetDept).catch(() => null) : null;
-        const stagedSemNum = parseSemesterNumber(stagedContract.semester);
-        let stagedSec = stagedContract.section ? String(stagedContract.section).trim().toUpperCase().replace(/^(?:SEC(?:TION)?[-_\s]*)/, '') : null;
-        if (!stagedSec && className) {
-            const m = className.match(/[-_]([A-Za-z0-9])$/);
-            if (m) stagedSec = m[1].toUpperCase();
-        }
-        const stagedYr = stagedContract.academic_year ? String(stagedContract.academic_year).trim() : null;
 
-        let classId = resolvedMap.class && resolvedMap.class.id;
-        if (!classId) {
-            const clsRes = await client.query(
-                'SELECT id FROM classes WHERE UPPER(code) = UPPER($1)', [className]
-            );
-            if (clsRes.rows.length) {
-                classId = clsRes.rows[0].id;
-            } else if (targetDeptId && stagedSemNum && stagedSec) {
-                const existingCls = await client.query(
-                    'SELECT id FROM classes WHERE department_id = $1 AND semester = $2 AND (section = $3 OR UPPER(code) LIKE $4) LIMIT 1',
-                    [targetDeptId, stagedSemNum, stagedSec, `%-${stagedSec}`]
+        let classId = null;
+        const yrVariants = normalizeAcademicYearVariants(targetYr);
+
+        // 1. Authoritative search: find existing class matching (department_id, academic_year, semester, section)
+        if (targetDeptId && stagedSemNum && stagedSec) {
+            let scopeRes;
+            if (yrVariants.length > 0) {
+                scopeRes = await client.query(
+                    `SELECT id, code, semester, academic_year, section 
+                       FROM classes 
+                      WHERE department_id = $1 
+                        AND semester = $2 
+                        AND UPPER(TRIM(section)) = UPPER(TRIM($3))
+                        AND (academic_year = ANY($4) OR academic_year IS NULL)
+                      ORDER BY CASE WHEN academic_year = ANY($4) THEN 0 ELSE 1 END, id ASC 
+                      LIMIT 1`,
+                    [targetDeptId, stagedSemNum, stagedSec, yrVariants]
                 );
-                if (existingCls.rows.length) {
-                    classId = existingCls.rows[0].id;
+            } else {
+                scopeRes = await client.query(
+                    `SELECT id, code, semester, academic_year, section 
+                       FROM classes 
+                      WHERE department_id = $1 
+                        AND semester = $2 
+                        AND UPPER(TRIM(section)) = UPPER(TRIM($3))
+                      ORDER BY id ASC 
+                      LIMIT 1`,
+                    [targetDeptId, stagedSemNum, stagedSec]
+                );
+            }
+
+            if (scopeRes.rows.length) {
+                classId = scopeRes.rows[0].id;
+                // If academic_year was NULL on the existing class, backfill it
+                if (!scopeRes.rows[0].academic_year && targetYr) {
+                    await client.query(
+                        'UPDATE classes SET academic_year = $1 WHERE id = $2',
+                        [targetYr, classId]
+                    );
                 }
             }
-            if (!classId) {
-                const insCls = await client.query(
-                    `INSERT INTO classes (code, department_id, semester, academic_year, section)
-                     VALUES (UPPER($1), $2, $3, $4, $5)
-                     ON CONFLICT (code) DO UPDATE SET
-                         department_id = COALESCE(classes.department_id, EXCLUDED.department_id),
-                         semester = COALESCE(EXCLUDED.semester, classes.semester),
-                         academic_year = COALESCE(EXCLUDED.academic_year, classes.academic_year),
-                         section = COALESCE(EXCLUDED.section, classes.section)
-                     RETURNING id`,
-                    [className, targetDeptId, stagedSemNum, stagedYr, stagedSec]
-                );
-                classId = insCls.rows[0].id;
+        }
+
+        // 2. Fallback to exact code match ONLY if scope didn't match and code is provided without scope conflicts
+        if (!classId && className) {
+            const clsRes = await client.query(
+                'SELECT id, department_id, semester, academic_year, section FROM classes WHERE UPPER(TRIM(code)) = UPPER(TRIM($1)) LIMIT 1',
+                [className]
+            );
+            if (clsRes.rows.length) {
+                const existing = clsRes.rows[0];
+                if (!targetDeptId || !existing.department_id || existing.department_id === targetDeptId) {
+                    if ((!existing.semester || existing.semester === stagedSemNum) && (!existing.section || existing.section === stagedSec)) {
+                        classId = existing.id;
+                        if (!existing.academic_year && targetYr) {
+                            await client.query('UPDATE classes SET academic_year = $1 WHERE id = $2', [targetYr, classId]);
+                        }
+                    }
+                }
             }
         }
 
-        // Backfill / update class metadata from staged contract
-        await client.query(`
-            UPDATE classes
-               SET semester = COALESCE($2, semester),
-                   academic_year = COALESCE($3, academic_year),
-                   section = COALESCE($4, section),
-                   department_id = COALESCE($5, department_id)
-             WHERE id = $1
-        `, [classId, stagedSemNum, stagedYr, stagedSec, targetDeptId]);
+        // 3. Fallback to resolvedMap.class ONLY if NO targetScope is overriding it
+        if (!classId && !targetScope && resolvedMap && resolvedMap.class && resolvedMap.class.id) {
+            classId = resolvedMap.class.id;
+        }
 
-        // 3. Scoped replacement: delete prior entries for this class only
+        // 4. Create class only if genuinely non-existent
+        if (!classId) {
+            const autoCode = className || `${branchCode || 'GEN'}-SEM${stagedSemNum || 1}${stagedSec ? `-${stagedSec}` : ''}`;
+            let finalCode = autoCode;
+            const codeCheck = await client.query('SELECT id FROM classes WHERE UPPER(TRIM(code)) = UPPER(TRIM($1))', [finalCode]);
+            if (codeCheck.rows.length > 0) {
+                finalCode = `${branchCode || 'GEN'}-SEM${stagedSemNum || 1}-${stagedSec || 'A'}-${targetYr || 'AY'}`;
+            }
+
+            const insCls = await client.query(
+                `INSERT INTO classes (code, department_id, semester, academic_year, section)
+                 VALUES (UPPER($1), $2, $3, $4, $5)
+                 RETURNING id`,
+                [finalCode, targetDeptId, stagedSemNum, targetYr, stagedSec]
+            );
+            classId = insCls.rows[0].id;
+        }
+
+        // 3. Scoped replacement: delete prior entries for this class and any duplicate older class for the same dept/sem/sec
         await client.query('DELETE FROM timetable WHERE class_id = $1', [classId]);
+        if (targetDeptId && stagedSemNum && stagedSec) {
+            await client.query(`
+                DELETE FROM timetable 
+                 WHERE class_id IN (
+                     SELECT id FROM classes 
+                      WHERE department_id = $1 AND semester = $2 AND UPPER(TRIM(section)) = UPPER(TRIM($3)) AND id != $4
+                 )
+            `, [targetDeptId, stagedSemNum, stagedSec, classId]);
+        }
 
         // 4. Expand slots & check cross-class conflicts
         let totalInserted = 0;
         const entries = stagedContract.entries || [];
         const subjectLegends = Array.isArray(stagedContract.subject_legend) ? stagedContract.subject_legend : [];
         const facultyLegends = Array.isArray(stagedContract.faculty_legend) ? stagedContract.faculty_legend : [];
-        const { isScheduledActivity } = require('../core/entityResolver');
+        const {
+            isScheduledActivity,
+            getResolvedFacultyEntry,
+            getResolvedSubjectEntry,
+            getResolvedRoomEntry,
+            nameTokensMatch
+        } = require('../core/entityResolver');
 
+        const DAY_MAP = {
+            'MON': 'Monday', 'MONDAY': 'Monday',
+            'TUE': 'Tuesday', 'TUES': 'Tuesday', 'TUESDAY': 'Tuesday',
+            'WED': 'Wednesday', 'WEDNESDAY': 'Wednesday',
+            'THU': 'Thursday', 'THURSDAY': 'Thursday', 'THURS': 'Thursday', 'THURSDAY': 'Thursday',
+            'FRI': 'Friday', 'FRIDAY': 'Friday',
+            'SAT': 'Saturday', 'SATURDAY': 'Saturday',
+            'SUN': 'Sunday', 'SUNDAY': 'Sunday'
+        };
+
+        const slotMap = new Map();
         for (const entry of entries) {
             if (entry.is_free) continue;
 
-            // Resolve subject
-            const subjObj = resolvedMap.subjects && (resolvedMap.subjects[entry.subject_name] || resolvedMap.subjects[entry.subject_code]);
-            let subjectId = subjObj && subjObj.id;
-            if (!subjectId && entry.subject_name) {
-                const sRes = await client.query(
-                    'SELECT id FROM subjects WHERE UPPER(TRIM(name)) = UPPER(TRIM($1)) OR (code IS NOT NULL AND UPPER(TRIM(code)) = UPPER(TRIM($2)))',
-                    [entry.subject_name, entry.subject_code || '']
-                );
-                if (sRes.rows.length) {
-                    subjectId = sRes.rows[0].id;
-                } else if (entry.subject_name.includes('/')) {
-                    const firstPart = entry.subject_name.split('/')[0].trim();
-                    const sPartRes = await client.query(
-                        'SELECT id FROM subjects WHERE UPPER(TRIM(name)) = UPPER(TRIM($1)) OR (code IS NOT NULL AND UPPER(TRIM(code)) = UPPER(TRIM($1)))',
-                        [firstPart]
-                    );
-                    if (sPartRes.rows.length) {
-                        subjectId = sPartRes.rows[0].id;
-                    }
-                }
+            const isActivity = isScheduledActivity(entry.subject_name, entry.session_type);
+            const normalizedDay = DAY_MAP[String(entry.day || '').trim().toUpperCase()] || entry.day;
+            const startP = parseInt(entry.period_start || entry.period || 1, 10);
+            const endP = parseInt(entry.span_to || entry.period_end || entry.period || startP, 10);
 
-                if (!subjectId) {
-                    const leg = subjectLegends.find(l => l.name === entry.subject_name || l.short_name === entry.subject_name);
-                    const code = (leg && leg.code) || entry.subject_code || (entry.subject_name.replace(/[^A-Z0-9]/gi, '').slice(0, 10) || 'SUBJ').toUpperCase();
-                    const subjectType = isScheduledActivity(entry.subject_name, entry.session_type)
-                        ? 'activity'
-                        : (/lab|practical|workshop|drawing/i.test(entry.subject_name) ? 'lab' : 'theory');
-                    const insSubj = await client.query(
-                        `INSERT INTO subjects (code, name, department_id, subject_type)
-                         VALUES ($1, $2, $3, $4)
-                         ON CONFLICT (code) DO UPDATE SET name = EXCLUDED.name, department_id = COALESCE(subjects.department_id, EXCLUDED.department_id)
-                         RETURNING id`,
-                        [code, entry.subject_name, targetDeptId, subjectType]
-                    );
-                    subjectId = insSubj.rows[0].id;
-                }
-            }
+            // --- 1. Resolve & Validate Subject (Deterministic, upload-scoped) ---
+            let subjectId = null;
+            const subjObj = getResolvedSubjectEntry(
+                resolvedMap && resolvedMap.subjects,
+                entry.subject_name,
+                entry.subject_code,
+                subjectLegends
+            );
 
-            // Resolve faculty (nullable for activities)
-            let facultyId = null;
-            if (entry.faculty_name) {
-                const facObj = resolvedMap.faculty && resolvedMap.faculty[entry.faculty_name];
-                facultyId = facObj && facObj.id;
-                if (!facultyId) {
-                    const fRes = await client.query(
-                        'SELECT id FROM faculty WHERE UPPER(TRIM(name)) = UPPER(TRIM($1)) OR (code IS NOT NULL AND UPPER(TRIM(code)) = UPPER(TRIM($1)))',
-                        [entry.faculty_name]
+            if (isActivity) {
+                if (subjObj && subjObj.id) {
+                    subjectId = subjObj.id;
+                } else if (entry.subject_name) {
+                    const actRes = await client.query(
+                        `SELECT id FROM subjects WHERE UPPER(TRIM(name)) = UPPER(TRIM($1)) AND (department_id = $2 OR department_id IS NULL) LIMIT 1`,
+                        [entry.subject_name, targetDeptId]
                     );
-                    if (fRes.rows.length) {
-                        facultyId = fRes.rows[0].id;
-                    } else if (entry.faculty_name.includes('/')) {
-                        const firstFac = entry.faculty_name.split('/')[0].trim();
-                        const fFirstRes = await client.query(
-                            'SELECT id FROM faculty WHERE UPPER(TRIM(name)) = UPPER(TRIM($1)) OR (code IS NOT NULL AND UPPER(TRIM(code)) = UPPER(TRIM($1)))',
-                            [firstFac]
-                        );
-                        if (fFirstRes.rows.length) {
-                            facultyId = fFirstRes.rows[0].id;
-                        }
-                    }
-
-                    if (!facultyId && !isScheduledActivity(entry.subject_name, entry.session_type)) {
-                        const leg = facultyLegends.find(l => l.name === entry.faculty_name);
-                        const code = (leg && leg.code) || ((targetDept || 'FAC') + '_' + entry.faculty_name.replace(/[^A-Z0-9]/gi, '_').toUpperCase()).slice(0, 30);
-                        const insFac = await client.query(
-                            `INSERT INTO faculty (code, name, department_id, designation, status, max_weekly_periods)
-                             VALUES ($1, $2, $3, 'Faculty', 'active', 28)
-                             ON CONFLICT (code) DO UPDATE SET name = EXCLUDED.name, department_id = COALESCE(faculty.department_id, EXCLUDED.department_id)
+                    if (actRes.rows.length) {
+                        subjectId = actRes.rows[0].id;
+                    } else {
+                        const actCode = (entry.subject_code || entry.subject_name.replace(/[^A-Z0-9]/gi, '').slice(0, 10) || 'ACT').toUpperCase();
+                        const insAct = await client.query(
+                            `INSERT INTO subjects (code, name, department_id, subject_type)
+                             VALUES ($1, $2, $3, 'activity')
+                             ON CONFLICT (code) DO UPDATE SET name = EXCLUDED.name
                              RETURNING id`,
-                            [code, entry.faculty_name, targetDeptId]
+                            [actCode, entry.subject_name, targetDeptId]
                         );
-                        facultyId = insFac.rows[0].id;
+                        subjectId = insAct.rows[0].id;
                     }
                 }
+            } else {
+                if (!subjObj || !subjObj.id) {
+                    const err = new Error(`Import rejected: Subject "${entry.subject_name || entry.subject_code}" in slot ${normalizedDay} P${startP} was not resolved for this upload.`);
+                    err.code = 'UNRESOLVED_SUBJECT';
+                    err.status = 422;
+                    err.details = [{
+                        code: 'SUBJECT_NOT_RESOLVED',
+                        subjectName: entry.subject_name || entry.subject_code,
+                        day: normalizedDay,
+                        period: startP
+                    }];
+                    throw err;
+                }
+
+                const expectedSubjId = subjObj.id;
+                const subjDbRes = await client.query(
+                    'SELECT id, code, name, department_id FROM subjects WHERE id = $1',
+                    [expectedSubjId]
+                );
+                if (!subjDbRes.rows.length) {
+                    const err = new Error(`Import rejected: Resolved subject ID ${expectedSubjId} for "${entry.subject_name}" does not exist in the database.`);
+                    err.code = 'SUBJECT_NOT_FOUND_IN_DB';
+                    err.status = 422;
+                    throw err;
+                }
+                subjectId = subjDbRes.rows[0].id;
             }
 
-            // Resolve room (nullable)
+            // --- 2. Resolve & Validate Faculty (Deterministic, upload-scoped 5-point validation) ---
+            let facultyId = null;
+            if (entry.faculty_name && !isActivity) {
+                const facObj = getResolvedFacultyEntry(
+                    resolvedMap && resolvedMap.faculty,
+                    entry.faculty_name,
+                    facultyLegends
+                );
+
+                // Validation 1: Faculty was resolved for the current upload
+                if (!facObj || (!facObj.id && !facObj.isUnregistered)) {
+                    const err = new Error(`Import rejected: Faculty "${entry.faculty_name}" in slot ${normalizedDay} P${startP} was not resolved for this upload.`);
+                    err.code = 'UNRESOLVED_FACULTY';
+                    err.status = 422;
+                    err.details = [{
+                        code: 'FACULTY_NOT_RESOLVED',
+                        facultyName: entry.faculty_name,
+                        day: normalizedDay,
+                        period: startP
+                    }];
+                    throw err;
+                }
+
+                if (facObj.isUnregistered || !facObj.id) {
+                    facultyId = null;
+                } else {
+                    const expectedFacId = facObj.id;
+
+                    // Validation 2: The resolved faculty ID exists in PostgreSQL
+                    const facDbRes = await client.query(
+                        'SELECT id, code, name, department_id, status FROM faculty WHERE id = $1',
+                        [expectedFacId]
+                    );
+                    if (!facDbRes.rows.length) {
+                        const err = new Error(`Import rejected: Resolved faculty ID ${expectedFacId} for "${entry.faculty_name}" does not exist in the database.`);
+                        err.code = 'FACULTY_NOT_FOUND_IN_DB';
+                        err.status = 422;
+                        throw err;
+                    }
+                    const dbFac = facDbRes.rows[0];
+
+                    // Validation 3: The resolved faculty record belongs to the target branch/department
+                    if (targetDeptId && dbFac.department_id && dbFac.department_id !== targetDeptId) {
+                        const err = new Error(`Import rejected: Resolved faculty "${dbFac.name}" (ID ${expectedFacId}) belongs to department ID ${dbFac.department_id}, not target department ID ${targetDeptId}.`);
+                        err.code = 'FACULTY_DEPARTMENT_MISMATCH';
+                        err.status = 422;
+                        throw err;
+                    }
+
+                    // Validation 4: The resolved faculty name matches the staged/extracted faculty identity
+                    const nameMatches = (
+                        dbFac.name.toUpperCase() === entry.faculty_name.toUpperCase() ||
+                        nameTokensMatch(dbFac.name, entry.faculty_name) ||
+                        (facObj.name && nameTokensMatch(dbFac.name, facObj.name)) ||
+                        (dbFac.code && nameTokensMatch(dbFac.code, entry.faculty_name))
+                    );
+                    if (!nameMatches) {
+                        const err = new Error(`Import rejected: Resolved faculty name "${dbFac.name}" does not match extracted faculty "${entry.faculty_name}".`);
+                        err.code = 'FACULTY_IDENTITY_MISMATCH';
+                        err.status = 422;
+                        throw err;
+                    }
+
+                    // Validation 5: The faculty ID is the exact ID stored in the resolved map
+                    if (dbFac.id !== expectedFacId) {
+                        const err = new Error(`Import rejected: Database faculty ID ${dbFac.id} does not match resolved map ID ${expectedFacId}.`);
+                        err.code = 'FACULTY_ID_MISMATCH';
+                        err.status = 422;
+                        throw err;
+                    }
+
+                    facultyId = dbFac.id;
+                }
+            } else if (!isActivity && !entry.is_free) {
+                const err = new Error(`Import rejected: Faculty is required for non-activity subject "${entry.subject_name || entry.subject_code}" at ${normalizedDay} P${startP}. Please edit the entry before approving.`);
+                err.code = 'MISSING_FACULTY';
+                err.status = 422;
+                err.details = [{
+                    code: 'FACULTY_REQUIRED',
+                    subjectName: entry.subject_name || entry.subject_code,
+                    day: normalizedDay,
+                    period: startP
+                }];
+                throw err;
+            }
+
+            // --- 3. Resolve Room (Nullable) ---
             let roomId = null;
             if (entry.room_code) {
-                const rObj = resolvedMap.rooms && resolvedMap.rooms[entry.room_code];
-                roomId = rObj && rObj.id;
-                if (!roomId) {
+                const rObj = getResolvedRoomEntry(resolvedMap && resolvedMap.rooms, entry.room_code);
+                if (rObj && rObj.id) {
+                    roomId = rObj.id;
+                } else {
                     const rRes = await client.query('SELECT id FROM rooms WHERE UPPER(TRIM(code)) = UPPER(TRIM($1))', [entry.room_code]);
                     if (rRes.rows.length) roomId = rRes.rows[0].id;
                 }
             }
 
-            const DAY_MAP = {
-                'MON': 'Monday', 'MONDAY': 'Monday',
-                'TUE': 'Tuesday', 'TUES': 'Tuesday', 'TUESDAY': 'Tuesday',
-                'WED': 'Wednesday', 'WEDNESDAY': 'Wednesday',
-                'THU': 'Thursday', 'THUR': 'Thursday', 'THURS': 'Thursday', 'THURSDAY': 'Thursday',
-                'FRI': 'Friday', 'FRIDAY': 'Friday',
-                'SAT': 'Saturday', 'SATURDAY': 'Saturday',
-                'SUN': 'Sunday', 'SUNDAY': 'Sunday'
-            };
-            const normalizedDay = DAY_MAP[String(entry.day || '').trim().toUpperCase()] || entry.day;
-
-            const startP = entry.period;
-            const endP = entry.span_to || entry.period;
-
             for (let p = startP; p <= endP; p++) {
-                // Conflict check: faculty busy in another class
-                if (facultyId) {
+                const slotKey = `${normalizedDay}_P${p}`;
+                if (slotMap.has(slotKey)) {
+                    const existing = slotMap.get(slotKey);
+                    const isSameSession = (
+                        existing.subjectId === subjectId &&
+                        existing.facultyId === facultyId &&
+                        existing.roomId === roomId
+                    );
+                    if (isSameSession) {
+                        // Redundant span or cell definition for the exact same session - retain canonical slot
+                        continue;
+                    } else {
+                        // Conflicting slot assignment inside the same timetable upload
+                        const err = new Error(`Slot conflict: Class ${className} has conflicting assignments at ${normalizedDay} P${p}`);
+                        err.code = 'SLOT_CONFLICT';
+                        err.status = 409;
+                        err.details = [{
+                            code: 'CLASS_SLOT_CONFLICT',
+                            message: err.message,
+                            day: normalizedDay,
+                            period: p,
+                            className
+                        }];
+                        throw err;
+                    }
+                }
+
+                slotMap.set(slotKey, {
+                    day: normalizedDay,
+                    period: p,
+                    subjectId,
+                    facultyId,
+                    roomId,
+                    sessionType: entry.session_type || 'theory'
+                });
+            }
+        }
+
+        // Pass 2: Check cross-class conflicts against committed timetable rows and insert
+        for (const slot of slotMap.values()) {
+            const { day, period: p, subjectId, facultyId, roomId, sessionType } = slot;
+
+            // Conflict check: faculty busy in another class
+            if (facultyId) {
+                const facClash = await client.query(`
+                    SELECT t.id, c.code AS "className", f.name AS "facultyName", s.name AS "subjectName"
+                      FROM timetable t
+                      JOIN classes c ON c.id = t.class_id
+                      JOIN faculty f ON f.id = t.faculty_id
+                      JOIN subjects s ON s.id = t.subject_id
+                     WHERE t.day_of_week = $1 AND t.period = $2 AND t.faculty_id = $3 AND t.class_id <> $4
+                `, [day, p, facultyId, classId]);
+
+                if (facClash.rows.length) {
+                    const row = facClash.rows[0];
+                    const err = new Error(`Faculty ${row.facultyName} already teaches ${row.subjectName} (${row.className}) at ${day} P${p}`);
+                    err.code = 'SLOT_CONFLICT';
+                    err.status = 409;
+                    err.details = [{
+                        code: 'FACULTY_BUSY',
+                        message: err.message,
+                        day: day,
+                        period: p,
+                        faculty: row.facultyName,
+                        conflictingClass: row.className
+                    }];
+                    throw err;
+                }
+            }
+
+            // Conflict check: room busy in another class
+            if (roomId) {
+                const roomClash = await client.query(`
+                    SELECT t.id, c.code AS "className", r.code AS "roomCode"
+                      FROM timetable t
+                      JOIN classes c ON c.id = t.class_id
+                      JOIN rooms r ON r.id = t.room_id
+                     WHERE t.day_of_week = $1 AND t.period = $2 AND t.room_id = $3 AND t.class_id <> $4
+                `, [day, p, roomId, classId]);
+
+                if (roomClash.rows.length) {
+                    const row = roomClash.rows[0];
+                    const err = new Error(`Room ${row.roomCode} is already used by ${row.className} at ${day} P${p}`);
+                    err.code = 'SLOT_CONFLICT';
+                    err.status = 409;
+                    err.details = [{
+                        code: 'ROOM_BUSY',
+                        message: err.message,
+                        day: day,
+                        period: p,
+                        room: row.roomCode,
+                        conflictingClass: row.className
+                    }];
+                    throw err;
+                }
+            }
+
+            try {
+                await client.query(`
+                    INSERT INTO timetable (class_id, day_of_week, period, subject_id, faculty_id, room_id, session_type)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7)
+                `, [classId, day, p, subjectId, facultyId, roomId, sessionType]);
+                totalInserted++;
+            } catch (dbErr) {
+                if (dbErr.code === '23505' && dbErr.constraint === 'timetable_faculty_slot_unique') {
                     const facClash = await client.query(`
                         SELECT t.id, c.code AS "className", f.name AS "facultyName", s.name AS "subjectName"
                           FROM timetable t
@@ -1470,62 +1798,43 @@ async function importStagedTimetable({ uploadRecord, stagedContract, resolvedMap
                           JOIN faculty f ON f.id = t.faculty_id
                           JOIN subjects s ON s.id = t.subject_id
                          WHERE t.day_of_week = $1 AND t.period = $2 AND t.faculty_id = $3 AND t.class_id <> $4
-                    `, [normalizedDay, p, facultyId, classId]);
-
-                    if (facClash.rows.length) {
-                        const row = facClash.rows[0];
-                        const err = new Error(`Faculty ${row.facultyName} already teaches ${row.subjectName} (${row.className}) at ${normalizedDay} P${p}`);
-                        err.code = 'SLOT_CONFLICT';
-                        err.status = 409;
-                        err.details = [{
-                            code: 'FACULTY_BUSY',
-                            message: err.message,
-                            day: normalizedDay,
-                            period: p,
-                            faculty: row.facultyName,
-                            conflictingClass: row.className
-                        }];
-                        throw err;
-                    }
+                    `, [day, p, facultyId, classId]);
+                    const row = facClash.rows[0] || {};
+                    const facName = row.facultyName || 'Faculty';
+                    const conflictCls = row.className || 'another class';
+                    const subjName = row.subjectName || 'a subject';
+                    const err = new Error(`Faculty ${facName} already teaches ${subjName} (${conflictCls}) at ${day} P${p}`);
+                    err.code = 'SLOT_CONFLICT';
+                    err.status = 409;
+                    err.details = [{
+                        code: 'FACULTY_BUSY',
+                        message: err.message,
+                        day: day,
+                        period: p,
+                        faculty: facName,
+                        conflictingClass: conflictCls
+                    }];
+                    throw err;
                 }
-
-                // Conflict check: room busy in another class
-                if (roomId) {
-                    const roomClash = await client.query(`
-                        SELECT t.id, c.code AS "className", r.code AS "roomCode"
-                          FROM timetable t
-                          JOIN classes c ON c.id = t.class_id
-                          JOIN rooms r ON r.id = t.room_id
-                         WHERE t.day_of_week = $1 AND t.period = $2 AND t.room_id = $3 AND t.class_id <> $4
-                    `, [normalizedDay, p, roomId, classId]);
-
-                    if (roomClash.rows.length) {
-                        const row = roomClash.rows[0];
-                        const err = new Error(`Room ${row.roomCode} is already used by ${row.className} at ${normalizedDay} P${p}`);
-                        err.code = 'SLOT_CONFLICT';
-                        err.status = 409;
-                        err.details = [{
-                            code: 'ROOM_BUSY',
-                            message: err.message,
-                            day: normalizedDay,
-                            period: p,
-                            room: row.roomCode,
-                            conflictingClass: row.className
-                        }];
-                        throw err;
-                    }
-                }
-
-                await client.query(`
-                    INSERT INTO timetable (class_id, day_of_week, period, subject_id, faculty_id, room_id, session_type)
-                    VALUES ($1, $2, $3, $4, $5, $6, $7)
-                `, [classId, normalizedDay, p, subjectId, facultyId, roomId, entry.session_type || 'theory']);
-
-                totalInserted++;
+                throw dbErr;
             }
         }
 
-        return { importedCount: totalInserted, classId };
+        const clsFinalQ = await client.query('SELECT code FROM classes WHERE id = $1', [classId]);
+        const finalClassCode = (clsFinalQ.rows.length && clsFinalQ.rows[0].code) || className;
+
+        return {
+            importedCount: totalInserted,
+            classId,
+            scope: {
+                branch: targetDept,
+                academicYear: targetYr,
+                semester: stagedSemNum ? `SEM-${stagedSemNum}` : (rawSem || 'SEM-1'),
+                section: stagedSec,
+                className: finalClassCode,
+                classId
+            }
+        };
     });
 }
 
@@ -2323,7 +2632,7 @@ module.exports = {
     addClass, updateClass, deleteClass, resolveOrCreateClass, clearTimetable,
     addFaculty, getFaculty, updateFaculty, deactivateFaculty, activateFaculty, usernameFor,
     getInstanceBranch, updateInstanceBranch,
-    importStagedTimetable, parseSemesterNumber,
+    importStagedTimetable, parseSemesterNumber, normalizeAcademicYearVariants,
     saveFacultyPersonalTimetable, getFacultyPersonalTimetable, clearFacultyPersonalTimetable,
     createFacultyRequest, listFacultyRequests, getFacultyRequestById, updateFacultyRequestStatus,
     listFacultyAttendanceForDate, markFacultyAttendance, deleteFacultyAttendance, getAbsentFacultyForDate, getFacultyAttendanceHistory,

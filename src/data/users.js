@@ -478,6 +478,17 @@ function findByUsername(username) {
     return null;
 }
 
+function findById(id) {
+    if (id === null || id === undefined) return null;
+    const sid = String(id).trim();
+    if (!sid) return null;
+
+    const registered = registeredUsers.find(u => String(u.id) === sid);
+    if (registered) return toPublicUser(registered);
+
+    return null;
+}
+
 function list(branchCode = null) {
     const code = branchCode ? String(branchCode).trim().toUpperCase() : null;
 
@@ -711,6 +722,7 @@ function resetForTesting() {
 
 module.exports = {
     list,
+    findById,
     findByUsername,
     findHOSByBranch,
     authenticate,

@@ -6,3 +6,5 @@ uploads/
 tmp/
 .DS_Store
 coverage/
+backups/
+scratch/

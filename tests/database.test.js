@@ -10,20 +10,12 @@ const assert = require('assert');
 const http = require('http');
 const { check, checkAsync, counts } = require('./helpers');
 
-const CONNECTION = process.env.TEST_DATABASE_URL || process.env.DATABASE_URL || '';
+const { verifySafetyGuard } = require('./testDbGuard');
 
 console.log('TecSubstitution — database tests');
 
-if (!CONNECTION) {
-    console.log('\n[skip] No TEST_DATABASE_URL or DATABASE_URL set.');
-    console.log('       These tests need a scratch PostgreSQL database; skipping them.');
-    console.log('       The application runs without a database, so this is not a failure.');
-    console.log('\n✅ database: skipped (no connection string).');
-    process.exit(0);
-}
-
-// The modules below read config at require time, so the URL must be set first.
-process.env.DATABASE_URL = CONNECTION;
+const guardInfo = verifySafetyGuard();
+console.log(`[Safety Guard] Active test database: ${guardInfo.parsedTest.full}`);
 
 const db = require('../src/db/pool');
 const seeder = require('../src/db/seed');

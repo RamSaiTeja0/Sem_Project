@@ -89,4 +89,4 @@ async function close() {
     }
 }
 
-module.exports = { isConfigured, getPool, query, withTransaction, describeTarget, close };
+module.exports = { isConfigured, getPool, query, withTransaction, describeTarget, close, resetPool: close };

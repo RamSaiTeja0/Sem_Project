@@ -13,6 +13,9 @@
  * 9. Faculty My Timetable continues working 100% independently without regressions.
  */
 
+const { verifySafetyGuard } = require('./testDbGuard');
+verifySafetyGuard();
+
 const assert = require('assert');
 const http = require('http');
 const fs = require('fs');

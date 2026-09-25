@@ -27,6 +27,7 @@ function isNonFacultyActivity(subject, type) {
  */
 function validateExtractedContract(payload, uploadRecord = null, options = {}) {
     const errors = [];
+    const warnings = [];
     const conflicts = [];
     const missingReferences = [];
     let code = null;
@@ -36,6 +37,7 @@ function validateExtractedContract(payload, uploadRecord = null, options = {}) {
             ok: false,
             code: 'INVALID_JSON_STRUCTURE',
             errors: ['Extracted data must be a valid JSON object.'],
+            warnings,
             conflicts,
             missingReferences
         };
@@ -229,8 +231,7 @@ function validateExtractedContract(payload, uploadRecord = null, options = {}) {
 
         const isActivity = isNonFacultyActivity(subject, sessionType);
         if (!isActivity && !faculty && !isFacultyTimetable) {
-            errors.push(`Entry ${line}: faculty_name is required for non-activity class.`);
-            code = code || 'MISSING_FACULTY';
+            warnings.push(`Entry ${line}: faculty_name could not be determined for non-activity class "${subject || ''}" at ${normDay || ''} P${normPeriod || ''}. Please edit before import.`);
         }
 
         const room = entry.room_code ? String(entry.room_code).trim() : null;
@@ -349,6 +350,7 @@ function validateExtractedContract(payload, uploadRecord = null, options = {}) {
         ok,
         code: ok ? null : (code || 'VALIDATION_FAILED'),
         errors,
+        warnings,
         conflicts,
         missingReferences
     };

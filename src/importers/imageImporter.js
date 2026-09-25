@@ -228,6 +228,10 @@ async function parse(buffer, options = {}) {
                 fileSize: buffer.length,
                 uploaderUserId: options.session ? (options.session.userId || options.session.username) : null,
                 departmentCode: uploadContext.departmentCode,
+                academicYear: options.academicYear || (options.session && options.session.academicYear) || null,
+                semester: options.semester || (options.session && options.session.semester) || null,
+                section: options.section || null,
+                targetClass: options.defaultClass || options.targetClass || null,
                 uploadType: uploadContext.uploadType,
                 status: 'PROCESSING'
             });

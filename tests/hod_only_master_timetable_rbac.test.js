@@ -9,6 +9,9 @@
  * 5. Faculty My Timetable functionality remains unaffected.
  */
 
+const { verifySafetyGuard } = require('./testDbGuard');
+verifySafetyGuard();
+
 const assert = require('assert');
 const http = require('http');
 const { app } = require('../server');

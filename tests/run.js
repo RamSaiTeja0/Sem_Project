@@ -1,6 +1,7 @@
 /** Runs every test suite in order and reports a combined result. */
 const { spawnSync } = require('child_process');
 const path = require('path');
+const { verifySafetyGuard, initTestDb } = require('./testDbGuard');
 
 // Suites that specifically test against the legacy demo dataset fixtures
 const legacyDemoConfigs = {
@@ -47,6 +48,8 @@ const suites = [
     'hod_master_timetable_upload_flow.test.js',
     'config_and_session_persistence.test.js',
     'hod_schedule_and_sql_regression.test.js',
+    'target_scope_import_and_refresh.test.js',
+    'class_reuse_and_duplicate_constraint.test.js',
     'master_timetable_display.test.js',
     'hod_only_master_timetable_rbac.test.js',
     'timetable_workflow_complete.test.js',
@@ -60,6 +63,8 @@ const dbSuites = new Set([
     'database.test.js',
     'neon_persistence_verification.test.js',
     'hod_schedule_and_sql_regression.test.js',
+    'target_scope_import_and_refresh.test.js',
+    'class_reuse_and_duplicate_constraint.test.js',
     'master_timetable_display.test.js',
     'hod_only_master_timetable_rbac.test.js',
     'timetable_workflow_complete.test.js',
@@ -67,26 +72,47 @@ const dbSuites = new Set([
     'faculty_timetable_extraction.test.js'
 ]);
 
-suites.forEach(suite => {
+async function main() {
+    // Run safety guard check
+    console.log('[Test Suite Safety Guard] Verifying isolated test database configuration...');
+    const guardInfo = verifySafetyGuard();
+    console.log(`[Test Suite Safety Guard] ✅ Verified. Isolated Test DB: ${guardInfo.parsedTest.full}`);
+
+    suites.forEach(suite => {
+        console.log('\n' + '='.repeat(64));
+        console.log('RUN  ' + suite);
+        console.log('='.repeat(64));
+        const envOverrides = legacyDemoConfigs[suite] || {};
+        const env = { ...process.env, ...envOverrides };
+        if (dbSuites.has(suite)) {
+            env.DATABASE_URL = guardInfo.testDatabaseUrl;
+            env.TEST_DATABASE_URL = guardInfo.testDatabaseUrl;
+            env.APP_DATABASE_URL = guardInfo.appProdUrl;
+            env.NODE_ENV = 'test';
+        } else {
+            env.DATABASE_URL = '';
+            env.TEST_DATABASE_URL = '';
+            env.APP_DATABASE_URL = guardInfo.appProdUrl;
+            env.NODE_ENV = 'test';
+        }
+        const result = spawnSync(process.execPath, [path.join(__dirname, suite)], { stdio: 'inherit', env });
+        if (result.status !== 0) {
+            failures++;
+            failedSuites.push(suite);
+        }
+    });
+
     console.log('\n' + '='.repeat(64));
-    console.log('RUN  ' + suite);
-    console.log('='.repeat(64));
-    const envOverrides = legacyDemoConfigs[suite] || {};
-    const env = { ...process.env, ...envOverrides };
-    if (!dbSuites.has(suite)) {
-        env.DATABASE_URL = '';
+    if (failures === 0) {
+        console.log('ALL SUITES PASSED');
+    } else {
+        console.error(`${failures} SUITE(S) FAILED: ${failedSuites.join(', ')}`);
+        process.exit(1);
     }
-    const result = spawnSync(process.execPath, [path.join(__dirname, suite)], { stdio: 'inherit', env });
-    if (result.status !== 0) {
-        failures++;
-        failedSuites.push(suite);
-    }
+}
+
+main().catch(err => {
+    console.error('Test runner fatal error:', err);
+    process.exit(1);
 });
 
-console.log('\n' + '='.repeat(64));
-if (failures === 0) {
-    console.log('ALL SUITES PASSED');
-} else {
-    console.error(`${failures} SUITE(S) FAILED: ${failedSuites.join(', ')}`);
-    process.exit(1);
-}

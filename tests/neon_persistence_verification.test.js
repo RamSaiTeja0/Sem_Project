@@ -16,6 +16,9 @@
  * Simulates an application restart by clearing in-memory state, re-invoking
  * store.initFromDatabase(), and verifying data persistence.
  */
+const { verifySafetyGuard } = require('./testDbGuard');
+verifySafetyGuard();
+
 const assert = require('assert');
 const config = require('../src/config');
 const db = require('../src/db/pool');
@@ -28,24 +31,10 @@ const attendance = require('../src/data/attendance');
 const invigilation = require('../src/data/invigilation');
 const substitutions = require('../src/data/substitutions');
 
-const CONNECTION = process.env.TEST_DATABASE_URL || process.env.DATABASE_URL || config.databaseUrl || '';
-
 async function run() {
     console.log('================================================================');
     console.log('TecSubstitution — Neon Database Persistence & Restart Test');
     console.log('================================================================\n');
-
-    if (!CONNECTION || !db.isConfigured()) {
-        console.log('[INFO] DATABASE_URL (or TEST_DATABASE_URL) is NOT set in environment.');
-        console.log('       Live Neon PostgreSQL persistence test was skipped cleanly.');
-        console.log('       Repository interfaces and schema compatibility verified.\n');
-        assert.strictEqual(typeof repository.createFacultySubstitution, 'function');
-        assert.strictEqual(typeof repository.saveUser, 'function');
-        assert.strictEqual(typeof repository.loadAllUsers, 'function');
-        assert.strictEqual(typeof repository.loadAllDepartments, 'function');
-        console.log('✅ Schema and repository contract verification passed.');
-        return;
-    }
 
     console.log(`Connecting to Neon target: ${db.describeTarget()}`);
     await seeder.migrate();
