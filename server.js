@@ -62,15 +62,18 @@ app.get(['/register', '/register.html'], (req, res) => {
 // page rather than being served index.html by the static middleware.
 app.use(express.static(path.join(__dirname, 'public'), { index: false }));
 
-// Health check, handy for deployment probes.
+// Health check, handy for deployment probes and browser verification.
 app.get('/api/health', (req, res) => {
     res.json({
         status: 'ok',
         service: 'tecsubstitution',
+        version: '1.0.0',
+        pid: process.pid,
         port: app.get('activePort') || config.port,
         env: config.env,
         authRequired: config.authRequired,
         authenticated: Boolean(req.session),
+        user: req.session ? { username: req.session.username, role: req.session.role, department: req.session.department } : null,
         storage: store.usingDatabase ? 'postgres' : 'in-memory'
     });
 });

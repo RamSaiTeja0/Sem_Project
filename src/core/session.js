@@ -39,9 +39,13 @@ function create(user) {
         id: user.id,
         username: user.username,
         name: user.name,
+        phone: user.phone || null,
         role: user.role,
-        department: user.department,
-        facultyName: user.facultyName || null,
+        department: user.department || '',
+        branchName: user.branchName || user.department || '',
+        subjects: Array.isArray(user.subjects) ? user.subjects : [],
+        facultyName: user.facultyName || (user.role === 'faculty' ? user.name : null),
+        facultyId: user.facultyId || null,
         exp: Date.now() + config.sessionHours * 3600 * 1000
     };
     const payload = b64url(JSON.stringify(body));
@@ -93,11 +97,20 @@ function middleware(req, res, next) {
     if (sessionPayload) {
         const users = require('../data/users');
         const userExists = users.findByUsername(sessionPayload.username) || (sessionPayload.id && users.findById(sessionPayload.id));
-        if (userExists) {
-            req.session = sessionPayload;
-        } else {
+        if (userExists && userExists.status === 'inactive') {
             req.session = null;
             res.setHeader('Set-Cookie', `${COOKIE_NAME}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`);
+        } else {
+            if (userExists) {
+                if (userExists.name) sessionPayload.name = userExists.name;
+                if (userExists.phone !== undefined) sessionPayload.phone = userExists.phone;
+                if (userExists.department) sessionPayload.department = userExists.department;
+                if (userExists.branchName) sessionPayload.branchName = userExists.branchName;
+                if (Array.isArray(userExists.subjects) && userExists.subjects.length) sessionPayload.subjects = userExists.subjects;
+                if (userExists.facultyId) sessionPayload.facultyId = userExists.facultyId;
+                if (userExists.facultyName) sessionPayload.facultyName = userExists.facultyName;
+            }
+            req.session = sessionPayload;
         }
     } else {
         req.session = null;

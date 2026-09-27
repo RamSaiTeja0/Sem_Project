@@ -13,6 +13,8 @@ const express = require('express');
 const router = express.Router();
 
 const config = require('../config');
+const db = require('../db/pool');
+const repository = require('../db/repository');
 const users = require('../data/users');
 const { getBranch, getRegisteredBranchCodes } = require('../data/departments');
 const facultyRequestsRouter = require('./facultyRequests');
@@ -27,10 +29,10 @@ function publicUser(session) {
         name: session.name,
         phone: session.phone || null,
         role: session.role,
-        department: session.department,
-        branchName: session.branchName || session.department,
+        department: session.department || '',
+        branchName: session.branchName || session.department || '',
         subjects: Array.isArray(session.subjects) ? session.subjects : [],
-        facultyName: session.facultyName || null,
+        facultyName: session.facultyName || (session.role === 'faculty' ? session.name : null),
         facultyId: session.facultyId || null
     };
 }
@@ -91,8 +93,14 @@ router.get('/branches', (req, res) => {
     }
 });
 
-router.get('/accounts', (req, res) => {
+router.get('/accounts', async (req, res) => {
     const branchCode = req.session ? req.session.department : (req.query.branch || null);
+    if (db.isConfigured()) {
+        try {
+            const allUsers = await repository.loadAllUsers();
+            users.syncFromDatabase(allUsers);
+        } catch (_) {}
+    }
     const hosUser = users.findHOSByBranch(branchCode);
     res.json({
         note: 'Account directory for the branch.',
@@ -129,7 +137,7 @@ router.post('/register', async (req, res) => {
     }
 });
 
-router.post('/login', (req, res) => {
+router.post('/login', async (req, res) => {
     const { username, password } = req.body || {};
 
     if (!username || !password) {
@@ -139,16 +147,20 @@ router.post('/login', (req, res) => {
     }
 
     try {
-        const user = users.authenticate(username, password);
+        const normUser = String(username).trim().toLowerCase();
+        const user = await users.authenticateAsync(username, password);
         if (!user) {
+            console.log(`[AUTH-DIAGNOSTIC] PID:${process.pid} POST /api/auth/login: user="${normUser}", authResult=FAILED (Invalid Credentials), status=401`);
             return res.status(401).json({
                 error: 'Incorrect username or password.', code: 'INVALID_CREDENTIALS'
             });
         }
 
+        console.log(`[AUTH-DIAGNOSTIC] PID:${process.pid} POST /api/auth/login: user="${normUser}", role="${user.role}", dept="${user.department}", authResult=SUCCESS, status=200`);
         res.startSession(user);
         res.json({ authenticated: true, user: publicUser(user) });
     } catch (err) {
+        console.log(`[AUTH-DIAGNOSTIC] PID:${process.pid} POST /api/auth/login: user="${String(username).trim().toLowerCase()}", authResult=ERROR: ${err.message}, status=${err.status || 401}`);
         return res.status(err.status || 401).json({
             error: err.message,
             code: err.code || 'INVALID_CREDENTIALS'
@@ -156,11 +168,11 @@ router.post('/login', (req, res) => {
     }
 });
 
-router.get('/profile', (req, res) => {
+router.get('/profile', async (req, res) => {
     if (!req.session) {
         return res.status(401).json({ error: 'Sign in to access your profile.', code: 'UNAUTHENTICATED' });
     }
-    const profile = users.getProfile(req.session.username);
+    const profile = await users.findByUsernameAsync(req.session.username);
     res.json({ profile: publicUser(profile || req.session) });
 });
 
@@ -173,6 +185,7 @@ router.put('/profile', async (req, res) => {
         if (updated.phone) req.session.phone = updated.phone;
         if (updated.subjects) req.session.subjects = updated.subjects;
         if (updated.name) req.session.name = updated.name;
+        res.startSession(updated);
         res.json({ profile: publicUser(updated) });
     } catch (err) {
         res.status(err.status || 400).json({ error: err.message, code: err.code || 'PROFILE_UPDATE_FAILED' });

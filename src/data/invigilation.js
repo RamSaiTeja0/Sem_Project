@@ -118,11 +118,101 @@ function findFaculty(needle) {
     if (!needle) return null;
     const str = String(needle).trim().toUpperCase();
     const roster = store.engine ? store.engine.getFaculty() : [];
-    return roster.find(f =>
+    const direct = roster.find(f =>
         (f.id && String(f.id).toUpperCase() === str) ||
         (f.code && String(f.code).toUpperCase() === str) ||
         (f.name && f.name.toUpperCase() === str)
-    ) || null;
+    );
+    if (direct) return direct;
+
+    try {
+        const users = require('./users');
+        const u = (typeof users.findById === 'function' ? users.findById(needle) : null) ||
+                  (typeof users.findByUsername === 'function' ? users.findByUsername(needle) : null);
+        if (u) {
+            const fac = roster.find(f =>
+                (u.facultyId && f.id && String(f.id).toUpperCase() === String(u.facultyId).toUpperCase()) ||
+                (u.facultyName && f.name && f.name.toUpperCase() === u.facultyName.toUpperCase()) ||
+                (u.name && f.name && f.name.toUpperCase() === u.name.toUpperCase())
+            );
+            if (fac) return fac;
+            return {
+                id: u.facultyId || u.id,
+                name: u.facultyName || u.name,
+                code: u.username,
+                department: u.department,
+                status: u.status || 'active'
+            };
+        }
+    } catch (_) {}
+
+    try {
+        const { nameTokensMatch } = require('../core/entityResolver');
+        const matched = roster.find(f => nameTokensMatch(f.name, str) || (f.code && nameTokensMatch(String(f.code), str)));
+        if (matched) return matched;
+    } catch (_) {}
+    return null;
+}
+
+/**
+ * Check if a faculty member has an actual linked user login account.
+ */
+async function hasLinkedUserAccount(faculty) {
+    if (!faculty) return false;
+    const users = require('./users');
+    const db = require('../db/pool');
+    const store = require('./store');
+    const repository = require('../db/repository');
+
+    let dbFacId = null;
+    if (db.isConfigured() && store.usingDatabase) {
+        try {
+            dbFacId = await repository.resolveFacultyDbId(null, faculty.id || faculty.code, faculty.name);
+            const checkConditions = [];
+            const checkParams = [];
+
+            if (dbFacId) {
+                checkParams.push(dbFacId);
+                checkConditions.push(`faculty_id = $${checkParams.length}`);
+            }
+            if (faculty.code) {
+                checkParams.push(String(faculty.code).trim().toLowerCase());
+                checkConditions.push(`LOWER(username) = $${checkParams.length}`);
+            }
+            if (faculty.name) {
+                checkParams.push(String(faculty.name).trim().toLowerCase());
+                checkConditions.push(`LOWER(name) = $${checkParams.length}`);
+            }
+
+            if (checkConditions.length > 0) {
+                const { rows } = await db.query(
+                    `SELECT 1 FROM users WHERE role = 'faculty' AND (${checkConditions.join(' OR ')}) LIMIT 1`,
+                    checkParams
+                );
+                if (rows.length > 0) return true;
+            }
+        } catch (_) {}
+    }
+
+    const registered = (typeof users.list === 'function' ? users.list() : []) || [];
+    const targetFacIdStr = faculty.id != null ? String(faculty.id).trim().toLowerCase() : '';
+    const targetFacCodeStr = faculty.code != null ? String(faculty.code).trim().toLowerCase() : '';
+    const targetFacNameStr = faculty.name != null ? String(faculty.name).trim().toLowerCase() : '';
+    const dbFacIdStr = dbFacId != null ? String(dbFacId).trim().toLowerCase() : '';
+
+    return registered.some(u =>
+        u.role === 'faculty' && (
+            (targetFacIdStr && u.facultyId != null && String(u.facultyId).trim().toLowerCase() === targetFacIdStr) ||
+            (targetFacCodeStr && u.facultyId != null && String(u.facultyId).trim().toLowerCase() === targetFacCodeStr) ||
+            (targetFacCodeStr && u.username && String(u.username).trim().toLowerCase() === targetFacCodeStr) ||
+            (u.facultyCode && targetFacCodeStr && String(u.facultyCode).trim().toLowerCase() === targetFacCodeStr) ||
+            (u.facultyCode && targetFacIdStr && String(u.facultyCode).trim().toLowerCase() === targetFacIdStr) ||
+            (dbFacIdStr && u.facultyId != null && String(u.facultyId).trim().toLowerCase() === dbFacIdStr) ||
+            (targetFacNameStr && u.name && String(u.name).trim().toLowerCase() === targetFacNameStr) ||
+            (targetFacNameStr && u.facultyName && String(u.facultyName).trim().toLowerCase() === targetFacNameStr) ||
+            (/^\d+$/.test(targetFacIdStr) && u.facultyId != null && parseInt(u.facultyId, 10) === parseInt(targetFacIdStr, 10))
+        )
+    );
 }
 
 /**
@@ -155,14 +245,11 @@ async function checkDuplicateInvigilation(faculty, dateStr, period) {
 
     if (db.isConfigured() && store.usingDatabase) {
         let dbFacultyId = faculty.id;
-        if (isNaN(parseInt(dbFacultyId, 10))) {
-            try {
-                const { rows } = await db.query(
-                    'SELECT id FROM faculty WHERE UPPER(name) = UPPER($1) OR UPPER(code) = UPPER($1)',
-                    [faculty.name]
-                );
-                if (rows.length > 0) dbFacultyId = rows[0].id;
-            } catch (_) {}
+        try {
+            dbFacultyId = await repository.resolveFacultyDbId(null, faculty.id, faculty.name);
+        } catch (_) {}
+        if (dbFacultyId && !isNaN(parseInt(dbFacultyId, 10))) {
+            dbFacultyId = parseInt(dbFacultyId, 10);
         }
         const active = await repository.listActiveInvigilation({ examDate: dateStr, period: period, facultyId: dbFacultyId });
         return active.length > 0;
@@ -221,6 +308,13 @@ async function createDirectAssignment({ facultyIdentifier, date, periods, notes,
         throw err;
     }
 
+    const hasAccount = await hasLinkedUserAccount(faculty);
+    if (!hasAccount) {
+        const err = new Error(`Cannot assign exam invigilation to faculty "${faculty.name}". Faculty does not have a linked user account. Please create an account in Faculty Management first.`);
+        err.status = 400; err.code = 'FACULTY_ACCOUNT_REQUIRED';
+        throw err;
+    }
+
     const facultyBranch = String(faculty.department || '').trim().toUpperCase();
     if (facultyBranch && facultyBranch !== hosBranch) {
         const err = new Error(`Cross-branch invigilation assignment is forbidden. Faculty belongs to ${facultyBranch}, but your branch is ${hosBranch}.`);
@@ -266,14 +360,33 @@ async function createDirectAssignment({ facultyIdentifier, date, periods, notes,
     // Database mode
     if (db.isConfigured() && store.usingDatabase) {
         let dbFacultyId = faculty.id;
-        if (isNaN(parseInt(dbFacultyId, 10))) {
+        try {
+            dbFacultyId = await repository.resolveFacultyDbId(null, facultyIdentifier || faculty.id, faculty.name);
+        } catch (_) {}
+
+        if (!dbFacultyId || isNaN(parseInt(dbFacultyId, 10))) {
             try {
-                const { rows } = await db.query(
-                    'SELECT id FROM faculty WHERE UPPER(name) = UPPER($1) OR UPPER(code) = UPPER($1)',
-                    [faculty.name]
-                );
-                if (rows.length > 0) dbFacultyId = rows[0].id;
+                dbFacultyId = await repository.resolveFacultyDbId(null, faculty.id, faculty.name);
             } catch (_) {}
+        }
+
+        if (!dbFacultyId || isNaN(parseInt(dbFacultyId, 10))) {
+            try {
+                dbFacultyId = await repository.ensureFacultyDbRecord(null, {
+                    id: faculty.id,
+                    name: faculty.name,
+                    department: facultyBranch || hosBranch,
+                    status: faculty.status || 'active'
+                });
+            } catch (_) {}
+        }
+
+        dbFacultyId = parseInt(dbFacultyId, 10);
+        if (isNaN(dbFacultyId)) {
+            const err = new Error(`Unable to resolve database faculty ID for "${faculty.name}".`);
+            err.status = 500;
+            err.code = 'FACULTY_ID_RESOLUTION_FAILED';
+            throw err;
         }
 
         for (const p of periodList) {
@@ -289,7 +402,7 @@ async function createDirectAssignment({ facultyIdentifier, date, periods, notes,
             });
             createdAssignments.push({
                 id: rec.id,
-                facultyId: faculty.id,
+                facultyId: dbFacultyId,
                 facultyName: faculty.name,
                 facultyCode: faculty.code || null,
                 branchCode: facultyBranch || hosBranch,
@@ -357,11 +470,16 @@ async function submitInvigilationRequest({ date, periods, reason, sessionUser })
 
     // Identify the authenticated faculty member
     const facultyIdentifier = sessionUser.facultyId || sessionUser.facultyName || sessionUser.name || sessionUser.username;
-    const faculty = findFaculty(facultyIdentifier);
+    let faculty = findFaculty(facultyIdentifier);
     if (!faculty) {
-        const err = new Error(`Your faculty profile could not be located in the faculty roster.`);
-        err.status = 404; err.code = 'NOT_FOUND';
-        throw err;
+        const facName = sessionUser.facultyName || sessionUser.name || sessionUser.username;
+        const facDept = sessionUser.department || 'GENERAL';
+        faculty = {
+            id: sessionUser.facultyId || `fac_${sessionUser.id || Date.now()}`,
+            name: facName,
+            department: facDept,
+            status: sessionUser.status || 'active'
+        };
     }
 
     if (faculty.status === 'inactive') {
@@ -370,7 +488,7 @@ async function submitInvigilationRequest({ date, periods, reason, sessionUser })
         throw err;
     }
 
-    const facultyBranch = String(faculty.department || sessionUser.department || '').trim().toUpperCase();
+    const facultyBranch = String(sessionUser.department || faculty.department || '').trim().toUpperCase();
 
     // Early conflict checking for transparent feedback to faculty
     for (const p of periodList) {
@@ -405,14 +523,19 @@ async function submitInvigilationRequest({ date, periods, reason, sessionUser })
 
     // Database mode
     if (db.isConfigured() && store.usingDatabase) {
-        let dbFacultyId = faculty.id;
-        if (isNaN(parseInt(dbFacultyId, 10))) {
+        let dbFacultyId = sessionUser.facultyId || faculty.id;
+        try {
+            dbFacultyId = await repository.resolveFacultyDbId(null, dbFacultyId, faculty.name || sessionUser.name);
+        } catch (_) {}
+
+        if (!dbFacultyId) {
             try {
-                const { rows } = await db.query(
-                    'SELECT id FROM faculty WHERE UPPER(name) = UPPER($1) OR UPPER(code) = UPPER($1)',
-                    [faculty.name]
-                );
-                if (rows.length > 0) dbFacultyId = rows[0].id;
+                dbFacultyId = await repository.ensureFacultyDbRecord(null, {
+                    id: sessionUser.facultyId || faculty.id,
+                    name: faculty.name || sessionUser.name,
+                    department: facultyBranch,
+                    status: 'active'
+                });
             } catch (_) {}
         }
 
@@ -426,8 +549,8 @@ async function submitInvigilationRequest({ date, periods, reason, sessionUser })
 
         return {
             id: rec.id,
-            facultyId: faculty.id,
-            facultyName: faculty.name,
+            facultyId: dbFacultyId,
+            facultyName: faculty.name || sessionUser.name,
             facultyCode: faculty.code || null,
             branchCode: facultyBranch,
             examDate: parsedDate.dateStr,
@@ -542,10 +665,26 @@ async function approveRequest(requestId, sessionUser) {
         throw err;
     }
 
-    if (String(request.branchCode).toUpperCase() !== hosBranch) {
-        const err = new Error(`Cross-branch request review is forbidden. Request belongs to ${request.branchCode}, but your branch is ${hosBranch}.`);
-        err.status = 403; err.code = 'FORBIDDEN';
-        throw err;
+    const reqBranch = String(request.branchCode || '').toUpperCase();
+    if (reqBranch !== hosBranch) {
+        const isFacultyInHosBranch = db.isConfigured() && store.usingDatabase
+            ? await (async () => {
+                const facId = request.facultyId;
+                const { rows } = await db.query(`
+                    SELECT 1 FROM users u
+                    JOIN departments ud ON u.department_id = ud.id
+                    JOIN faculty f ON (u.faculty_id = f.id OR UPPER(u.username) = UPPER(f.code))
+                    WHERE f.id = $1 AND UPPER(ud.code) = UPPER($2)
+                `, [facId, hosBranch]);
+                return rows.length > 0;
+            })()
+            : false;
+
+        if (!isFacultyInHosBranch) {
+            const err = new Error(`Cross-branch request review is forbidden. Request belongs to ${request.branchCode}, but your branch is ${hosBranch}.`);
+            err.status = 403; err.code = 'FORBIDDEN';
+            throw err;
+        }
     }
 
     if (request.status === 'APPROVED') {
@@ -560,11 +699,14 @@ async function approveRequest(requestId, sessionUser) {
         throw err;
     }
 
-    const faculty = findFaculty(request.facultyId || request.facultyName);
+    let faculty = findFaculty(request.facultyId || request.facultyName);
     if (!faculty) {
-        const err = new Error(`Associated faculty record could not be found.`);
-        err.status = 404; err.code = 'FACULTY_NOT_FOUND';
-        throw err;
+        faculty = {
+            id: request.facultyId,
+            name: request.facultyName || 'Faculty',
+            department: hosBranch,
+            status: 'active'
+        };
     }
 
     const dateStr = request.examDate instanceof Date ? request.examDate.toISOString().slice(0, 10) : String(request.examDate);
@@ -606,21 +748,34 @@ async function approveRequest(requestId, sessionUser) {
 
     // Database mode
     if (db.isConfigured() && store.usingDatabase) {
-        let dbFacultyId = faculty.id;
-        if (isNaN(parseInt(dbFacultyId, 10))) {
+        let dbFacultyId = request.facultyId || faculty.id;
+        try {
+            dbFacultyId = await repository.resolveFacultyDbId(null, request.facultyId || faculty.id, faculty.name || request.facultyName);
+        } catch (_) {}
+
+        if (!dbFacultyId || isNaN(parseInt(dbFacultyId, 10))) {
             try {
-                const { rows } = await db.query(
-                    'SELECT id FROM faculty WHERE UPPER(name) = UPPER($1) OR UPPER(code) = UPPER($1)',
-                    [faculty.name]
-                );
-                if (rows.length > 0) dbFacultyId = rows[0].id;
+                dbFacultyId = await repository.ensureFacultyDbRecord(null, {
+                    id: request.facultyId || faculty.id,
+                    name: faculty.name || request.facultyName,
+                    department: reqBranch || hosBranch,
+                    status: faculty.status || 'active'
+                });
             } catch (_) {}
+        }
+
+        dbFacultyId = parseInt(dbFacultyId, 10);
+        if (isNaN(dbFacultyId)) {
+            const err = new Error(`Unable to resolve database faculty ID for "${faculty.name || request.facultyName}".`);
+            err.status = 500;
+            err.code = 'FACULTY_ID_RESOLUTION_FAILED';
+            throw err;
         }
 
         for (const p of periods) {
             const rec = await repository.createActiveInvigilation({
                 facultyId: dbFacultyId,
-                branchCode: request.branchCode,
+                branchCode: hosBranch,
                 examDate: parsedDate.dateStr,
                 period: p,
                 source: 'REQUEST',
@@ -722,10 +877,26 @@ async function rejectRequest(requestId, rejectionReason = null, sessionUser) {
         throw err;
     }
 
-    if (String(request.branchCode).toUpperCase() !== hosBranch) {
-        const err = new Error(`Cross-branch request review is forbidden. Request belongs to ${request.branchCode}, but your branch is ${hosBranch}.`);
-        err.status = 403; err.code = 'FORBIDDEN';
-        throw err;
+    const reqBranch = String(request.branchCode || '').toUpperCase();
+    if (reqBranch !== hosBranch) {
+        const isFacultyInHosBranch = db.isConfigured() && store.usingDatabase
+            ? await (async () => {
+                const facId = request.facultyId;
+                const { rows } = await db.query(`
+                    SELECT 1 FROM users u
+                    JOIN departments ud ON u.department_id = ud.id
+                    JOIN faculty f ON (u.faculty_id = f.id OR UPPER(u.username) = UPPER(f.code))
+                    WHERE f.id = $1 AND UPPER(ud.code) = UPPER($2)
+                `, [facId, hosBranch]);
+                return rows.length > 0;
+            })()
+            : false;
+
+        if (!isFacultyInHosBranch) {
+            const err = new Error(`Cross-branch request review is forbidden. Request belongs to ${request.branchCode}, but your branch is ${hosBranch}.`);
+            err.status = 403; err.code = 'FORBIDDEN';
+            throw err;
+        }
     }
 
     if (request.status === 'REJECTED') {
@@ -881,15 +1052,19 @@ async function getMyInvigilation(sessionUser) {
     const targetId = sessionUser.facultyId ? String(sessionUser.facultyId).trim().toUpperCase() : null;
 
     if (db.isConfigured() && store.usingDatabase) {
-        const faculty = findFaculty(targetId || targetName);
-        let dbFacultyId = faculty ? faculty.id : null;
-        if (dbFacultyId && isNaN(parseInt(dbFacultyId, 10))) {
+        let dbFacultyId = sessionUser.facultyId || null;
+        if (!dbFacultyId || isNaN(parseInt(dbFacultyId, 10))) {
+            const faculty = findFaculty(targetId || targetName);
+            dbFacultyId = faculty ? faculty.id : null;
+            if (dbFacultyId && isNaN(parseInt(dbFacultyId, 10))) {
+                try {
+                    dbFacultyId = await repository.resolveFacultyDbId(null, dbFacultyId, faculty.name || targetName);
+                } catch (_) {}
+            }
+        }
+        if (!dbFacultyId) {
             try {
-                const { rows } = await db.query(
-                    'SELECT id FROM faculty WHERE UPPER(name) = UPPER($1) OR UPPER(code) = UPPER($1)',
-                    [faculty.name]
-                );
-                if (rows.length > 0) dbFacultyId = rows[0].id;
+                dbFacultyId = await repository.resolveFacultyDbId(null, targetId || targetName, targetName);
             } catch (_) {}
         }
 

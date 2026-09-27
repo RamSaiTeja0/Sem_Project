@@ -126,51 +126,125 @@ router.get('/designations', (req, res) => {
     res.json({ designations: DESIGNATIONS, statuses: STATUSES });
 });
 
-router.get('/', (req, res) => {
-    const engine = store.engine;
-    const { department, search, day, period } = req.query;
+router.get('/', async (req, res, next) => {
+    try {
+        const engine = store.engine;
+        const { department, search, day, period } = req.query;
 
-    const options = {};
-    if (day || period) {
-        const resolvedDay = engine.normalizeDay(day);
-        if (!resolvedDay) {
-            return res.status(400).json({ error: `Unknown day "${day}"`, code: 'INVALID_DAY' });
+        const options = {};
+        if (day || period) {
+            const resolvedDay = engine.normalizeDay(day);
+            if (!resolvedDay) {
+                return res.status(400).json({ error: `Unknown day "${day}"`, code: 'INVALID_DAY' });
+            }
+            const resolvedPeriod = engine.normalizePeriod(period);
+            if (resolvedPeriod == null) {
+                return res.status(400).json({ error: `Unknown period "${period}"`, code: 'INVALID_PERIOD' });
+            }
+            options.day = resolvedDay;
+            options.period = resolvedPeriod;
         }
-        const resolvedPeriod = engine.normalizePeriod(period);
-        if (resolvedPeriod == null) {
-            return res.status(400).json({ error: `Unknown period "${period}"`, code: 'INVALID_PERIOD' });
+
+        let stats = engine.getFacultyStats(options);
+
+        const sessionDept = req.session && req.session.department ? String(req.session.department).trim().toUpperCase() : null;
+        const queryDept = department ? String(department).trim().toUpperCase() : null;
+
+        if (sessionDept) {
+            if (queryDept && queryDept !== sessionDept) {
+                return res.status(403).json({
+                    error: `Cross-branch queries are not allowed. Current branch is ${sessionDept}.`,
+                    code: 'FORBIDDEN'
+                });
+            }
+            stats = stats.filter(f => (f.department || '').toUpperCase() === sessionDept);
+        } else if (queryDept) {
+            stats = stats.filter(f => (f.department || '').toUpperCase() === queryDept);
         }
-        options.day = resolvedDay;
-        options.period = resolvedPeriod;
-    }
 
-    let stats = engine.getFacultyStats(options);
-
-    const sessionDept = req.session && req.session.department ? String(req.session.department).trim().toUpperCase() : null;
-    const queryDept = department ? String(department).trim().toUpperCase() : null;
-
-    if (sessionDept) {
-        if (queryDept && queryDept !== sessionDept) {
-            return res.status(403).json({
-                error: `Cross-branch queries are not allowed. Current branch is ${sessionDept}.`,
-                code: 'FORBIDDEN'
-            });
+        if (search) {
+            const needle = String(search).trim().toUpperCase();
+            stats = stats.filter(f =>
+                f.name.toUpperCase().includes(needle) ||
+                (f.id && String(f.id).toUpperCase().includes(needle)) ||
+                (f.email || '').toUpperCase().includes(needle) ||
+                (f.designation || '').toUpperCase().includes(needle));
         }
-        stats = stats.filter(f => (f.department || '').toUpperCase() === sessionDept);
-    } else if (queryDept) {
-        stats = stats.filter(f => (f.department || '').toUpperCase() === queryDept);
-    }
 
-    if (search) {
-        const needle = String(search).trim().toUpperCase();
-        stats = stats.filter(f =>
-            f.name.toUpperCase().includes(needle) ||
-            f.id.toUpperCase().includes(needle) ||
-            (f.email || '').toUpperCase().includes(needle) ||
-            (f.designation || '').toUpperCase().includes(needle));
-    }
+        // Relational user account resolution
+        let dbUsersMap = new Map();
+        if (db.isConfigured() && store.usingDatabase) {
+            try {
+                const { rows } = await db.query(`
+                    SELECT u.id, u.username, u.name, u.role, u.status, u.phone, u.faculty_id,
+                           f.id AS faculty_db_id, f.code AS faculty_code, f.name AS faculty_name
+                      FROM users u
+                      LEFT JOIN faculty f ON f.id = u.faculty_id
+                     WHERE u.role = 'faculty'
+                `);
+                for (const u of rows) {
+                    if (u.faculty_id != null) {
+                        dbUsersMap.set(String(u.faculty_id), u);
+                    }
+                    if (u.faculty_db_id != null) {
+                        dbUsersMap.set(String(u.faculty_db_id), u);
+                    }
+                    if (u.faculty_code) {
+                        dbUsersMap.set(String(u.faculty_code).toUpperCase(), u);
+                    }
+                }
+            } catch (_) {}
+        }
 
-    res.json({ count: stats.length, faculty: stats, slot: options.day ? options : null });
+        const registeredUsers = (typeof users.list === 'function' ? users.list() : []) || [];
+
+        stats = stats.map(f => {
+            let matchedUser = null;
+            const facIdStr = f.id != null ? String(f.id).trim() : '';
+            const facCodeStr = f.code != null ? String(f.code).trim() : '';
+
+            // 1. Check DB map by numeric ID, code, or identifier
+            if (facIdStr && dbUsersMap.has(facIdStr)) {
+                matchedUser = dbUsersMap.get(facIdStr);
+            } else if (facIdStr && dbUsersMap.has(facIdStr.toUpperCase())) {
+                matchedUser = dbUsersMap.get(facIdStr.toUpperCase());
+            } else if (facCodeStr && dbUsersMap.has(facCodeStr.toUpperCase())) {
+                matchedUser = dbUsersMap.get(facCodeStr.toUpperCase());
+            }
+
+            // 2. Check in-memory registered users by facultyId, facultyCode, or numeric ID
+            if (!matchedUser) {
+                matchedUser = registeredUsers.find(u =>
+                    u.role === 'faculty' && u.facultyId != null && (
+                        (facIdStr && String(u.facultyId).trim().toLowerCase() === facIdStr.toLowerCase()) ||
+                        (facCodeStr && String(u.facultyId).trim().toLowerCase() === facCodeStr.toLowerCase()) ||
+                        (u.facultyCode && facCodeStr && String(u.facultyCode).trim().toLowerCase() === facCodeStr.toLowerCase()) ||
+                        (u.facultyCode && facIdStr && String(u.facultyCode).trim().toLowerCase() === facIdStr.toLowerCase()) ||
+                        (/^\d+$/.test(facIdStr) && parseInt(u.facultyId, 10) === parseInt(facIdStr, 10))
+                    )
+                );
+            }
+
+            const hasAccount = Boolean(matchedUser);
+            return {
+                ...f,
+                hasAccount,
+                account: matchedUser ? {
+                    id: matchedUser.id,
+                    username: matchedUser.username,
+                    name: matchedUser.name,
+                    role: matchedUser.role || 'faculty',
+                    status: matchedUser.status || 'active',
+                    phone: matchedUser.phone || null
+                } : null,
+                username: matchedUser ? matchedUser.username : null
+            };
+        });
+
+        res.json({ count: stats.length, faculty: stats, slot: options.day ? options : null });
+    } catch (err) {
+        next(err);
+    }
 });
 
 /**
@@ -518,6 +592,134 @@ router.post('/:id/activate', requireHOSUser, async (req, res) => {
         });
     } catch (err) {
         res.status(err.status || 400).json({ error: err.message, code: err.code || 'ACTIVATION_FAILED' });
+    }
+});
+
+/**
+ * POST /api/faculty/:id/create-account — HOS creates a user login account for an existing faculty record.
+ * Preserves the exact existing faculty_id, does NOT duplicate the faculty record,
+ * enforces branch isolation, password security policy, and username uniqueness.
+ */
+router.post('/:id/create-account', requireHOSUser, async (req, res, next) => {
+    const targetId = req.params.id;
+    const engine = store.engine;
+    const sessionDept = req.session && req.session.department ? String(req.session.department).trim().toUpperCase() : null;
+
+    let member = findFacultyMember(engine, targetId);
+    if (db.isConfigured() && store.usingDatabase) {
+        try {
+            const dbMember = await repository.getFaculty(targetId);
+            if (dbMember) member = dbMember;
+        } catch (_) {}
+    }
+
+    if (!member) {
+        return res.status(404).json({ error: `Faculty "${targetId}" not found.`, code: 'NOT_FOUND' });
+    }
+
+    // Branch Security: HOS can create accounts only for faculty of their own branch
+    if (sessionDept && member.department && member.department.toUpperCase() !== sessionDept) {
+        return res.status(403).json({
+            error: `Cross-branch faculty management is not allowed. Faculty belongs to ${member.department}, but current branch is ${sessionDept}.`,
+            code: 'FORBIDDEN'
+        });
+    }
+
+    // Check if faculty already has an account
+    let existingAccount = null;
+    let dbFacId = null;
+    if (db.isConfigured() && store.usingDatabase) {
+        try {
+            dbFacId = await repository.resolveFacultyDbId(null, targetId || (member && member.id), member ? member.name : null);
+            if (dbFacId) {
+                const { rows } = await db.query(
+                    "SELECT id, username FROM users WHERE role = 'faculty' AND faculty_id = $1 LIMIT 1",
+                    [dbFacId]
+                );
+                if (rows.length > 0) existingAccount = rows[0];
+            }
+        } catch (_) {}
+    }
+
+    if (!existingAccount) {
+        const registered = (typeof users.list === 'function' ? users.list() : []) || [];
+        const targetIdStr = String(targetId).trim().toLowerCase();
+        const memberIdStr = member.id != null ? String(member.id).trim().toLowerCase() : '';
+        const memberCodeStr = member.code != null ? String(member.code).trim().toLowerCase() : '';
+        const dbFacIdStr = dbFacId != null ? String(dbFacId).trim().toLowerCase() : '';
+
+        existingAccount = registered.find(u =>
+            u.role === 'faculty' && u.facultyId != null && (
+                (targetIdStr && String(u.facultyId).trim().toLowerCase() === targetIdStr) ||
+                (memberIdStr && String(u.facultyId).trim().toLowerCase() === memberIdStr) ||
+                (memberCodeStr && String(u.facultyId).trim().toLowerCase() === memberCodeStr) ||
+                (u.facultyCode && memberCodeStr && String(u.facultyCode).trim().toLowerCase() === memberCodeStr) ||
+                (u.facultyCode && targetIdStr && String(u.facultyCode).trim().toLowerCase() === targetIdStr) ||
+                (dbFacIdStr && String(u.facultyId).trim().toLowerCase() === dbFacIdStr)
+            )
+        );
+    }
+
+    if (existingAccount) {
+        return res.status(409).json({
+            error: `This faculty member already has an account (${existingAccount.username}).`,
+            code: 'ACCOUNT_EXISTS'
+        });
+    }
+
+    const body = req.body || {};
+    const rawUsername = String(body.username || '').trim();
+    if (!rawUsername) {
+        return res.status(400).json({ error: 'Username is required.', code: 'INVALID_USERNAME' });
+    }
+
+    const password = String(body.password || '');
+    if (!password) {
+        return res.status(400).json({ error: 'Password is required.', code: 'INVALID_PASSWORD' });
+    }
+
+    const phone = String(body.phone || member.phone || '').trim();
+    const subjects = body.subjects !== undefined
+        ? (Array.isArray(body.subjects) ? body.subjects : String(body.subjects).split(',').map(s => s.trim()).filter(Boolean))
+        : (member.subjects || ['General']);
+
+    if (!subjects.length) {
+        return res.status(400).json({ error: 'At least one subject or area of expertise is required.', code: 'SUBJECTS_REQUIRED' });
+    }
+
+    try {
+        const createdUser = await users.createAccountForFaculty({
+            facultyId: member.id,
+            name: body.name || member.name,
+            department: member.department,
+            designation: member.designation,
+            username: rawUsername,
+            password: password,
+            confirmPassword: body.confirmPassword || password,
+            phone: phone || null,
+            subjects: subjects
+        }, req.session);
+
+        if (db.isConfigured() && store.usingDatabase) {
+            await store.reloadFromDatabase();
+        }
+
+        res.status(201).json({
+            success: true,
+            message: `Account created successfully for ${member.name}.`,
+            user: createdUser,
+            faculty: {
+                ...member,
+                hasAccount: true,
+                account: createdUser,
+                username: createdUser.username
+            }
+        });
+    } catch (err) {
+        res.status(err.status || 400).json({
+            error: err.message,
+            code: err.code || 'ACCOUNT_CREATION_FAILED'
+        });
     }
 });
 

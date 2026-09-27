@@ -98,8 +98,21 @@ async function counts() {
  */
 async function loadSource(meta) {
     const [facultyRows, classRows, entryRows, periodRows, roomRows, subjectRows, deptRows] = await Promise.all([
-        db.query(`SELECT f.id, f.code, f.name, COALESCE(d.code, 'General') AS department,
-                         f.designation, f.email, f.phone, f.max_weekly_periods, f.status,
+        db.query(`SELECT f.id, f.code,
+                         COALESCE(
+                             NULLIF(NULLIF(f.name, '[object Object]'), ''),
+                             (SELECT u.name FROM users u WHERE u.faculty_id = f.id OR UPPER(u.username) = UPPER(f.code) LIMIT 1),
+                             f.name
+                         ) AS name,
+                         COALESCE(
+                             NULLIF(NULLIF(d.code, 'General'), 'GENERAL'),
+                             (SELECT ud.code FROM users u JOIN departments ud ON u.department_id = ud.id WHERE (u.faculty_id = f.id OR UPPER(u.username) = UPPER(f.code)) LIMIT 1),
+                             d.code,
+                             'General'
+                         ) AS department,
+                         COALESCE(f.designation, 'Faculty') AS designation,
+                         f.email, f.phone, f.max_weekly_periods,
+                         COALESCE(f.status, 'active') AS status,
                          COALESCE((SELECT array_agg(subject) FROM faculty_subjects WHERE faculty_id = f.id), ARRAY[]::text[]) AS subjects
                     FROM faculty f LEFT JOIN departments d ON d.id = f.department_id
                    ORDER BY f.code`),
@@ -637,8 +650,30 @@ async function listDepartments() {
 async function getInstanceBranch(branchCode = null) {
     const branch = getBranch(branchCode);
     try {
-        const lookupCode = branch.code || branchCode;
-        if (!lookupCode) return { ...branch, facultyCount: 0 };
+        const lookupCode = (branch && branch.code) ? branch.code : branchCode;
+        if (!lookupCode) {
+            const { rows: firstDept } = await db.query(`
+                SELECT d.code, d.name, d.academic_year AS "academicYear", d.semester,
+                       COALESCE(d.total_semesters, 6) AS "totalSemesters",
+                       COUNT(f.id)::int AS "facultyCount"
+                  FROM departments d
+                  LEFT JOIN faculty f ON f.department_id = d.id
+                 WHERE COALESCE(d.active, true) = true
+                 GROUP BY d.code, d.name, d.academic_year, d.semester, d.total_semesters
+                 ORDER BY d.code ASC LIMIT 1
+            `);
+            if (firstDept.length) {
+                return {
+                    code: firstDept[0].code,
+                    name: firstDept[0].name,
+                    academicYear: firstDept[0].academicYear || '',
+                    semester: firstDept[0].semester,
+                    totalSemesters: firstDept[0].totalSemesters || 6,
+                    facultyCount: firstDept[0].facultyCount || 0
+                };
+            }
+            return { ...branch, facultyCount: 0 };
+        }
         const { rows } = await db.query(`
             SELECT d.code, d.name, d.academic_year AS "academicYear", d.semester,
                    COALESCE(d.total_semesters, 6) AS "totalSemesters",
@@ -651,9 +686,9 @@ async function getInstanceBranch(branchCode = null) {
             return {
                 code: rows[0].code,
                 name: rows[0].name,
-                academicYear: rows[0].academicYear || branch.academicYear,
-                semester: rows[0].semester != null ? rows[0].semester : branch.semester,
-                totalSemesters: rows[0].totalSemesters != null ? rows[0].totalSemesters : (branch.totalSemesters || 6),
+                academicYear: rows[0].academicYear || (branch ? branch.academicYear : ''),
+                semester: rows[0].semester != null ? rows[0].semester : (branch ? branch.semester : null),
+                totalSemesters: rows[0].totalSemesters != null ? rows[0].totalSemesters : ((branch && branch.totalSemesters) || 6),
                 facultyCount: rows[0].facultyCount || 0
             };
         }
@@ -1468,11 +1503,11 @@ async function importStagedTimetable(options) {
 
         // 4. Create class only if genuinely non-existent
         if (!classId) {
-            const autoCode = className || `${branchCode || 'GEN'}-SEM${stagedSemNum || 1}${stagedSec ? `-${stagedSec}` : ''}`;
+            const autoCode = className || `${targetDept || 'GEN'}-SEM${stagedSemNum || 1}${stagedSec ? `-${stagedSec}` : ''}`;
             let finalCode = autoCode;
             const codeCheck = await client.query('SELECT id FROM classes WHERE UPPER(TRIM(code)) = UPPER(TRIM($1))', [finalCode]);
             if (codeCheck.rows.length > 0) {
-                finalCode = `${branchCode || 'GEN'}-SEM${stagedSemNum || 1}-${stagedSec || 'A'}-${targetYr || 'AY'}`;
+                finalCode = `${targetDept || 'GEN'}-SEM${stagedSemNum || 1}-${stagedSec || 'A'}-${targetYr || 'AY'}`;
             }
 
             const insCls = await client.query(
@@ -1973,19 +2008,39 @@ async function getFacultyAttendanceHistory(facultyId, limit = 50) {
 
 // Phase B7.3 Exam Invigilation Requests & Assignments
 async function createInvigilationRequest({ facultyId, branchCode, examDate, periods, reason }) {
+    let numericFacultyId = facultyId;
+    if (isNaN(parseInt(numericFacultyId, 10))) {
+        numericFacultyId = await resolveFacultyDbId(db, facultyId);
+    }
+    numericFacultyId = parseInt(numericFacultyId, 10);
+    if (isNaN(numericFacultyId)) {
+        throw new Error(`Invalid faculty_id "${facultyId}" for exam_invigilation_requests. Must resolve to integer primary key.`);
+    }
+
     const { rows } = await db.query(`
         INSERT INTO exam_invigilation_requests (faculty_id, branch_code, exam_date, periods, reason, status, created_at, updated_at)
         VALUES ($1, $2, $3, $4, $5, 'PENDING', now(), now())
         RETURNING id, faculty_id AS "facultyId", branch_code AS "branchCode", exam_date AS "examDate",
                   periods, reason, status, created_at AS "createdAt", updated_at AS "updatedAt"
-    `, [facultyId, branchCode, examDate, periods, reason || null]);
+    `, [numericFacultyId, branchCode, examDate, periods, reason || null]);
     return rows[0];
 }
 
 async function listInvigilationRequests({ branchCode, status, facultyId } = {}) {
     let query = `
-        SELECT r.id, r.faculty_id AS "facultyId", f.name AS "facultyName", f.code AS "facultyCode",
-               r.branch_code AS "branchCode", r.exam_date AS "examDate", r.periods, r.reason,
+        SELECT r.id, r.faculty_id AS "facultyId",
+               COALESCE(
+                   NULLIF(NULLIF(f.name, '[object Object]'), ''),
+                   (SELECT u.name FROM users u WHERE u.faculty_id = f.id OR UPPER(u.username) = UPPER(f.code) LIMIT 1),
+                   f.name
+               ) AS "facultyName",
+               f.code AS "facultyCode",
+               COALESCE(
+                   NULLIF(NULLIF(r.branch_code, 'GENERAL'), ''),
+                   (SELECT ud.code FROM users u JOIN departments ud ON u.department_id = ud.id WHERE (u.faculty_id = r.faculty_id OR UPPER(u.username) = UPPER(f.code)) LIMIT 1),
+                   r.branch_code
+               ) AS "branchCode",
+               r.exam_date AS "examDate", r.periods, r.reason,
                r.status, r.reviewed_by AS "reviewedBy", r.reviewed_at AS "reviewedAt",
                r.rejection_reason AS "rejectionReason", r.created_at AS "createdAt", r.updated_at AS "updatedAt"
           FROM exam_invigilation_requests r
@@ -1995,15 +2050,34 @@ async function listInvigilationRequests({ branchCode, status, facultyId } = {}) 
     const params = [];
     if (branchCode) {
         params.push(branchCode);
-        query += ` AND UPPER(r.branch_code) = UPPER($${params.length})`;
+        query += ` AND (
+            UPPER(r.branch_code) = UPPER($${params.length})
+            OR (
+                UPPER(r.branch_code) = 'GENERAL'
+                AND EXISTS (
+                    SELECT 1 FROM users u
+                    JOIN departments ud ON u.department_id = ud.id
+                    WHERE (u.faculty_id = r.faculty_id OR UPPER(u.username) = UPPER(f.code))
+                      AND UPPER(ud.code) = UPPER($${params.length})
+                )
+            )
+        )`;
     }
     if (status) {
         params.push(status);
         query += ` AND UPPER(r.status) = UPPER($${params.length})`;
     }
     if (facultyId) {
-        params.push(facultyId);
-        query += ` AND r.faculty_id = $${params.length}`;
+        let fId = facultyId;
+        if (isNaN(parseInt(fId, 10))) {
+            try {
+                fId = await resolveFacultyDbId(db, facultyId);
+            } catch (_) {}
+        }
+        if (fId && !isNaN(parseInt(fId, 10))) {
+            params.push(parseInt(fId, 10));
+            query += ` AND r.faculty_id = $${params.length}`;
+        }
     }
     query += ` ORDER BY r.created_at DESC`;
     const { rows } = await db.query(query, params);
@@ -2012,8 +2086,19 @@ async function listInvigilationRequests({ branchCode, status, facultyId } = {}) 
 
 async function getInvigilationRequestById(id) {
     const { rows } = await db.query(`
-        SELECT r.id, r.faculty_id AS "facultyId", f.name AS "facultyName", f.code AS "facultyCode",
-               r.branch_code AS "branchCode", r.exam_date AS "examDate", r.periods, r.reason,
+        SELECT r.id, r.faculty_id AS "facultyId",
+               COALESCE(
+                   NULLIF(NULLIF(f.name, '[object Object]'), ''),
+                   (SELECT u.name FROM users u WHERE u.faculty_id = f.id OR UPPER(u.username) = UPPER(f.code) LIMIT 1),
+                   f.name
+               ) AS "facultyName",
+               f.code AS "facultyCode",
+               COALESCE(
+                   NULLIF(NULLIF(r.branch_code, 'GENERAL'), ''),
+                   (SELECT ud.code FROM users u JOIN departments ud ON u.department_id = ud.id WHERE (u.faculty_id = r.faculty_id OR UPPER(u.username) = UPPER(f.code)) LIMIT 1),
+                   r.branch_code
+               ) AS "branchCode",
+               r.exam_date AS "examDate", r.periods, r.reason,
                r.status, r.reviewed_by AS "reviewedBy", r.reviewed_at AS "reviewedAt",
                r.rejection_reason AS "rejectionReason", r.created_at AS "createdAt", r.updated_at AS "updatedAt"
           FROM exam_invigilation_requests r
@@ -2040,20 +2125,40 @@ async function updateInvigilationRequestStatus(id, { status, reviewedBy, rejecti
 }
 
 async function createActiveInvigilation({ facultyId, branchCode, examDate, period, source, requestId, assignedBy, notes }) {
+    let numericFacultyId = facultyId;
+    if (isNaN(parseInt(numericFacultyId, 10))) {
+        numericFacultyId = await resolveFacultyDbId(db, facultyId);
+    }
+    numericFacultyId = parseInt(numericFacultyId, 10);
+    if (isNaN(numericFacultyId)) {
+        throw new Error(`Invalid faculty_id "${facultyId}" for exam_invigilation. Must resolve to integer primary key.`);
+    }
+
     const { rows } = await db.query(`
         INSERT INTO exam_invigilation (faculty_id, branch_code, exam_date, period, source, request_id, assigned_by, notes, created_at, updated_at)
         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, now(), now())
         RETURNING id, faculty_id AS "facultyId", branch_code AS "branchCode", exam_date AS "examDate",
                   period, source, request_id AS "requestId", assigned_by AS "assignedBy", notes,
                   created_at AS "createdAt", updated_at AS "updatedAt"
-    `, [facultyId, branchCode, examDate, period, source || 'DIRECT', requestId || null, assignedBy || null, notes || null]);
+    `, [numericFacultyId, branchCode, examDate, period, source || 'DIRECT', requestId || null, assignedBy || null, notes || null]);
     return rows[0];
 }
 
 async function listActiveInvigilation({ branchCode, examDate, period, facultyId } = {}) {
     let query = `
-        SELECT ei.id, ei.faculty_id AS "facultyId", f.name AS "facultyName", f.code AS "facultyCode",
-               ei.branch_code AS "branchCode", ei.exam_date AS "examDate", ei.period,
+        SELECT ei.id, ei.faculty_id AS "facultyId",
+               COALESCE(
+                   NULLIF(NULLIF(f.name, '[object Object]'), ''),
+                   (SELECT u.name FROM users u WHERE u.faculty_id = f.id OR UPPER(u.username) = UPPER(f.code) LIMIT 1),
+                   f.name
+               ) AS "facultyName",
+               f.code AS "facultyCode",
+               COALESCE(
+                   NULLIF(NULLIF(ei.branch_code, 'GENERAL'), ''),
+                   (SELECT ud.code FROM users u JOIN departments ud ON u.department_id = ud.id WHERE (u.faculty_id = ei.faculty_id OR UPPER(u.username) = UPPER(f.code)) LIMIT 1),
+                   ei.branch_code
+               ) AS "branchCode",
+               ei.exam_date AS "examDate", ei.period,
                ei.source, ei.request_id AS "requestId", ei.assigned_by AS "assignedBy",
                ei.notes, ei.created_at AS "createdAt", ei.updated_at AS "updatedAt"
           FROM exam_invigilation ei
@@ -2063,7 +2168,18 @@ async function listActiveInvigilation({ branchCode, examDate, period, facultyId 
     const params = [];
     if (branchCode) {
         params.push(branchCode);
-        query += ` AND UPPER(ei.branch_code) = UPPER($${params.length})`;
+        query += ` AND (
+            UPPER(ei.branch_code) = UPPER($${params.length})
+            OR (
+                UPPER(ei.branch_code) = 'GENERAL'
+                AND EXISTS (
+                    SELECT 1 FROM users u
+                    JOIN departments ud ON u.department_id = ud.id
+                    WHERE (u.faculty_id = ei.faculty_id OR UPPER(u.username) = UPPER(f.code))
+                      AND UPPER(ud.code) = UPPER($${params.length})
+                )
+            )
+        )`;
     }
     if (examDate) {
         params.push(examDate);
@@ -2074,8 +2190,16 @@ async function listActiveInvigilation({ branchCode, examDate, period, facultyId 
         query += ` AND ei.period = $${params.length}`;
     }
     if (facultyId) {
-        params.push(facultyId);
-        query += ` AND ei.faculty_id = $${params.length}`;
+        let fId = facultyId;
+        if (isNaN(parseInt(fId, 10))) {
+            try {
+                fId = await resolveFacultyDbId(db, facultyId);
+            } catch (_) {}
+        }
+        if (fId && !isNaN(parseInt(fId, 10))) {
+            params.push(parseInt(fId, 10));
+            query += ` AND ei.faculty_id = $${params.length}`;
+        }
     }
     query += ` ORDER BY ei.exam_date ASC, ei.period ASC`;
     const { rows } = await db.query(query, params);
@@ -2085,11 +2209,18 @@ async function listActiveInvigilation({ branchCode, examDate, period, facultyId 
 async function deleteActiveInvigilation(id, branchCode) {
     const { rows } = await db.query(`
         DELETE FROM exam_invigilation ei
-         USING faculty f, departments d
+         USING faculty f
          WHERE ei.faculty_id = f.id
-           AND f.department_id = d.id
            AND ei.id = $1
-           AND UPPER(d.code) = UPPER($2)
+           AND (
+               UPPER(ei.branch_code) = UPPER($2)
+               OR EXISTS (
+                   SELECT 1 FROM users u
+                   JOIN departments ud ON u.department_id = ud.id
+                   WHERE (u.faculty_id = ei.faculty_id OR UPPER(u.username) = UPPER(f.code))
+                     AND UPPER(ud.code) = UPPER($2)
+               )
+           )
         RETURNING ei.id, ei.faculty_id AS "facultyId", ei.exam_date AS "examDate", ei.period
     `, [id, branchCode]);
     return rows[0] || null;
@@ -2100,56 +2231,115 @@ async function deleteActiveInvigilation(id, branchCode) {
  * ====================================================================== */
 
 async function resolveFacultyDbId(clientOrDb, identifier, name = null) {
+    if (!identifier && !name) return null;
     const runner = clientOrDb || db;
-    if (identifier !== undefined && identifier !== null && !isNaN(parseInt(identifier, 10))) {
-        const res = await runner.query('SELECT id FROM faculty WHERE id = $1', [parseInt(identifier, 10)]);
-        if (res.rows.length) return res.rows[0].id;
+
+    // 1. If numeric integer, check direct faculty.id
+    if (typeof identifier === 'number' || (identifier && /^\d+$/.test(String(identifier).trim()))) {
+        const idNum = parseInt(identifier, 10);
+        const { rows } = await runner.query('SELECT id FROM faculty WHERE id = $1', [idNum]);
+        if (rows.length) return rows[0].id;
     }
+
     const lookupStr = String(identifier || name || '').trim();
-    if (lookupStr) {
-        const res = await runner.query(
+    if (lookupStr && lookupStr !== '[object Object]') {
+        // 2. Check faculty by code or name
+        const { rows } = await runner.query(
             'SELECT id FROM faculty WHERE UPPER(code) = UPPER($1) OR UPPER(name) = UPPER($1) LIMIT 1',
             [lookupStr]
         );
-        if (res.rows.length) return res.rows[0].id;
-    }
-    if (name) {
-        const res = await runner.query(
-            'SELECT id FROM faculty WHERE UPPER(name) = UPPER($1) LIMIT 1',
-            [String(name).trim()]
+        if (rows.length) return rows[0].id;
+
+        // 3. Check users by username or name to find mapped faculty_id
+        const userRes = await runner.query(
+            'SELECT faculty_id FROM users WHERE (UPPER(username) = UPPER($1) OR UPPER(name) = UPPER($1)) AND faculty_id IS NOT NULL LIMIT 1',
+            [lookupStr]
         );
-        if (res.rows.length) return res.rows[0].id;
+        if (userRes.rows.length && userRes.rows[0].faculty_id) return userRes.rows[0].faculty_id;
     }
+
+    if (name && String(name).trim() !== lookupStr && String(name).trim() !== '[object Object]') {
+        const nStr = String(name).trim();
+        const { rows } = await runner.query(
+            'SELECT id FROM faculty WHERE UPPER(name) = UPPER($1) LIMIT 1',
+            [nStr]
+        );
+        if (rows.length) return rows[0].id;
+
+        const uRes = await runner.query(
+            'SELECT faculty_id FROM users WHERE (UPPER(username) = UPPER($1) OR UPPER(name) = UPPER($1)) AND faculty_id IS NOT NULL LIMIT 1',
+            [nStr]
+        );
+        if (uRes.rows.length && uRes.rows[0].faculty_id) return uRes.rows[0].faculty_id;
+    }
+
+    // 4. Try normalized name tokens against all faculty in db
+    try {
+        const allFac = await runner.query('SELECT id, name, code FROM faculty');
+        const { nameTokensMatch } = require('../core/entityResolver');
+        const target = lookupStr || String(name || '').trim();
+        if (target && target !== '[object Object]') {
+            const matched = allFac.rows.find(f => (f.name && f.name !== '[object Object]' && nameTokensMatch(f.name, target)) || (f.code && nameTokensMatch(String(f.code), target)));
+            if (matched) return matched.id;
+        }
+    } catch (_) {}
+
     return null;
 }
 
-async function ensureFacultyDbRecord(clientOrDb, { id, name, department, phone, status }) {
+async function ensureFacultyDbRecord(clientOrDb, identifierOrObj, maybeDept) {
     const runner = clientOrDb || db;
-    const existingId = await resolveFacultyDbId(runner, id, name);
+    let id = null;
+    let name = null;
+    let department = null;
+    let phone = null;
+    let status = 'active';
+
+    if (identifierOrObj && typeof identifierOrObj === 'object') {
+        id = identifierOrObj.id || null;
+        name = identifierOrObj.name || null;
+        department = identifierOrObj.department || identifierOrObj.departmentCode || null;
+        phone = identifierOrObj.phone || null;
+        status = identifierOrObj.status || 'active';
+    } else {
+        name = identifierOrObj ? String(identifierOrObj).trim() : null;
+        department = maybeDept || null;
+    }
+
+    if (name === '[object Object]') {
+        name = null;
+    }
+
+    const existingId = await resolveFacultyDbId(runner, id || name, name);
     if (existingId) return existingId;
 
     let deptId = null;
-    if (department) {
-        const dRes = await runner.query('SELECT id FROM departments WHERE UPPER(code) = UPPER($1)', [department]);
+    const deptCode = String(department || 'GENERAL').toUpperCase();
+    if (deptCode) {
+        const dRes = await runner.query('SELECT id FROM departments WHERE UPPER(code) = UPPER($1)', [deptCode]);
         if (dRes.rows.length) {
             deptId = dRes.rows[0].id;
         } else {
             const insD = await runner.query(
                 'INSERT INTO departments (code, name, total_semesters) VALUES ($1, $1, 6) ON CONFLICT (code) DO UPDATE SET name = EXCLUDED.name RETURNING id',
-                [department]
+                [deptCode]
             );
             deptId = insD.rows[0].id;
         }
     }
 
-    const facCode = id ? String(id) : `FAC_${Date.now()}`;
-    const facName = name ? String(name) : facCode;
+    const cleanName = (name || (id ? String(id) : 'Faculty')).trim();
+    let facCode = id ? String(id).trim() : null;
+    if (!facCode || /^\d+$/.test(facCode)) {
+        facCode = (deptCode + '_' + cleanName.replace(/[^A-Z0-9]/gi, '_').toUpperCase()).slice(0, 30);
+    }
+
     const ins = await runner.query(`
-        INSERT INTO faculty (code, name, department_id, phone, status)
-        VALUES ($1, $2, $3, $4, $5)
-        ON CONFLICT (code) DO UPDATE SET name = EXCLUDED.name
+        INSERT INTO faculty (code, name, department_id, designation, phone, status, max_weekly_periods)
+        VALUES ($1, $2, $3, 'Faculty', $4, $5, 28)
+        ON CONFLICT (code) DO UPDATE SET name = EXCLUDED.name, department_id = COALESCE(faculty.department_id, EXCLUDED.department_id)
         RETURNING id
-    `, [facCode, facName, deptId, phone || null, status || 'active']);
+    `, [facCode, cleanName, deptId, phone || null, status || 'active']);
     return ins.rows[0].id;
 }
 
@@ -2360,6 +2550,19 @@ async function saveUser({ username, name, phone, role, departmentCode, passwordH
             }
         }
 
+        if (facId && role === 'faculty') {
+            const { rows: existingLinked } = await client.query(
+                "SELECT id, username FROM users WHERE role = 'faculty' AND faculty_id = $1 LIMIT 1",
+                [facId]
+            );
+            if (existingLinked.length > 0 && String(existingLinked[0].username).toLowerCase() !== String(username).toLowerCase()) {
+                const err = new Error(`This faculty member already has an account (${existingLinked[0].username}).`);
+                err.status = 409;
+                err.code = 'ACCOUNT_EXISTS';
+                throw err;
+            }
+        }
+
         const { rows } = await client.query(`
             INSERT INTO users (username, name, phone, role, department_id, faculty_id, password_hash, status, created_at)
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, now())
@@ -2473,7 +2676,7 @@ async function loadAllUsers() {
         SELECT u.id, u.username, u.name, u.phone, u.role, u.status, u.password_hash AS "passwordHash",
                u.created_at AS "createdAt",
                d.code AS department, d.name AS "branchName",
-               f.id AS "facultyId", f.name AS "facultyName",
+               f.id AS "facultyId", f.name AS "facultyName", f.code AS "facultyCode",
                COALESCE((SELECT array_agg(subject) FROM faculty_subjects WHERE faculty_id = f.id), ARRAY[]::text[]) AS subjects
           FROM users u
           LEFT JOIN departments d ON d.id = u.department_id
@@ -2493,68 +2696,7 @@ async function loadAllDepartments() {
     return rows;
 }
 
-async function resolveFacultyDbId(clientOrDb, facultyIdentifier) {
-    if (!facultyIdentifier) return null;
-    const client = clientOrDb || db;
-    // 1. If numeric integer, check direct faculty.id
-    if (typeof facultyIdentifier === 'number' || /^\d+$/.test(String(facultyIdentifier).trim())) {
-        const idNum = parseInt(facultyIdentifier, 10);
-        const { rows } = await client.query('SELECT id FROM faculty WHERE id = $1', [idNum]);
-        if (rows.length) return rows[0].id;
-    }
-    const raw = String(facultyIdentifier).trim();
-    // 2. Check faculty by code or name
-    const { rows } = await client.query(
-        'SELECT id FROM faculty WHERE UPPER(code) = UPPER($1) OR UPPER(name) = UPPER($1) LIMIT 1',
-        [raw]
-    );
-    if (rows.length) return rows[0].id;
 
-    // 3. Check users by username or name to find mapped faculty_id
-    const userRes = await client.query(
-        'SELECT faculty_id FROM users WHERE (UPPER(username) = UPPER($1) OR UPPER(name) = UPPER($1)) AND faculty_id IS NOT NULL LIMIT 1',
-        [raw]
-    );
-    if (userRes.rows.length && userRes.rows[0].faculty_id) return userRes.rows[0].faculty_id;
-
-    // 4. Try normalized name tokens against all faculty in db
-    try {
-        const allFac = await client.query('SELECT id, name, code FROM faculty');
-        const { nameTokensMatch } = require('../core/entityResolver');
-        const matched = allFac.rows.find(f => nameTokensMatch(f.name, raw) || (f.code && nameTokensMatch(String(f.code), raw)));
-        if (matched) return matched.id;
-    } catch (_) {}
-
-    return null;
-}
-
-async function ensureFacultyDbRecord(clientOrDb, facultyName, departmentCode) {
-    const client = clientOrDb || db;
-    let facId = await resolveFacultyDbId(client, facultyName);
-    if (facId) return facId;
-
-    const dept = String(departmentCode || 'General').toUpperCase();
-    let deptRes = await client.query('SELECT id FROM departments WHERE UPPER(code) = UPPER($1)', [dept]);
-    let deptId = deptRes.rows.length > 0 ? deptRes.rows[0].id : null;
-    if (!deptId) {
-        const insDept = await client.query(
-            'INSERT INTO departments (code, name, active) VALUES (UPPER($1), $1, true) ON CONFLICT (code) DO UPDATE SET active = true RETURNING id',
-            [dept]
-        );
-        deptId = insDept.rows[0].id;
-    }
-
-    const cleanName = String(facultyName).trim();
-    const code = (dept + '_' + cleanName.replace(/[^A-Z0-9]/gi, '_').toUpperCase()).slice(0, 30);
-    const ins = await client.query(
-        `INSERT INTO faculty (code, name, department_id, designation, status, max_weekly_periods)
-         VALUES ($1, $2, $3, 'Faculty', 'active', 28)
-         ON CONFLICT (code) DO UPDATE SET name = EXCLUDED.name
-         RETURNING id`,
-        [code, cleanName, deptId]
-    );
-    return ins.rows[0].id;
-}
 
 async function saveFacultyPersonalTimetable({ facultyId, slots, departmentCode }) {
     return db.withTransaction(async client => {

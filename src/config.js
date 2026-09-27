@@ -23,10 +23,12 @@ const config = {
      * Ports tried in order when the configured one is already in use, so a
      * stale server from another project cannot block a fresh start.
      */
-    fallbackPorts: String(process.env.FALLBACK_PORTS || `${port + 1},${port + 2},${port + 3}`)
-        .split(',')
-        .map(p => intOr(p, null))
-        .filter(p => p && p !== port),
+    fallbackPorts: process.env.FALLBACK_PORTS
+        ? String(process.env.FALLBACK_PORTS)
+            .split(',')
+            .map(p => intOr(p, null))
+            .filter(p => p && p !== port)
+        : [],
     env: process.env.NODE_ENV || 'development',
     maxUploadBytes: intOr(process.env.MAX_UPLOAD_MB, 10) * 1024 * 1024,
 

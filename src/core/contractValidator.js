@@ -94,6 +94,16 @@ function validateExtractedContract(payload, uploadRecord = null, options = {}) {
                 }
             }
         }
+
+        // Academic Year Target Scope Authority & Comparison
+        const authYear = (uploadRecord && (uploadRecord.academicYear || uploadRecord.targetAcademicYear)) || (options && (options.academicYear || (options.targetScope && options.targetScope.academicYear)));
+        if (authYear && payload.academic_year) {
+            const strAuth = String(authYear).trim();
+            const strDoc = String(payload.academic_year).trim();
+            if (strAuth !== strDoc) {
+                warnings.push(`Academic Year mismatch: Extracted timetable document specifies academic year "${strDoc}", while your selected target academic year is "${strAuth}". The selected target academic year "${strAuth}" will remain authoritative upon import.`);
+            }
+        }
     }
 
     // 5. Grid structure checks (days, periods, entries)

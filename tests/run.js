@@ -54,12 +54,20 @@ const suites = [
     'hod_only_master_timetable_rbac.test.js',
     'timetable_workflow_complete.test.js',
     'faculty_timetable_extraction.test.js',
+    'auth_full_lifecycle_regression.test.js',
+    'faculty_account_management.test.js',
+    'hod_invigilation_dropdown.test.js',
+    'branch_isolation_invigilation.test.js',
     'live_verification.js'
 ];
 let failures = 0;
 const failedSuites = [];
 
 const dbSuites = new Set([
+    'auth_full_lifecycle_regression.test.js',
+    'faculty_account_management.test.js',
+    'hod_invigilation_dropdown.test.js',
+    'branch_isolation_invigilation.test.js',
     'database.test.js',
     'neon_persistence_verification.test.js',
     'hod_schedule_and_sql_regression.test.js',

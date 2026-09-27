@@ -69,11 +69,40 @@ function findFaculty(needle) {
     if (!needle) return null;
     const str = String(needle).trim().toUpperCase();
     const roster = store.engine ? store.engine.getFaculty() : [];
-    return roster.find(f =>
+    const direct = roster.find(f =>
         (f.id && String(f.id).toUpperCase() === str) ||
         (f.code && String(f.code).toUpperCase() === str) ||
         (f.name && f.name.toUpperCase() === str)
-    ) || null;
+    );
+    if (direct) return direct;
+
+    try {
+        const users = require('./users');
+        const u = (typeof users.findById === 'function' ? users.findById(needle) : null) ||
+                  (typeof users.findByUsername === 'function' ? users.findByUsername(needle) : null);
+        if (u) {
+            const fac = roster.find(f =>
+                (u.facultyId && f.id && String(f.id).toUpperCase() === String(u.facultyId).toUpperCase()) ||
+                (u.facultyName && f.name && f.name.toUpperCase() === u.facultyName.toUpperCase()) ||
+                (u.name && f.name && f.name.toUpperCase() === u.name.toUpperCase())
+            );
+            if (fac) return fac;
+            return {
+                id: u.facultyId || u.id,
+                name: u.facultyName || u.name,
+                code: u.username,
+                department: u.department,
+                status: u.status || 'active'
+            };
+        }
+    } catch (_) {}
+
+    try {
+        const { nameTokensMatch } = require('../core/entityResolver');
+        const matched = roster.find(f => nameTokensMatch(f.name, str) || (f.code && nameTokensMatch(String(f.code), str)));
+        if (matched) return matched;
+    } catch (_) {}
+    return null;
 }
 
 /**

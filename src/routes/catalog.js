@@ -78,7 +78,7 @@ router.get('/branch', async (req, res) => {
     try {
         const branchCode = req.session ? req.session.department : null;
         const branch = db.isConfigured()
-            ? await repository.getInstanceBranch()
+            ? await repository.getInstanceBranch(branchCode)
             : getBranch(branchCode);
         if (!branch || !branch.configured || !branch.code) {
             return res.json({

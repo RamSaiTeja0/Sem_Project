@@ -54,18 +54,73 @@ function parseDateString(str) {
     };
 }
 
-/**
- * Find a faculty member by ID, code, or name across the engine roster.
- */
-function findFaculty(needle) {
+async function findFaculty(needle) {
     if (!needle) return null;
     const str = String(needle).trim().toUpperCase();
     const roster = store.engine ? store.engine.getFaculty() : [];
-    return roster.find(f =>
+    const direct = roster.find(f =>
         (f.id && String(f.id).toUpperCase() === str) ||
         (f.code && String(f.code).toUpperCase() === str) ||
         (f.name && f.name.toUpperCase() === str)
-    ) || null;
+    );
+    if (direct) return direct;
+
+    if (db.isConfigured() && store.usingDatabase) {
+        try {
+            const isNum = !isNaN(parseInt(needle, 10));
+            let query = `
+                SELECT f.id, f.code, f.name, f.status, d.code AS department
+                  FROM faculty f
+                  LEFT JOIN departments d ON d.id = f.department_id
+                 WHERE `;
+            let params = [];
+            if (isNum) {
+                query += `f.id = $1 OR UPPER(f.code) = UPPER($2) OR UPPER(f.name) = UPPER($2)`;
+                params = [parseInt(needle, 10), String(needle).trim()];
+            } else {
+                query += `UPPER(f.code) = UPPER($1) OR UPPER(f.name) = UPPER($1)`;
+                params = [String(needle).trim()];
+            }
+            const { rows } = await db.query(query, params);
+            if (rows.length > 0) {
+                return {
+                    id: rows[0].id,
+                    name: rows[0].name,
+                    code: rows[0].code,
+                    department: rows[0].department,
+                    status: rows[0].status || 'active'
+                };
+            }
+        } catch (_) {}
+    }
+
+    try {
+        const users = require('./users');
+        const u = (typeof users.findById === 'function' ? users.findById(needle) : null) ||
+                  (typeof users.findByUsername === 'function' ? users.findByUsername(needle) : null);
+        if (u) {
+            const fac = roster.find(f =>
+                (u.facultyId && f.id && String(f.id).toUpperCase() === String(u.facultyId).toUpperCase()) ||
+                (u.facultyName && f.name && f.name.toUpperCase() === u.facultyName.toUpperCase()) ||
+                (u.name && f.name && f.name.toUpperCase() === u.name.toUpperCase())
+            );
+            if (fac) return fac;
+            return {
+                id: u.facultyId || u.id,
+                name: u.facultyName || u.name,
+                code: u.username,
+                department: u.department,
+                status: u.status || 'active'
+            };
+        }
+    } catch (_) {}
+
+    try {
+        const { nameTokensMatch } = require('../core/entityResolver');
+        const matched = roster.find(f => nameTokensMatch(f.name, str) || (f.code && nameTokensMatch(String(f.code), str)));
+        if (matched) return matched;
+    } catch (_) {}
+    return null;
 }
 
 /**
@@ -106,7 +161,7 @@ async function markAttendance({ facultyIdentifier, date, status, sessionUser }) 
         throw err;
     }
 
-    const faculty = findFaculty(facultyIdentifier);
+    const faculty = await findFaculty(facultyIdentifier);
     if (!faculty) {
         const err = new Error(`Faculty "${facultyIdentifier}" not found.`);
         err.status = 404; err.code = 'NOT_FOUND';

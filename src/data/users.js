@@ -34,6 +34,7 @@ function syncFromDatabase(dbUsers = []) {
             subjects: Array.isArray(u.subjects) ? u.subjects : [],
             facultyId: u.facultyId || null,
             facultyName: u.facultyName || (u.role === 'faculty' ? u.name : null),
+            facultyCode: u.facultyCode || null,
             status: u.status || 'active',
             createdAt: u.createdAt || new Date().toISOString()
         };
@@ -156,6 +157,18 @@ async function register(data, sessionUser = null) {
         err.status = 409; err.code = 'USERNAME_EXISTS';
         throw err;
     }
+    if (db.isConfigured()) {
+        try {
+            const { rows } = await db.query('SELECT 1 FROM users WHERE LOWER(username) = LOWER($1) LIMIT 1', [username]);
+            if (rows.length > 0) {
+                const err = new Error(`Username "${rawUsername}" is already taken.`);
+                err.status = 409; err.code = 'USERNAME_EXISTS';
+                throw err;
+            }
+        } catch (dbErr) {
+            if (dbErr.code === 'USERNAME_EXISTS') throw dbErr;
+        }
+    }
 
     const password = String(data.password || '');
     if (!validatePassword(password)) {
@@ -235,7 +248,53 @@ async function register(data, sessionUser = null) {
             throw err;
         }
 
-        facultyId = data.facultyId || `${targetBranchCode}_${username.replace(/[^a-z0-9]/g, '_').toUpperCase()}`;
+        if (data.facultyId) {
+            facultyId = data.facultyId;
+        } else if (store.engine) {
+            const existingFac = store.engine.getFaculty().find(f =>
+                f.name && f.name.toLowerCase() === name.toLowerCase() &&
+                (!targetBranchCode || (f.department && f.department.toUpperCase() === targetBranchCode))
+            );
+            if (existingFac && existingFac.id) {
+                facultyId = existingFac.id;
+            }
+        }
+        if (!facultyId) {
+            facultyId = `${targetBranchCode}_${username.replace(/[^a-z0-9]/g, '_').toUpperCase()}`;
+        }
+
+        // Duplicate account protection: A faculty record can have at most ONE active faculty login account.
+        if (facultyId) {
+            let dbFacId = null;
+            if (db.isConfigured()) {
+                dbFacId = await repository.resolveFacultyDbId(null, facultyId, name);
+                if (dbFacId) {
+                    const { rows } = await db.query(
+                        "SELECT id, username FROM users WHERE role = 'faculty' AND faculty_id = $1 LIMIT 1",
+                        [dbFacId]
+                    );
+                    if (rows.length > 0) {
+                        const err = new Error(`This faculty member already has an account (${rows[0].username}).`);
+                        err.status = 409; err.code = 'ACCOUNT_EXISTS';
+                        throw err;
+                    }
+                }
+            }
+            const targetFacIdStr = String(facultyId).trim().toLowerCase();
+            const dbFacIdStr = dbFacId != null ? String(dbFacId).trim().toLowerCase() : '';
+            const existingFacultyUser = registeredUsers.find(u =>
+                u.role === 'faculty' && u.facultyId != null && (
+                    (targetFacIdStr && String(u.facultyId).trim().toLowerCase() === targetFacIdStr) ||
+                    (u.facultyCode && targetFacIdStr && String(u.facultyCode).trim().toLowerCase() === targetFacIdStr) ||
+                    (dbFacIdStr && String(u.facultyId).trim().toLowerCase() === dbFacIdStr)
+                )
+            );
+            if (existingFacultyUser) {
+                const err = new Error(`This faculty member already has an account (${existingFacultyUser.username}).`);
+                err.status = 409; err.code = 'ACCOUNT_EXISTS';
+                throw err;
+            }
+        }
     }
 
     // Hash password securely with cryptographic salt
@@ -419,6 +478,80 @@ function authenticate(username, password) {
     }
 
     return null;
+}
+
+/**
+ * Asynchronously authenticates a user against PostgreSQL (when configured)
+ * or in-memory registered users cache.
+ */
+async function authenticateAsync(username, password) {
+    const wanted = String(username || '').trim().toLowerCase();
+    if (!wanted || password == null) return null;
+
+    if (db.isConfigured()) {
+        try {
+            const { rows } = await db.query(`
+                SELECT u.id, u.username, u.name, u.phone, u.role, u.status, u.password_hash AS "passwordHash",
+                       u.created_at AS "createdAt",
+                       d.code AS department, d.name AS "branchName",
+                       f.id AS "facultyId", f.name AS "facultyName", f.code AS "facultyCode",
+                       COALESCE((SELECT array_agg(subject) FROM faculty_subjects WHERE faculty_id = f.id), ARRAY[]::text[]) AS subjects
+                  FROM users u
+                  LEFT JOIN departments d ON d.id = u.department_id
+                  LEFT JOIN faculty f ON f.id = u.faculty_id
+                 WHERE LOWER(u.username) = $1
+                 LIMIT 1
+            `, [wanted]);
+
+            if (rows.length > 0) {
+                const dbUser = rows[0];
+                if (dbUser.status === 'inactive') {
+                    const err = new Error('Account is deactivated. Please contact your Head of Section.');
+                    err.status = 403;
+                    err.code = 'ACCOUNT_DEACTIVATED';
+                    throw err;
+                }
+                if (verifyPassword(password, dbUser.passwordHash)) {
+                    syncFromDatabase([dbUser]);
+                    return toPublicUser(dbUser);
+                }
+                return null;
+            }
+        } catch (err) {
+            if (err.code === 'ACCOUNT_DEACTIVATED' || err.status === 403) throw err;
+        }
+    }
+
+    return authenticate(username, password);
+}
+
+async function findByUsernameAsync(username) {
+    const wanted = String(username || '').trim().toLowerCase();
+    if (!wanted) return null;
+
+    if (db.isConfigured()) {
+        try {
+            const { rows } = await db.query(`
+                SELECT u.id, u.username, u.name, u.phone, u.role, u.status, u.password_hash AS "passwordHash",
+                       u.created_at AS "createdAt",
+                       d.code AS department, d.name AS "branchName",
+                       f.id AS "facultyId", f.name AS "facultyName", f.code AS "facultyCode",
+                       COALESCE((SELECT array_agg(subject) FROM faculty_subjects WHERE faculty_id = f.id), ARRAY[]::text[]) AS subjects
+                  FROM users u
+                  LEFT JOIN departments d ON d.id = u.department_id
+                  LEFT JOIN faculty f ON f.id = u.faculty_id
+                 WHERE LOWER(u.username) = $1
+                 LIMIT 1
+            `, [wanted]);
+
+            if (rows.length > 0) {
+                syncFromDatabase(rows);
+                return toPublicUser(rows[0]);
+            }
+        } catch (_) {}
+    }
+
+    return findByUsername(username);
 }
 
 function findByUsername(username) {
@@ -716,6 +849,193 @@ async function createApprovedFacultyUser(data) {
     return toPublicUser(newUser);
 }
 
+async function createAccountForFaculty(data, sessionUser = null) {
+    const rawUsername = String(data.username || '').trim();
+    if (!validateUsername(rawUsername)) {
+        const err = new Error('Username must be 3–30 characters and contain only letters, numbers, dots, dashes, or underscores.');
+        err.status = 400; err.code = 'INVALID_USERNAME';
+        throw err;
+    }
+    const username = rawUsername.toLowerCase();
+
+    // Check duplicate username
+    if (registeredUsers.some(u => u.username === username)) {
+        const err = new Error(`Username "${rawUsername}" is already taken.`);
+        err.status = 409; err.code = 'USERNAME_EXISTS';
+        throw err;
+    }
+    if (db.isConfigured()) {
+        try {
+            const { rows } = await db.query('SELECT 1 FROM users WHERE LOWER(username) = LOWER($1) LIMIT 1', [username]);
+            if (rows.length > 0) {
+                const err = new Error(`Username "${rawUsername}" is already taken.`);
+                err.status = 409; err.code = 'USERNAME_EXISTS';
+                throw err;
+            }
+        } catch (dbErr) {
+            if (dbErr.code === 'USERNAME_EXISTS') throw dbErr;
+        }
+    }
+
+    const password = String(data.password || '');
+    if (!validatePassword(password)) {
+        const err = new Error(PASSWORD_ERROR_MESSAGE);
+        err.status = 400; err.code = 'INVALID_PASSWORD';
+        throw err;
+    }
+
+    if (data.confirmPassword != null && String(data.confirmPassword) !== password) {
+        const err = new Error('Passwords do not match.');
+        err.status = 400; err.code = 'PASSWORD_MISMATCH';
+        throw err;
+    }
+
+    const name = String(data.name || data.fullName || '').trim();
+    if (!name || name.length < 2) {
+        const err = new Error('Full name is required (minimum 2 characters).');
+        err.status = 400; err.code = 'INVALID_NAME';
+        throw err;
+    }
+
+    const phone = String(data.phone || '').trim();
+    if (phone && !validatePhone(phone)) {
+        const err = new Error('A valid phone number is required.');
+        err.status = 400; err.code = 'INVALID_PHONE';
+        throw err;
+    }
+
+    const rawSubjects = Array.isArray(data.subjects)
+        ? data.subjects
+        : String(data.subjects || '').split(',').map(s => s.trim()).filter(Boolean);
+    const subjects = rawSubjects.map(s => String(s).trim()).filter(s => s.length > 0);
+
+    const facultyId = data.facultyId;
+    if (!facultyId) {
+        const err = new Error('Faculty ID is required to link an existing faculty record.');
+        err.status = 400; err.code = 'MISSING_FACULTY_ID';
+        throw err;
+    }
+
+    // Duplicate account protection: A faculty record can have at most ONE active faculty login account.
+    let dbFacId = null;
+    if (db.isConfigured()) {
+        dbFacId = await repository.resolveFacultyDbId(null, facultyId, name);
+        if (dbFacId) {
+            const { rows } = await db.query(
+                "SELECT id, username FROM users WHERE role = 'faculty' AND faculty_id = $1 LIMIT 1",
+                [dbFacId]
+            );
+            if (rows.length > 0) {
+                const err = new Error(`This faculty member already has an account (${rows[0].username}).`);
+                err.status = 409; err.code = 'ACCOUNT_EXISTS';
+                throw err;
+            }
+        }
+    }
+
+    const targetFacIdStr = String(facultyId).trim().toLowerCase();
+    const dbFacIdStr = dbFacId != null ? String(dbFacId).trim().toLowerCase() : '';
+    const existingFacultyUser = registeredUsers.find(u =>
+        u.role === 'faculty' && u.facultyId != null && (
+            (targetFacIdStr && String(u.facultyId).trim().toLowerCase() === targetFacIdStr) ||
+            (u.facultyCode && targetFacIdStr && String(u.facultyCode).trim().toLowerCase() === targetFacIdStr) ||
+            (dbFacIdStr && String(u.facultyId).trim().toLowerCase() === dbFacIdStr)
+        )
+    );
+    if (existingFacultyUser) {
+        const err = new Error(`This faculty member already has an account (${existingFacultyUser.username}).`);
+        err.status = 409; err.code = 'ACCOUNT_EXISTS';
+        throw err;
+    }
+
+    const targetBranchCode = String(data.department || data.branchCode || (sessionUser ? sessionUser.department : '') || '').trim().toUpperCase();
+    const hosBranch = getBranch(targetBranchCode);
+    const targetBranchName = hosBranch && hosBranch.name ? hosBranch.name : targetBranchCode;
+
+    // Password hashing
+    const passwordHash = hashPassword(password);
+
+    // Save to PostgreSQL if DB configured
+    let dbUser = null;
+    if (db.isConfigured()) {
+        dbUser = await repository.saveUser({
+            username,
+            name,
+            phone: phone || null,
+            role: 'faculty',
+            departmentCode: targetBranchCode,
+            passwordHash,
+            status: 'active',
+            facultyId: facultyId,
+            subjects: subjects
+        });
+    }
+
+    // In memory: update / preserve faculty
+    let facultyRecord = null;
+    try {
+        facultyRecord = store.updateFacultyInMemory(facultyId, {
+            name,
+            phone: phone || null,
+            subjects: subjects.length ? subjects : undefined
+        });
+    } catch (_) {
+        facultyRecord = store.addFacultyInMemory({
+            id: facultyId,
+            name,
+            department: targetBranchCode,
+            phone: phone || null,
+            subjects: subjects,
+            status: 'active'
+        });
+    }
+
+    const newUser = {
+        id: (dbUser && dbUser.id) ? dbUser.id : (facultyRecord ? facultyRecord.id : `USER_${Date.now()}`),
+        username,
+        name,
+        phone: phone || null,
+        role: 'faculty',
+        department: targetBranchCode,
+        branchName: targetBranchName,
+        passwordHash,
+        subjects: subjects,
+        facultyId: facultyRecord ? facultyRecord.id : facultyId,
+        facultyName: name,
+        status: 'active',
+        createdAt: (dbUser && dbUser.createdAt) ? dbUser.createdAt : new Date().toISOString()
+    };
+
+    const existingIdx = registeredUsers.findIndex(u => u.username === username);
+    if (existingIdx >= 0) {
+        registeredUsers[existingIdx] = newUser;
+    } else {
+        registeredUsers.push(newUser);
+    }
+
+    return toPublicUser(newUser);
+}
+
+function syncFromDatabase(dbUsers) {
+    if (!Array.isArray(dbUsers)) return;
+    registeredUsers = dbUsers.map(u => ({
+        id: u.id,
+        username: u.username,
+        name: u.name,
+        phone: u.phone || null,
+        role: u.role,
+        department: u.department,
+        branchName: u.branchName || u.department,
+        passwordHash: u.passwordHash,
+        subjects: Array.isArray(u.subjects) ? u.subjects : [],
+        facultyId: u.facultyId,
+        facultyName: u.facultyName || u.name,
+        facultyCode: u.facultyCode || null,
+        status: u.status || 'active',
+        createdAt: u.createdAt ? (u.createdAt instanceof Date ? u.createdAt.toISOString() : String(u.createdAt)) : new Date().toISOString()
+    }));
+}
+
 function resetForTesting() {
     registeredUsers = [];
 }
@@ -724,10 +1044,13 @@ module.exports = {
     list,
     findById,
     findByUsername,
+    findByUsernameAsync,
     findHOSByBranch,
     authenticate,
+    authenticateAsync,
     register,
     createApprovedFacultyUser,
+    createAccountForFaculty,
     hasHOS,
     hasHOSForBranch,
     isInitialSetupAllowed,

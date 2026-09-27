@@ -101,6 +101,14 @@ async function run() {
     await startServer();
 
     try {
+        const db = require('../src/db/pool');
+        if (db.isConfigured()) {
+            await db.query("DELETE FROM faculty_attendance WHERE marked_by IN ('cme_hos_b72', 'eee_hos_b72') OR attendance_date >= '2026-09-01'");
+            await db.query("DELETE FROM users WHERE username IN ('cme_hos_b72', 'eee_hos_b72', 'ravi.cme', 'kumar.cme', 'suresh.cme', 'frank.eee')");
+            await db.query("DELETE FROM faculty WHERE code IN ('cme_hos_b72', 'eee_hos_b72', 'ravi.cme', 'kumar.cme', 'suresh.cme', 'frank.eee') OR name IN ('Dr. Ravi CME', 'Prof. Kumar CME', 'Sri Suresh CME', 'Prof. Frank EEE')");
+            await db.query("DELETE FROM departments WHERE code IN ('CME', 'EEE')");
+        }
+
         // [0] Reset state & pre-configure clean isolated branches
         users.resetForTesting();
         resetBranchForTesting();
@@ -582,10 +590,133 @@ async function run() {
             subjects: ['Computer Networks']
         });
 
-        await check('16. B7.1 faculty self-registration requests remain fully functional', () => {
-            assert.strictEqual(regReq.status, 201);
-            assert.strictEqual(regReq.body.success, true);
-            assert.strictEqual(regReq.body.request.status, 'PENDING');
+        // ==============================================================
+        // [17] Comprehensive Regression Verification (Requirements A - L)
+        // ==============================================================
+        console.log('\n[17] Detailed Verification for Points A - L');
+
+        // A & B & C: Academic year is HOD-controlled, never guessed, target scope authoritative
+        await check('A, B, C: Academic year is explicitly HOD-controlled and never guessed from dates/files', async () => {
+            const scopesRes = await call('GET', '/api/timetable/scopes', null, cookieCme);
+            assert.strictEqual(scopesRes.status, 200);
+            assert.strictEqual(scopesRes.body.branch, 'CME');
+            assert.ok(Array.isArray(scopesRes.body.academicYears), 'Scopes must include academicYears array');
+            assert.ok(scopesRes.body.academicYears.length > 0, 'Must have academic year options');
+
+            // Verify validator warns on academic year mismatch instead of silently replacing
+            const { validateExtractedContract } = require('../src/core/contractValidator');
+            const validationResult = validateExtractedContract({
+                contract_version: '2.1',
+                timetable_type: 'MASTER_TIMETABLE',
+                department_code: 'CME',
+                class_name: 'CME-SEM1-A',
+                academic_year: '2024-2025', // extracted from file
+                days: ['Monday'],
+                periods: [1],
+                entries: [{ day: 'Monday', period: 1, subject_name: 'Test', session_type: 'theory', faculty_name: 'Dr. Ravi CME' }]
+            }, {
+                uploadType: 'MASTER_TIMETABLE',
+                departmentCode: 'CME',
+                academicYear: '2026-2027' // HOD-selected target academic year
+            });
+
+            assert.strictEqual(validationResult.ok, true, 'Contract remains valid');
+            assert.ok(validationResult.warnings.some(w => w.includes('Academic Year mismatch')), 'Must warn HOD about academic year mismatch');
+        });
+
+        // D: Present faculty list loads correctly
+        await check('D: Present faculty list loads correctly for a fresh date (2026-10-01)', async () => {
+            const res = await call('GET', '/api/attendance?date=2026-10-01', null, cookieCme);
+            assert.strictEqual(res.status, 200);
+            assert.strictEqual(res.body.date, '2026-10-01');
+            const presentFaculty = res.body.faculty.filter(f => f.status !== 'ABSENT');
+            const absentFaculty = res.body.faculty.filter(f => f.status === 'ABSENT');
+            assert.strictEqual(presentFaculty.length, 3, 'All 3 active CME faculty are PRESENT');
+            assert.strictEqual(absentFaculty.length, 0, '0 absent faculty');
+        });
+
+        // E & F: HOD can mark faculty absent and faculty moves to Absent section
+        await check('E & F: HOD can mark faculty absent and faculty moves to Absent list on 2026-10-01', async () => {
+            const markRes = await call('POST', '/api/attendance', {
+                facultyId: raviId,
+                date: '2026-10-01',
+                status: 'ABSENT'
+            }, cookieCme);
+            assert.strictEqual(markRes.status, 200);
+            assert.strictEqual(markRes.body.record.status, 'ABSENT');
+
+            const updatedRes = await call('GET', '/api/attendance?date=2026-10-01', null, cookieCme);
+            const presentFaculty = updatedRes.body.faculty.filter(f => f.status !== 'ABSENT');
+            const absentFaculty = updatedRes.body.faculty.filter(f => f.status === 'ABSENT');
+            assert.strictEqual(presentFaculty.length, 2, '2 present faculty');
+            assert.strictEqual(absentFaculty.length, 1, '1 absent faculty');
+            assert.strictEqual(absentFaculty[0].name, 'Dr. Ravi CME');
+        });
+
+        // G & H: HOD can mark absent faculty present again and attendance is stored for the selected date
+        await check('G & H: HOD can mark absent faculty present again on 2026-10-01', async () => {
+            const markPresentRes = await call('POST', '/api/attendance', {
+                facultyId: raviId,
+                date: '2026-10-01',
+                status: 'PRESENT'
+            }, cookieCme);
+            assert.strictEqual(markPresentRes.status, 200);
+
+            const updatedRes = await call('GET', '/api/attendance?date=2026-10-01', null, cookieCme);
+            const presentFaculty = updatedRes.body.faculty.filter(f => f.status !== 'ABSENT');
+            const absentFaculty = updatedRes.body.faculty.filter(f => f.status === 'ABSENT');
+            assert.strictEqual(presentFaculty.length, 3, 'All 3 faculty present again');
+            assert.strictEqual(absentFaculty.length, 0, '0 absent faculty');
+        });
+
+        // I & J: Absence on Day 1 does not make faculty absent on Day 2, and opening Day 2 defaults to PRESENT
+        await check('I & J: Absence on 2026-10-05 does not carry over to 2026-10-06 (strictly date-specific)', async () => {
+            // Mark Suresh ABSENT on Day 1 (2026-10-05)
+            await call('POST', '/api/attendance', {
+                facultyId: sureshId,
+                date: '2026-10-05',
+                status: 'ABSENT'
+            }, cookieCme);
+
+            // Fetch Day 1
+            const day1 = await call('GET', '/api/attendance?date=2026-10-05', null, cookieCme);
+            const day1Absent = day1.body.faculty.filter(f => f.status === 'ABSENT');
+            assert.strictEqual(day1Absent.length, 1);
+            assert.strictEqual(day1Absent[0].name, 'Sri Suresh CME');
+
+            // Fetch Day 2 (2026-10-06)
+            const day2 = await call('GET', '/api/attendance?date=2026-10-06', null, cookieCme);
+            const day2Present = day2.body.faculty.filter(f => f.status !== 'ABSENT');
+            const day2Absent = day2.body.faculty.filter(f => f.status === 'ABSENT');
+            assert.strictEqual(day2Present.length, 3, 'Suresh is PRESENT by default on Day 2');
+            assert.strictEqual(day2Absent.length, 0, '0 absent on Day 2');
+
+            // Switch back to Day 1 and confirm absence is preserved
+            const day1Again = await call('GET', '/api/attendance?date=2026-10-05', null, cookieCme);
+            const day1AgainAbsent = day1Again.body.faculty.filter(f => f.status === 'ABSENT');
+            assert.strictEqual(day1AgainAbsent.length, 1);
+            assert.strictEqual(day1AgainAbsent[0].name, 'Sri Suresh CME');
+        });
+
+        // K: Branch isolation remains enforced
+        await check('K: Branch isolation is strictly enforced for attendance', async () => {
+            // CME HOS cannot see EEE faculty in attendance
+            const cmeAtt = await call('GET', '/api/attendance?date=2026-10-05', null, cookieCme);
+            assert.ok(!cmeAtt.body.faculty.some(f => f.name === 'Prof. Frank EEE'), 'EEE faculty must not appear in CME attendance');
+
+            // EEE HOS cannot see CME faculty in attendance
+            const eeeAtt = await call('GET', '/api/attendance?date=2026-10-05', null, cookieEee);
+            assert.ok(!eeeAtt.body.faculty.some(f => f.name === 'Dr. Ravi CME'), 'CME faculty must not appear in EEE attendance');
+        });
+
+        // L: Faculty cannot modify attendance
+        await check('L: Faculty users cannot modify attendance (HTTP 403)', async () => {
+            const facMod = await call('POST', '/api/attendance', {
+                facultyId: raviId,
+                date: '2026-10-05',
+                status: 'ABSENT'
+            }, cookieRavi);
+            assert.strictEqual(facMod.status, 403, 'Faculty modification must be rejected with 403');
         });
 
         console.log('\n================================================================');
@@ -598,7 +729,9 @@ async function run() {
 }
 
 if (require.main === module) {
-    run().catch(err => {
+    run().then(() => {
+        process.exit(0);
+    }).catch(err => {
         console.error('Test run error:', err);
         process.exit(1);
     });

@@ -18,7 +18,7 @@ async function testClassReuse() {
         return;
     }
 
-    const testBranch = 'TEST_REUSE_' + Math.floor(Math.random() * 10000);
+    const testBranch = 'TEST_REUSE_' + Date.now().toString(36) + '_' + Math.floor(Math.random() * 1000);
     await repository.addDepartment({
         code: testBranch,
         name: `Department ${testBranch}`,
@@ -141,7 +141,7 @@ async function testClassReuse() {
     // Re-import into CME + 2026-27 + SEM-5 + Section A -> reuses CME-A without duplicate constraint error.
     // =========================================================================
     console.log('\n--- PART 4 REGRESSION SCENARIO ---');
-    const cmeBranch = 'CME_P4_' + Math.floor(Math.random() * 10000);
+    const cmeBranch = 'CME_P4_' + Date.now().toString(36) + '_' + Math.floor(Math.random() * 1000);
     await repository.addDepartment({
         code: cmeBranch,
         name: `Department ${cmeBranch}`,

@@ -45,6 +45,33 @@ function run() {
         assert.ok(appCode.includes('navSchedule'), 'navSchedule referenced');
     });
 
+    console.log('\n[3] Master Timetable Target Scope UI & Academic Year Structure');
+    const indexHtml = fs.readFileSync(path.join(__dirname, '..', 'public', 'index.html'), 'utf8');
+
+    check('index.html defines #ttAcademicYear as a text input (NOT a select dropdown)', () => {
+        assert.ok(indexHtml.includes('<input type="text" id="ttAcademicYear"'), 'ttAcademicYear must be a text input');
+        assert.ok(!indexHtml.includes('<select id="ttAcademicYear"'), 'ttAcademicYear must not be a select element');
+    });
+
+    check('Target Scope contains Academic Year, Semester, and Section', () => {
+        assert.ok(indexHtml.includes('id="ttYearWrap"'), 'ttYearWrap exists');
+        assert.ok(indexHtml.includes('id="ttSemWrap"'), 'ttSemWrap exists');
+        assert.ok(indexHtml.includes('id="ttSecWrap"'), 'ttSecWrap exists');
+    });
+
+    check('app.js does not generate automatic academic year dropdown options', () => {
+        assert.ok(!appCode.includes("data.academicYears = ["), 'No hardcoded academicYears array generated');
+        assert.ok(!appCode.includes("fillSelect(yearEl"), 'No fillSelect on yearEl dropdown');
+    });
+
+    check('app.js validates non-empty Academic Year on import and approval', () => {
+        assert.ok(appCode.includes('Please enter an Academic Year (e.g. 2026-27) in the Target Scope'), 'Validates academic year before approving');
+    });
+
+    check('app.js warns when uploaded academic year differs from target academic year without overwriting', () => {
+        assert.ok(appCode.includes('Uploaded timetable academic year differs from the selected target academic year.'), 'Clear mismatch warning present');
+    });
+
     const { passed, failed } = counts();
     console.log('\n============================================================');
     console.log(`Frontend Verification: ${passed} passed, ${failed} failed.`);
