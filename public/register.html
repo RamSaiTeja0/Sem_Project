@@ -97,7 +97,7 @@
     </a>
     <h1>Academic Branch<br />Registration</h1>
     <p>
-      Create a new Head of Section (HOS) account to manage an independent academic branch, or add faculty members to your active branch.
+      Create a new Head of Department (HOD) account to manage an independent academic branch, or add faculty members to your active branch.
     </p>
 
     <ul class="login-points">
@@ -112,27 +112,27 @@
     <div class="login-card" style="width: min(540px, 100%);">
       <h2 id="registerTitle">Create Account</h2>
       <p class="muted" id="setupNotice" style="display:none; color: var(--brand-700); font-weight: 500;">
-        Create an independent Head of Section (HOS) account and configure your academic branch below.
+        Create an independent Head of Department (HOD) account and configure your academic branch below.
       </p>
 
       <form id="registerForm" novalidate style="margin-top: 18px;">
-        <!-- Flow B: HOS logged in creating faculty - prominent banner -->
+        <!-- Flow B: HOD logged in creating faculty - prominent banner -->
         <div id="hosFacultyHeader" style="display:none; margin-bottom: 14px;">
           <div style="font-size: 0.76rem; font-weight: 700; text-transform: uppercase; color: var(--ink-700); margin-bottom: 4px;">Account Type</div>
           <span class="badge badge-primary" style="font-size: 0.85rem; padding: 4px 10px;">Faculty Member</span>
-          <div style="font-size: 0.78rem; color: var(--ink-500); margin-top: 6px;">You are currently signed in as HOS. Create faculty accounts for your branch below.</div>
+          <div style="font-size: 0.78rem; color: var(--ink-500); margin-top: 6px;">You are currently signed in as HOD. Create faculty accounts for your branch below.</div>
           <div style="margin-top: 10px; display: flex; gap: 10px; align-items: center; font-size: 0.82rem; flex-wrap: wrap;">
             <a href="/dashboard#faculty" class="btn btn-secondary btn-sm" style="text-decoration:none; padding: 5px 12px; font-size: 0.82rem;">← Go to Faculty Management in Dashboard</a>
-            <button type="button" id="btnHosLogoutToRegister" class="btn btn-ghost btn-sm" style="font-size: 0.82rem; color: var(--brand-700); text-decoration: underline;">Logout to Register New Branch HOS</button>
+            <button type="button" id="btnHosLogoutToRegister" class="btn btn-ghost btn-sm" style="font-size: 0.82rem; color: var(--brand-700); text-decoration: underline;">Logout to Register New Branch HOD</button>
           </div>
         </div>
 
-        <!-- Flow B: Current Branch (Read-Only) for logged-in HOS creating faculty -->
+        <!-- Flow B: Current Branch (Read-Only) for logged-in HOD creating faculty -->
         <div id="currentBranchBox" style="display:none; margin-bottom: 16px; padding: 12px 14px; background: var(--brand-050); border: 1px solid var(--brand-200); border-radius: var(--radius-md);">
           <div style="font-size: 0.72rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--brand-700); margin-bottom: 4px;">Current Branch</div>
           <div style="font-size: 1.05rem; font-weight: 700; color: var(--ink-900);" id="currentBranchDisplay">—</div>
           <div style="font-size: 0.78rem; color: var(--ink-600); margin-top: 4px;">
-            Read-only · Automatically inherited from your authenticated HOS session.
+            Read-only · Automatically inherited from your authenticated HOD session.
           </div>
         </div>
 
@@ -145,7 +145,7 @@
             <label class="role-option is-selected" id="roleHOSLabel">
               <input type="radio" name="role" value="hos" id="roleHOS" checked />
               <div>
-                <div class="role-title">Head of Section (HOS)</div>
+                <div class="role-title">Head of Department (HOD)</div>
                 <div class="role-desc">Administrator for branch</div>
               </div>
             </label>
@@ -153,7 +153,7 @@
               <input type="radio" name="role" value="faculty_request" id="roleFaculty" />
               <div>
                 <div class="role-title">Faculty Registration</div>
-                <div class="role-desc">Request account from HOS</div>
+                <div class="role-desc">Request account from HOD</div>
               </div>
             </label>
           </div>
@@ -171,7 +171,7 @@
           </label>
         </div>
 
-        <!-- Flow A: Editable Branch inputs for New HOS registration -->
+        <!-- Flow A: Editable Branch inputs for New HOD registration -->
         <div class="field-row" id="branchRow">
           <label class="field">
             <span>Branch Name <em class="req" style="color: var(--danger-500);">*</em></span>
@@ -194,7 +194,7 @@
               <input type="text" id="regFacultyBranchCode" name="facultyBranchCode" placeholder="Or enter code (e.g. CME)" style="flex:1; text-transform:uppercase;" />
             </div>
             <small class="muted" style="font-size:0.75rem; margin-top:3px; display:block;">
-              Must match an existing registered branch. Your request will be sent to the HOS of this branch.
+              Must match an existing registered branch. Your request will be sent to the HOD of this branch.
             </small>
           </label>
         </div>
@@ -319,8 +319,8 @@
           <span>✓ Faculty Registration Request Submitted</span>
         </div>
         <p style="font-size:0.85rem; color:var(--ink-700, #374151); line-height:1.45;">
-          Your registration request has been submitted to the Head of Section for <strong id="succReqBranch"></strong>.
-          Your faculty account will be created once approved by the HOS, after which you can sign in using your username and password.
+          Your registration request has been submitted to the Head of Department for <strong id="succReqBranch"></strong>.
+          Your faculty account will be created once approved by the HOD, after which you can sign in using your username and password.
         </p>
         <div style="margin-top:14px; display:flex; gap:10px;">
           <a href="/login" class="btn btn-primary btn-sm" style="text-decoration:none;">Go to Sign in</a>

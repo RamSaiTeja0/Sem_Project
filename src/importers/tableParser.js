@@ -34,7 +34,7 @@ function detectLayout(header) {
     const hasFaculty = keys.some(k => k === 'faculty' || k === 'facultyname' || k === 'name' || k === 'staff');
     const hasDay = keys.includes('day');
     const hasPeriod = keys.includes('period');
-    if (hasFaculty && hasDay && hasPeriod) return 'long';
+    if (hasDay && hasPeriod) return 'long';
     const slotColumns = header.filter(h => parseSlotHeader(h) !== null).length;
     if (hasFaculty && slotColumns > 0) return 'matrix';
     if (slotColumns > 0) return 'matrix';
@@ -135,7 +135,8 @@ function parseTable(rows, options = {}) {
 
         grid.slice(1).forEach((row, n) => {
             const lineNumber = n + 2;
-            const facultyName = at(row, ['faculty', 'facultyname', 'name', 'staff']);
+            const fallbackFaculty = options.facultyName || (options.session && (options.session.facultyName || options.session.name || options.session.username)) || (options.isFacultyTimetable || options.uploadType === 'FACULTY_TIMETABLE' ? 'Faculty Member' : null);
+            const facultyName = at(row, ['faculty', 'facultyname', 'name', 'staff', 'teacher', 'instructor']) || fallbackFaculty;
             const dayRaw = at(row, ['day']);
             const periodRaw = at(row, ['period']);
             const subject = at(row, ['subject', 'course']);

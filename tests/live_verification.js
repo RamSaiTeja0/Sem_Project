@@ -319,7 +319,7 @@ async function runLiveVerification() {
 
     const indexPage = await request('/index.html');
     assert(indexPage.body.includes('id="facBranchInheritBadge"'), 'index.html has facBranchInheritBadge');
-    assert(indexPage.body.includes('Read-only · Automatically inherited from your authenticated HOS session'), 'index.html marks branch as read-only and auto-inherited');
+    assert(indexPage.body.includes('Automatically inherited from your authenticated HOD session') || indexPage.body.includes('Automatically inherited from your authenticated HOS session'), 'index.html marks branch as read-only and auto-inherited');
 
     // Create Faculty under CME HOS
     const cmeFacCreate = await request('/api/auth/register', {

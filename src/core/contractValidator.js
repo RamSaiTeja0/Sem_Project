@@ -85,12 +85,14 @@ function validateExtractedContract(payload, uploadRecord = null, options = {}) {
 
         // Faculty Authority check for FACULTY_TIMETABLE
         if (uploadRecord.uploadType === 'FACULTY_TIMETABLE' && uploadRecord.facultyId) {
-            const authFaculty = String(uploadRecord.facultyId).trim().toUpperCase();
+            // For Faculty -> My Timetable, the document faculty name is informational only.
+            // The authenticated faculty session is authoritative.
+            // Do NOT produce an error or reject the upload on faculty name mismatch.
             if (payload.faculty_name) {
-                const docFaculty = String(payload.faculty_name).trim().toUpperCase();
-                if (docFaculty !== authFaculty) {
-                    errors.push(`Faculty mismatch: document claims "${payload.faculty_name}", but upload belongs to "${uploadRecord.facultyId}".`);
-                    code = 'FACULTY_MISMATCH';
+                const authFaculty = String(uploadRecord.facultyId).trim();
+                const docFaculty = String(payload.faculty_name).trim();
+                if (docFaculty.toUpperCase() !== authFaculty.toUpperCase()) {
+                    warnings.push(`Faculty name note: document specifies "${docFaculty}", timetable will be associated with authenticated faculty "${authFaculty}".`);
                 }
             }
         }

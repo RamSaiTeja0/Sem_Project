@@ -309,14 +309,13 @@ async function run() {
             status: 'UPLOADED'
         });
 
-        await checkAsync('Faculty mismatch in Gemini output is rejected (FACULTY_MISMATCH)', async () => {
+        await checkAsync('Faculty name variation in Gemini output is accepted and bound to authoritative faculty', async () => {
             const result = await runExtractionPipeline('upl_b24_fac_mismatch', {
                 geminiTransport: async () => JSON.stringify(validExtractionPayload('CME', 'FACULTY_TIMETABLE', 'Dr. Different Faculty'))
             });
 
-            assert.strictEqual(result.success, false);
-            assert.strictEqual(result.status, 'FAILED');
-            assert.strictEqual(result.code, 'FACULTY_MISMATCH');
+            assert.strictEqual(result.success, true);
+            assert.strictEqual(result.status, 'PROCESSED');
         });
 
         // ---------------------------------------------------------------------

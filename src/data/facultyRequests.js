@@ -258,7 +258,9 @@ async function approveRequest(id, sessionUser) {
 
     // Strict branch ownership verification
     if (!hosDept || hosDept !== reqDept) {
-        const err = new Error(`Cross-branch access forbidden. You are HOS of ${hosDept}, but this request belongs to ${reqDept}.`);
+        const err = new Error(hosDept
+            ? `Cross-branch access forbidden. You are HOD of ${hosDept}, but this request belongs to ${reqDept}.`
+            : 'Forbidden: Your authenticated HOD account has no associated branch.');
         err.status = 403; err.code = 'FORBIDDEN';
         throw err;
     }
@@ -284,7 +286,7 @@ async function approveRequest(id, sessionUser) {
         throw err;
     }
 
-    const reviewer = sessionUser.username || sessionUser.name || 'HOS';
+    const reviewer = sessionUser.username || sessionUser.name || 'HOD';
     const reviewedAt = new Date().toISOString();
 
     // Transactionally create the actual faculty user account
@@ -342,7 +344,9 @@ async function rejectRequest(id, sessionUser, reason = null) {
 
     // Strict branch ownership verification
     if (!hosDept || hosDept !== reqDept) {
-        const err = new Error(`Cross-branch access forbidden. You are HOS of ${hosDept}, but this request belongs to ${reqDept}.`);
+        const err = new Error(hosDept
+            ? `Cross-branch access forbidden. You are HOD of ${hosDept}, but this request belongs to ${reqDept}.`
+            : 'Forbidden: Your authenticated HOD account has no associated branch.');
         err.status = 403; err.code = 'FORBIDDEN';
         throw err;
     }

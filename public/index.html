@@ -137,11 +137,63 @@
 
       <!-- ------------------------ MY SCHEDULE ------------------------ -->
       <section class="view" id="view-schedule">
+        <!-- 1. Faculty Personal Timetable Upload Card -->
+        <div class="card" id="facUploadCard">
+          <div class="card-head">
+            <div>
+              <h2>Upload My Timetable</h2>
+              <p>Upload your personal or department timetable sheet as an image (PNG, JPG, WebP), PDF, or spreadsheet (Excel, CSV) to extract and update your schedule.</p>
+            </div>
+          </div>
+          <div class="card-body">
+            <form id="facUploadForm" enctype="multipart/form-data">
+              <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 12px;">
+                <input type="file" id="facTimetableFile" name="timetable" accept=".png,.jpg,.jpeg,.webp,.pdf,.xlsx,.xls,.csv" style="display:none;" />
+                <button type="button" class="btn btn-secondary" id="btnFacChooseFile">Choose File</button>
+                <button type="submit" class="btn btn-primary" id="btnFacUpload" disabled>Preview Timetable</button>
+              </div>
+              <div id="facSelectedFile" style="margin-top: 10px; font-size: 0.9rem; color: var(--ink-700);">
+                Selected file: <span id="facSelectedFileName" class="mono" style="font-weight: 600;">None</span>
+              </div>
+              <div id="facUploadStatus" style="margin-top: 12px; display: none;"></div>
+            </form>
+          </div>
+        </div>
+
+        <!-- 2. Extracted Personal Timetable Preview Card (Visual Grid) -->
+        <div class="card" id="facPreviewCard" style="display: none; margin-bottom: 24px;">
+          <div class="card-head">
+            <div>
+              <h2>Extracted Schedule Preview</h2>
+              <p>Verify your extracted timetable periods before confirming.</p>
+            </div>
+            <div class="head-actions">
+              <span class="badge badge-primary" id="facPreviewCountBadge">0 slots</span>
+            </div>
+          </div>
+          <div class="card-body">
+            <div class="table-scroll">
+              <table class="timetable" id="facPreviewTable">
+                <thead id="facPreviewHead"></thead>
+                <tbody id="facPreviewBody"></tbody>
+              </table>
+            </div>
+            <div class="legend" style="margin-top: 10px;">
+              <span><i class="swatch swatch-busy"></i> Scheduled period</span>
+              <span><i class="swatch swatch-free"></i> Free period</span>
+            </div>
+            <div style="display: flex; gap: 12px; margin-top: 16px;">
+              <button type="button" class="btn btn-primary" id="btnFacConfirmSave">Confirm & Save to My Timetable</button>
+              <button type="button" class="btn btn-secondary" id="btnFacCancelPreview">Cancel</button>
+            </div>
+          </div>
+        </div>
+
         <div class="card">
           <div class="card-head">
             <div>
               <h2 id="schedTitle">My Timetable</h2>
-              <p id="schedSubtitle">Your weekly schedule. Add or modify your assigned periods.</p>
+              <p id="schedSubtitle">Your weekly schedule. Click any period to check faculty availability for substitution.</p>
             </div>
             <div class="head-actions">
               <span class="badge badge-primary" id="schedBranchBadge">Branch</span>
@@ -179,83 +231,12 @@
                 <tbody id="schedBody"></tbody>
               </table>
             </div>
+            <div class="legend">
+              <span><i class="swatch swatch-busy"></i> Scheduled period</span>
+              <span><i class="swatch swatch-free"></i> Free period</span>
+              <span><i class="swatch swatch-sel"></i> Selected</span>
+            </div>
             <div id="schedState" class="notice notice-info" style="margin-top:12px;">Loading schedule…</div>
-          </div>
-        </div>
-
-        <!-- Upload My Timetable Card (Phase B8) -->
-        <div class="card" id="facUploadCard" style="margin-bottom: 20px;">
-          <div class="card-head">
-            <div>
-              <h2>Upload My Timetable</h2>
-              <p>Upload your personal timetable sheet as an image (PNG, JPG, WebP), PDF, or spreadsheet (Excel, CSV).</p>
-            </div>
-            <div class="head-actions">
-              <button type="button" class="btn btn-sm btn-secondary" id="btnFacResetMine" title="Reset personal timetable back to official branch Master Timetable view">Revert to Master Timetable</button>
-            </div>
-          </div>
-          <div class="card-body">
-            <form id="facUploadForm" enctype="multipart/form-data">
-              <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 12px;">
-                <input type="file" id="facTimetableFile" name="timetable" accept=".png,.jpg,.jpeg,.webp,.pdf,.xlsx,.xls,.csv" style="display:none;" />
-                <button type="button" class="btn btn-secondary" id="btnFacChooseFile">Choose File</button>
-                <button type="submit" class="btn btn-primary" id="btnFacUpload" disabled>Preview Timetable</button>
-              </div>
-              <div id="facSelectedFile" style="margin-top: 10px; font-size: 0.9rem; color: var(--ink-700);">
-                Selected file: <span id="facSelectedFileName" class="mono" style="font-weight: 600;">None</span>
-              </div>
-              <div id="facUploadStatus" style="margin-top: 12px; display: none;"></div>
-            </form>
-
-            <!-- Faculty Timetable Preview & Confirmation Card -->
-            <div id="facPreviewCard" style="display: none; margin-top: 18px; padding-top: 18px; border-top: 1px solid var(--border);">
-              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-                <h3 style="margin: 0; font-size: 1.05rem;">Extracted Personal Timetable Preview</h3>
-                <span class="badge badge-primary" id="facPreviewCountBadge">0 slots</span>
-              </div>
-              <p class="muted" style="margin-bottom: 12px; font-size: 0.88rem;">Review your extracted timetable slots below. Confirming will save this directly to your personal schedule without altering the official branch Master Timetable.</p>
-              <div class="table-scroll">
-                <table class="timetable" id="facPreviewTable">
-                  <thead id="facPreviewHead"></thead>
-                  <tbody id="facPreviewBody"></tbody>
-                </table>
-              </div>
-              <div style="display: flex; gap: 10px; margin-top: 14px; align-items: center;">
-                <button type="button" class="btn btn-primary" id="btnFacConfirmSave">Confirm &amp; Save to My Timetable</button>
-                <button type="button" class="btn btn-secondary" id="btnFacCancelPreview">Cancel</button>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Faculty Timetable Entry Management Form -->
-        <div class="card" id="schedManageCard">
-          <div class="card-head">
-            <div>
-              <h2 id="schedFormTitle">Add / Edit My Timetable Slot</h2>
-              <p>Schedule a period for yourself. All entries are validated against branch availability.</p>
-            </div>
-          </div>
-          <div class="card-body">
-            <form id="schedEntryForm">
-              <input type="hidden" id="schedEntryId" value="" />
-              <div class="field-grid">
-                <label class="field"><span>Class</span><select id="schedEntryClass" required></select></label>
-                <label class="field"><span>Day</span><select id="schedEntryDay" required></select></label>
-                <label class="field"><span>Period</span><select id="schedEntryPeriod" required></select></label>
-                <label class="field"><span>Subject</span><select id="schedEntrySubject" required></select></label>
-                <label class="field"><span>Room</span><input type="text" id="schedEntryRoom" placeholder="e.g. C-401" /></label>
-                <label class="field"><span>Session Type</span>
-                  <select id="schedEntryType"><option value="theory">Theory</option><option value="lab">Lab</option></select>
-                </label>
-              </div>
-              <div class="actions" style="margin-top:14px; display:flex; gap:8px; align-items:center;">
-                <button type="submit" class="btn btn-primary" id="schedSaveBtn">Save Entry</button>
-                <button type="button" class="btn btn-secondary" id="schedResetBtn">Clear</button>
-                <button type="button" class="btn btn-danger" id="schedDeleteBtn" style="display:none; margin-left:auto;">Delete Entry</button>
-              </div>
-              <div id="schedEntryNote" style="margin-top:10px;"></div>
-            </form>
           </div>
         </div>
 
@@ -269,6 +250,71 @@
           <div class="card-body">
             <div id="schedResult" class="result-panel">
               <p class="muted">Select a period from the schedule above.</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Faculty Personal Timetable Slot Editor Modal -->
+        <div id="facEditModal" style="display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 10000; align-items: center; justify-content: center;">
+          <div class="card" style="width: 100%; max-width: 520px; margin: 20px; box-shadow: 0 10px 30px rgba(0,0,0,0.25); background: var(--surface);">
+            <div class="card-head">
+              <div>
+                <h3 id="facEditModalTitle" style="margin: 0; font-size: 1.1rem;">Edit My Timetable Slot</h3>
+                <p id="facEditModalSubtitle" class="muted" style="margin-top: 4px; font-size: 0.85rem;">Modify your personal timetable slot details.</p>
+              </div>
+              <div class="head-actions">
+                <button type="button" class="btn btn-sm btn-secondary" id="btnFacCloseEditModal">✕</button>
+              </div>
+            </div>
+            <div class="card-body">
+              <form id="facSlotEditForm">
+                <input type="hidden" id="facEditDay" />
+                <input type="hidden" id="facEditPeriod" />
+
+                <div class="field-grid" style="grid-template-columns: 1fr 1fr; gap: 12px;">
+                  <label class="field" style="grid-column: span 2;">
+                    <span>Subject Name <em class="req" style="color:var(--danger-500);">*</em></span>
+                    <input type="text" id="facEditSubject" placeholder="e.g. Software Engineering" required />
+                  </label>
+
+                  <label class="field">
+                    <span>Class / Section</span>
+                    <input type="text" id="facEditClass" placeholder="e.g. CSE-4-A" />
+                  </label>
+
+                  <label class="field">
+                    <span>Room / Lab</span>
+                    <input type="text" id="facEditRoom" placeholder="e.g. Room 101 / Lab 2" />
+                  </label>
+
+                  <label class="field">
+                    <span>Session Type</span>
+                    <select id="facEditType">
+                      <option value="theory">Theory</option>
+                      <option value="lab">Laboratory</option>
+                      <option value="activity">Activity</option>
+                    </select>
+                  </label>
+
+                  <label class="field">
+                    <span>Multi-Period Span</span>
+                    <select id="facEditSpanTo">
+                      <option value="">Single Period</option>
+                    </select>
+                  </label>
+
+                  <label class="field" style="grid-column: span 2; display: flex; align-items: center; gap: 8px; margin-top: 4px; cursor: pointer;">
+                    <input type="checkbox" id="facEditIsFree" style="width: auto;" />
+                    <span style="font-size: 0.9rem;">Mark as Free / Empty Period</span>
+                  </label>
+                </div>
+
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 18px; padding-top: 12px; border-top: 1px solid var(--border);">
+                  <button type="button" class="btn btn-secondary" id="btnFacCancelEditModal">Cancel</button>
+                  <button type="submit" class="btn btn-primary" id="btnFacSaveSlot">Save Slot</button>
+                </div>
+                <div id="facEditStatus" style="margin-top: 10px; display: none;"></div>
+              </form>
             </div>
           </div>
         </div>
@@ -822,7 +868,7 @@ Prof. B. Kumar, FREE, FREE, Database Management Systems"></textarea>
                   <span style="font-size: 0.72rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--brand-700); display: block; margin-bottom: 4px;">Current Branch</span>
                   <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
                     <span class="badge badge-primary" id="facBranchInheritBadge" style="font-size: 0.95rem; padding: 6px 14px; font-weight: 700;">Branch</span>
-                    <span class="muted" style="font-size: 0.82rem; color: var(--ink-600);">(Read-only · Automatically inherited from your authenticated HOS session)</span>
+                    <span class="muted" style="font-size: 0.82rem; color: var(--ink-600);">(Read-only · Automatically inherited from your authenticated HOD session)</span>
                   </div>
                 </div>
 
@@ -1262,7 +1308,7 @@ Prof. B. Kumar, FREE, FREE, Database Management Systems"></textarea>
           <div class="card-head">
             <div>
               <h2>My Attendance</h2>
-              <p>Your date-specific attendance history. Attendance is managed by your Head of Section (HOS).</p>
+              <p>Your date-specific attendance history. Attendance is managed by your Head of Department (HOD).</p>
             </div>
             <span class="badge badge-info">Read Only</span>
           </div>
@@ -1525,7 +1571,7 @@ Prof. B. Kumar, FREE, FREE, Database Management Systems"></textarea>
           <div class="card-head">
             <div>
               <h2>Request Exam Invigilation</h2>
-              <p>Submit a request to be assigned to exam invigilation duty. Your Head of Section (HOS) will review and approve it.</p>
+              <p>Submit a request to be assigned to exam invigilation duty. Your Head of Department (HOD) will review and approve it.</p>
             </div>
           </div>
           <div class="card-body">
@@ -1741,8 +1787,8 @@ Prof. B. Kumar, FREE, FREE, Database Management Systems"></textarea>
         <div class="card">
           <div class="card-head">
             <div>
-              <h2>Branch Substitutions (HOS Oversight)</h2>
-              <p>Read-only overview of peer-to-peer faculty substitutions in your branch. Faculty agree substitutions directly; HOS does not assign or approve substitutions.</p>
+              <h2>Branch Substitutions (HOD Oversight)</h2>
+              <p>Read-only overview of peer-to-peer faculty substitutions in your branch. Faculty agree substitutions directly; HOD does not assign or approve substitutions.</p>
             </div>
             <div class="head-actions">
               <span class="badge badge-primary" id="hosSubBranchBadge">Branch</span>

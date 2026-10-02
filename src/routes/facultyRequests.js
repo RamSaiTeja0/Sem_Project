@@ -114,12 +114,19 @@ router.get('/:id', requireHOS, async (req, res) => {
             });
         }
 
-        const hosDept = String(req.session.department || '').toUpperCase();
-        const reqDept = String(record.branchCode || record.branch_code).toUpperCase();
+        const hosDept = req.session && req.session.department ? String(req.session.department).trim().toUpperCase() : '';
+        const reqDept = String(record.branchCode || record.branch_code).trim().toUpperCase();
+
+        if (!hosDept) {
+            return res.status(403).json({
+                error: 'Forbidden: Your authenticated HOD account has no associated branch.',
+                code: 'FORBIDDEN'
+            });
+        }
 
         if (hosDept !== reqDept) {
             return res.status(403).json({
-                error: `Cross-branch access forbidden. You are HOS of ${hosDept}, but this request belongs to ${reqDept}.`,
+                error: `Cross-branch access forbidden. You are HOD of ${hosDept}, but this request belongs to ${reqDept}.`,
                 code: 'FORBIDDEN'
             });
         }

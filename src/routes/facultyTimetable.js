@@ -187,7 +187,6 @@ function matchFacultyInExtractedTimetable({ result, sessionFaculty, sessionDept,
 
     // 3. Match entries belonging to the authenticated faculty
     const matchedSlots = [];
-    const isSingleFacultyDoc = (extractedFacultyList.length === 1 && !rawEntries.some(e => e.faculty_name && !facultyMatchesCandidate(e.faculty_name, [extractedFacultyList[0]])));
 
     rawEntries.forEach(e => {
         if (e.is_free || e.isFree) return;
@@ -206,12 +205,6 @@ function matchFacultyInExtractedTimetable({ result, sessionFaculty, sessionDept,
 
         if (facText) {
             isMatch = facultyMatchesCandidate(facText, candidateNames, matchedLegend);
-        } else if (isSingleFacultyDoc) {
-            // Personal timetable with unannotated cell faculty belongs to the owner
-            const docOwner = rawContract.faculty_name || extractedFacultyList[0] || '';
-            if (!docOwner || facultyMatchesCandidate(docOwner, candidateNames, matchedLegend)) {
-                isMatch = true;
-            }
         }
 
         if (isMatch) {
@@ -236,11 +229,42 @@ function matchFacultyInExtractedTimetable({ result, sessionFaculty, sessionDept,
         }
     });
 
+    // For Faculty -> My Timetable, the authenticated faculty session is the authoritative owner.
+    // If no slots matched candidate tokens (e.g. spelling variations like "B . swarupa" vs "B. Swarupa",
+    // initials, abbreviations, no faculty name in document, or foreign name printed in document),
+    // associate all extracted teaching slots from this personal timetable document with the authenticated faculty.
+    if (matchedSlots.length === 0 && rawEntries.length > 0) {
+        rawEntries.forEach(e => {
+            if (e.is_free || e.isFree) return;
+            const subj = e.subject_name || e.subject_code || e.subject;
+            if (!subj || String(subj).trim().toUpperCase() === 'FREE') return;
+
+            const startP = parseInt(e.period != null ? e.period : e.period_number, 10);
+            if (!isNaN(startP)) {
+                const endP = e.span_to != null ? parseInt(e.span_to, 10) :
+                    (e.span != null ? (startP + parseInt(e.span, 10) - 1) : startP);
+                const canonicalDay = normalizeDayCanonical(e.day);
+                if (canonicalDay) {
+                    for (let p = startP; p <= endP; p++) {
+                        matchedSlots.push({
+                            day: canonicalDay,
+                            period: p,
+                            subject: subj,
+                            className: e.class_name || e.className || e.class || null,
+                            room: e.room_code || e.room || null,
+                            type: e.session_type || e.type || 'theory'
+                        });
+                    }
+                }
+            }
+        });
+    }
+
     return {
         matchedSlots,
         extractedFacultyList,
-        matchedFacultyName: matchedLegend ? matchedLegend.name : (matchedSlots.length > 0 ? sessionFaculty : null),
-        isSingleFacultyDoc
+        matchedFacultyName: sessionFaculty,
+        isSingleFacultyDoc: true
     };
 }
 
@@ -288,8 +312,7 @@ router.post('/preview', upload.single('timetable'), async (req, res) => {
         const {
             matchedSlots,
             extractedFacultyList,
-            matchedFacultyName,
-            isSingleFacultyDoc
+            matchedFacultyName
         } = matchFacultyInExtractedTimetable({
             result,
             sessionFaculty,
@@ -299,23 +322,7 @@ router.post('/preview', upload.single('timetable'), async (req, res) => {
 
         console.log(`[Faculty Timetable Preview] Extracted faculty: [${extractedFacultyList.join(', ')}], Matched slots for "${sessionFaculty}": ${matchedSlots.length}`);
 
-        // 4. Verify single-faculty timetable identity
-        if (isSingleFacultyDoc && extractedFacultyList.length === 1 && matchedSlots.length === 0) {
-            const detectedFac = extractedFacultyList[0];
-            const isMatch = [sessionFaculty, sessionUsername].some(c =>
-                nameTokensMatch(detectedFac, c) || normalizeName(detectedFac) === normalizeName(c)
-            );
-            if (!isMatch) {
-                return res.status(403).json({
-                    error: `This timetable belongs to another faculty member (${detectedFac}) and cannot be added to your My Timetable.`,
-                    code: 'FACULTY_MISMATCH',
-                    detectedFaculty: detectedFac,
-                    yourFaculty: sessionFaculty
-                });
-            }
-        }
-
-        // 5. Construct diagnostic explanation if 0 slots matched
+        // 4. Construct diagnostic explanation if 0 slots matched
         let diagnosticReason = null;
         if (matchedSlots.length === 0) {
             if (extractedFacultyList.length > 0) {
@@ -325,8 +332,37 @@ router.post('/preview', upload.single('timetable'), async (req, res) => {
             }
         }
 
-        const days = (result.meta && result.meta.days) || ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-        const periods = (result.meta && result.meta.periods) || [1, 2, 3, 4, 5, 6, 7];
+        let periodTimings = (result.meta && result.meta.periodTimings && Object.keys(result.meta.periodTimings).length > 0)
+            ? result.meta.periodTimings
+            : ((result.rawContract && result.rawContract.period_timings && Object.keys(result.rawContract.period_timings).length > 0)
+                ? result.rawContract.period_timings
+                : {});
+
+        if (!periodTimings || Object.keys(periodTimings).length === 0) {
+            try {
+                if (store.engine && typeof store.engine.getMeta === 'function') {
+                    const engineMeta = store.engine.getMeta();
+                    if (engineMeta && engineMeta.periodTimings && Object.keys(engineMeta.periodTimings).length > 0) {
+                        periodTimings = engineMeta.periodTimings;
+                    }
+                }
+            } catch (_) {}
+        }
+        if (!periodTimings || Object.keys(periodTimings).length === 0) {
+            try {
+                const demo = require('../data/demoTimetable');
+                if (demo && demo.meta && demo.meta.periodTimings) {
+                    periodTimings = demo.meta.periodTimings;
+                }
+            } catch (_) {}
+        }
+
+        const days = (result.meta && result.meta.days && result.meta.days.length > 0)
+            ? result.meta.days
+            : ((store.engine && store.engine.getDays && store.engine.getDays()) || ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']);
+        const periods = (result.meta && result.meta.periods && result.meta.periods.length > 0)
+            ? result.meta.periods
+            : ((store.engine && store.engine.getPeriods && store.engine.getPeriods()) || [1, 2, 3, 4, 5, 6, 7]);
 
         const contractEntries = matchedSlots.map(s => ({
             day: s.day,
@@ -346,7 +382,7 @@ router.post('/preview', upload.single('timetable'), async (req, res) => {
             branch: sessionDept,
             days,
             periods,
-            periodTimings: (result.meta && result.meta.periodTimings) || {},
+            periodTimings: periodTimings || {},
             slotCount: matchedSlots.length,
             totalSlots: matchedSlots.length,
             slots: matchedSlots,
@@ -433,6 +469,64 @@ router.post('/confirm', async (req, res) => {
 });
 
 /**
+ * POST /api/faculty/timetable/slot
+ * PATCH /api/faculty/timetable/slot
+ * Edits or marks free a single slot in the authenticated faculty's personal timetable.
+ */
+async function handleFacultySlotEdit(req, res) {
+    try {
+        if (!req.session || req.session.role !== 'faculty') {
+            return res.status(401).json({ success: false, error: 'Faculty sign-in required.', code: 'UNAUTHORIZED' });
+        }
+
+        const sessionFaculty = req.session.facultyName || req.session.name || req.session.username;
+        const facultyId = req.session.facultyId || sessionFaculty;
+        const body = req.body || {};
+
+        const day = body.day;
+        const period = body.period;
+        const subject = body.subject;
+        const className = body.className || body.class;
+        const room = body.room;
+        const type = body.type || body.sessionType || 'theory';
+        const spanTo = body.spanTo || body.span_to || null;
+        const isFree = Boolean(body.isFree || body.is_free || (!subject || subject.trim() === '' || subject.trim().toLowerCase() === 'free'));
+
+        if (!day || period == null) {
+            return res.status(400).json({ error: 'Day and period are required.', code: 'MISSING_FIELDS' });
+        }
+
+        let result;
+        if (db.isConfigured() && store.usingDatabase) {
+            result = await repository.saveFacultyPersonalSlot(facultyId, {
+                day, period, subject, className, room, type, spanTo, isFree
+            });
+        } else {
+            result = store.saveFacultyPersonalSlotInMemory(sessionFaculty, {
+                day, period, subject, className, room, type, spanTo, isFree
+            });
+        }
+
+        return res.json({
+            success: true,
+            saved: true,
+            faculty: sessionFaculty,
+            slot: result,
+            message: isFree ? 'Slot marked free.' : 'Personal timetable slot updated successfully.'
+        });
+    } catch (err) {
+        console.error('[Faculty Slot Edit Error]', err);
+        return res.status(err.status || 500).json({
+            error: err.message || 'Failed to update personal timetable slot.',
+            code: err.code || 'SLOT_EDIT_FAILED'
+        });
+    }
+}
+
+router.post('/slot', handleFacultySlotEdit);
+router.patch('/slot', handleFacultySlotEdit);
+
+/**
  * GET /api/faculty/timetable/mine
  * Retrieves the logged-in faculty's personal timetable (or falls back to master timetable slots).
  */
@@ -454,27 +548,41 @@ router.get('/mine', async (req, res) => {
         const periods = meta.periods || [1, 2, 3, 4, 5, 6, 7];
 
         if (personalSlots && personalSlots.length > 0) {
+            const slotMap = new Map();
+            personalSlots.forEach(s => {
+                const dKey = normalizeDayCanonical(s.day);
+                const pMatch = String(s.period != null ? s.period : s.period_number || '').trim().match(/(\d+)/);
+                const pKey = pMatch ? parseInt(pMatch[1], 10) : null;
+                if (dKey && pKey != null) {
+                    slotMap.set(`${dKey}|${pKey}`, s);
+                }
+            });
+
             const cells = [];
             days.forEach(day => {
                 periods.forEach(period => {
-                    const match = personalSlots.find(s => (s.day === day || normalizeDayCanonical(s.day) === day) && s.period === period);
+                    const dKey = normalizeDayCanonical(day);
+                    const pMatch = String(period).trim().match(/(\d+)/);
+                    const pKey = pMatch ? parseInt(pMatch[1], 10) : (parseInt(period, 10) || 1);
+                    const match = slotMap.get(`${dKey}|${pKey}`);
                     if (match) {
                         cells.push({
                             day,
-                            period,
+                            period: pKey,
                             subject: match.subject,
                             faculty: sessionFaculty,
                             facultyId,
-                            className: match.className,
-                            room: match.room,
-                            type: match.type || 'theory',
+                            className: match.className || match.class_name || null,
+                            room: match.room || match.room_code || null,
+                            type: match.type || match.session_type || 'theory',
+                            spanTo: match.spanTo || match.span_to || null,
                             status: 'busy',
                             isPersonal: true
                         });
                     } else {
                         cells.push({
                             day,
-                            period,
+                            period: pKey,
                             subject: null,
                             faculty: sessionFaculty,
                             facultyId,

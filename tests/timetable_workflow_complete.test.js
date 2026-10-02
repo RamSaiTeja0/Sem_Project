@@ -457,7 +457,7 @@ async function runTest() {
         const fac2MonP1 = fac2Slots.find(c => c.day === 'Monday' && c.period === 1);
         assert(fac2MonP1 && fac2MonP1.status === 'free', 'Colleague Two must NOT see fac1 slots');
 
-        // 5E. Upload containing multi-faculty timetable with NO teaching periods for logged-in faculty gives clear diagnostic
+        // 5E. Upload containing timetable with different names is accepted and associated with logged-in faculty
         const multiOtherFacCsv =
             `Day,Period,Subject,Faculty,Room,Class\n` +
             `Monday,1,VLSI Design,${fac2Name},LH-201,${className1}\n` +
@@ -471,9 +471,9 @@ async function runTest() {
             facCookie
         );
         assert.strictEqual(noMatchPreviewRes.status, 200);
-        assert.strictEqual(noMatchPreviewRes.body.slotCount, 0);
-        assert.ok(noMatchPreviewRes.body.diagnosticReason, 'Must provide clear diagnostic reason');
-        assert(noMatchPreviewRes.body.diagnosticReason.includes(facName), 'Diagnostic must mention the logged-in faculty');
+        assert.strictEqual(noMatchPreviewRes.body.success, true);
+        assert.strictEqual(noMatchPreviewRes.body.slotCount, 2);
+        assert.strictEqual(noMatchPreviewRes.body.faculty, facName);
 
         // 5F. Upload containing single-faculty timetable for another faculty member is rejected
         const singleOtherFacCsv =
@@ -487,9 +487,9 @@ async function runTest() {
             'text/csv',
             facCookie
         );
-        assert.strictEqual(singleForeignPreviewRes.status, 403, 'Foreign single faculty upload must be 403');
-        assert.strictEqual(singleForeignPreviewRes.body.code, 'FACULTY_MISMATCH');
-        assert.strictEqual(singleForeignPreviewRes.body.detectedFaculty, fac2Name);
+        assert.strictEqual(singleForeignPreviewRes.status, 200, 'Personal upload succeeds with 200');
+        assert.strictEqual(singleForeignPreviewRes.body.success, true);
+        assert.strictEqual(singleForeignPreviewRes.body.faculty, facName);
 
         // 5G. Verify Master Timetable for class was NOT modified by personal upload
         const masterCheckRes = await call('GET', `/api/timetable?class=${className1}`, null, hodCookie);

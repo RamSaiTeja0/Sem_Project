@@ -22,21 +22,22 @@ function syncFromDatabase(dbUsers = []) {
     for (const u of dbUsers) {
         const uname = String(u.username || '').toLowerCase();
         const existingIdx = registeredUsers.findIndex(r => r.username.toLowerCase() === uname);
+        const dept = u.department ? String(u.department).trim().toUpperCase() : '';
         const item = {
             id: u.id,
             username: uname,
             name: u.name,
             phone: u.phone || null,
             role: u.role,
-            department: u.department || '',
-            branchName: u.branchName || u.department || '',
+            department: dept,
+            branchName: u.branchName || dept,
             passwordHash: u.passwordHash,
             subjects: Array.isArray(u.subjects) ? u.subjects : [],
             facultyId: u.facultyId || null,
             facultyName: u.facultyName || (u.role === 'faculty' ? u.name : null),
             facultyCode: u.facultyCode || null,
             status: u.status || 'active',
-            createdAt: u.createdAt || new Date().toISOString()
+            createdAt: u.createdAt ? (u.createdAt instanceof Date ? u.createdAt.toISOString() : String(u.createdAt)) : new Date().toISOString()
         };
         if (existingIdx >= 0) {
             registeredUsers[existingIdx] = item;
@@ -217,7 +218,7 @@ async function register(data, sessionUser = null) {
         // Faculty accounts MUST be created by an authenticated HOS session
         const isAuthorizedHOS = sessionUser && (sessionUser.role === 'hos' || sessionUser.role === 'coordinator');
         if (!isAuthorizedHOS) {
-            const err = new Error('Public faculty creation is not allowed. Faculty accounts must be created by the Head of Section (HOS) for your branch.');
+            const err = new Error('Public faculty creation is not allowed. Faculty accounts must be created by the Head of Department (HOD) for your branch.');
             err.status = 403; err.code = 'FORBIDDEN';
             throw err;
         }
@@ -226,7 +227,7 @@ async function register(data, sessionUser = null) {
         targetBranchName = hosBranch && hosBranch.name ? hosBranch.name : targetBranchCode;
 
         if (!targetBranchCode) {
-            const err = new Error('Could not inherit branch from your authenticated HOS session.');
+            const err = new Error('Could not inherit branch from your authenticated HOD session.');
             err.status = 400; err.code = 'MISSING_BRANCH_CONTEXT';
             throw err;
         }
@@ -362,14 +363,15 @@ async function register(data, sessionUser = null) {
 
 function toPublicUser(user) {
     if (!user) return null;
+    const dept = user.department ? String(user.department).trim().toUpperCase() : '';
     return {
         id: user.id,
         username: user.username,
         name: user.name,
         phone: user.phone || null,
         role: user.role,
-        department: user.department,
-        branchName: user.branchName || user.department,
+        department: dept,
+        branchName: user.branchName || dept,
         subjects: Array.isArray(user.subjects) ? user.subjects : [],
         facultyName: user.facultyName || (user.role === 'faculty' ? user.name : null),
         facultyId: user.facultyId || null,
@@ -389,7 +391,7 @@ function authenticate(username, password) {
     const registered = registeredUsers.find(u => u.username === wanted);
     if (registered) {
         if (registered.status === 'inactive') {
-            const err = new Error('Account is deactivated. Please contact your Head of Section.');
+            const err = new Error('Account is deactivated. Please contact your Head of Department.');
             err.status = 403;
             err.code = 'ACCOUNT_DEACTIVATED';
             throw err;
@@ -400,7 +402,7 @@ function authenticate(username, password) {
                 (f.name && f.name.toLowerCase() === registered.name.toLowerCase())
             );
             if (fac && fac.status === 'inactive') {
-                const err = new Error('Account is deactivated. Please contact your Head of Section.');
+                const err = new Error('Account is deactivated. Please contact your Head of Department.');
                 err.status = 403;
                 err.code = 'ACCOUNT_DEACTIVATED';
                 throw err;
@@ -454,7 +456,7 @@ function authenticate(username, password) {
         const member = faculty.find(f => slug(f.name) === wanted || (f.id && String(f.id).toLowerCase() === wanted));
         if (member) {
             if (member.status === 'inactive') {
-                const err = new Error('Account is deactivated. Please contact your Head of Section.');
+                const err = new Error('Account is deactivated. Please contact your Head of Department.');
                 err.status = 403;
                 err.code = 'ACCOUNT_DEACTIVATED';
                 throw err;
@@ -506,7 +508,7 @@ async function authenticateAsync(username, password) {
             if (rows.length > 0) {
                 const dbUser = rows[0];
                 if (dbUser.status === 'inactive') {
-                    const err = new Error('Account is deactivated. Please contact your Head of Section.');
+                    const err = new Error('Account is deactivated. Please contact your Head of Department.');
                     err.status = 403;
                     err.code = 'ACCOUNT_DEACTIVATED';
                     throw err;
@@ -1014,26 +1016,6 @@ async function createAccountForFaculty(data, sessionUser = null) {
     }
 
     return toPublicUser(newUser);
-}
-
-function syncFromDatabase(dbUsers) {
-    if (!Array.isArray(dbUsers)) return;
-    registeredUsers = dbUsers.map(u => ({
-        id: u.id,
-        username: u.username,
-        name: u.name,
-        phone: u.phone || null,
-        role: u.role,
-        department: u.department,
-        branchName: u.branchName || u.department,
-        passwordHash: u.passwordHash,
-        subjects: Array.isArray(u.subjects) ? u.subjects : [],
-        facultyId: u.facultyId,
-        facultyName: u.facultyName || u.name,
-        facultyCode: u.facultyCode || null,
-        status: u.status || 'active',
-        createdAt: u.createdAt ? (u.createdAt instanceof Date ? u.createdAt.toISOString() : String(u.createdAt)) : new Date().toISOString()
-    }));
 }
 
 function resetForTesting() {

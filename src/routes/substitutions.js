@@ -51,7 +51,7 @@ function requireFaculty(req, res, next) {
 
     if (req.session.role !== 'faculty') {
         return res.status(403).json({
-            error: 'This action is reserved for faculty members only. HOS cannot create, accept, or manage faculty substitutions.',
+            error: 'This action is reserved for faculty members only. HOD cannot create, accept, or manage faculty substitutions.',
             code: 'FORBIDDEN'
         });
     }
@@ -72,14 +72,14 @@ function requireHOS(req, res, next) {
 
     if (req.session.role === 'faculty') {
         return res.status(403).json({
-            error: 'Faculty members cannot access the HOS substitution overview. Use /api/substitutions/my or /incoming.',
+            error: 'Faculty members cannot access the HOD substitution overview. Use /api/substitutions/my or /incoming.',
             code: 'FORBIDDEN'
         });
     }
 
     if (!['hos', 'coordinator', 'admin'].includes(req.session.role)) {
         return res.status(403).json({
-            error: 'This action requires Head of Section (HOS) or Administrator role.',
+            error: 'This action requires Head of Department (HOD) or Administrator role.',
             code: 'FORBIDDEN'
         });
     }

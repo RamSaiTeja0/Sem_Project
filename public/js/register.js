@@ -196,8 +196,8 @@
             if (currentBranchBox) currentBranchBox.style.display = 'none';
 
             if (isHOS) {
-                // Initial HOS creating new branch: inputs are EMPTY and EDITABLE
-                if (registerTitle) registerTitle.textContent = 'Create Head of Section Account';
+                // Initial HOD creating new branch: inputs are EMPTY and EDITABLE
+                if (registerTitle) registerTitle.textContent = 'Create Head of Department Account';
                 if (subjectsSec) subjectsSec.style.display = 'none';
                 if (branchRow) branchRow.style.display = 'grid';
                 if (facultyBranchRow) facultyBranchRow.style.display = 'none';
@@ -208,7 +208,7 @@
                 }
                 if (submitBtn) {
                     submitBtn.disabled = false;
-                    submitBtn.textContent = 'Register HOS Account';
+                    submitBtn.textContent = 'Register HOD Account';
                 }
             } else {
                 // Public visitor selected Faculty Registration (Flow C)
@@ -495,7 +495,7 @@
                                 submitBtn.textContent = 'Submit Registration Request';
                             }
 
-                            showMessage('Registration request submitted successfully for Head of Section review.', 'ok');
+                            showMessage('Registration request submitted successfully for Head of Department review.', 'ok');
                             var panel = el('facultyRequestSuccessPanel');
                             if (panel) {
                                 if (el('succReqBranch')) {
@@ -589,7 +589,7 @@
                         if (res.status >= 400) {
                             if (submitBtn) {
                                 submitBtn.disabled = false;
-                                submitBtn.textContent = isHOSSession ? 'Create Faculty Account' : 'Register HOS Account';
+                                submitBtn.textContent = isHOSSession ? 'Create Faculty Account' : 'Register HOD Account';
                             }
                             showMessage((res.data && res.data.error) || 'Registration failed. Please check your inputs.', 'error');
                             return;
@@ -628,7 +628,7 @@
                     .catch(function (err) {
                         if (submitBtn) {
                             submitBtn.disabled = false;
-                            submitBtn.textContent = isHOSSession ? 'Create Faculty Account' : 'Register HOS Account';
+                            submitBtn.textContent = isHOSSession ? 'Create Faculty Account' : 'Register HOD Account';
                         }
                         showMessage('Network error during registration: ' + err.message, 'error');
                     });

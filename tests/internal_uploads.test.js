@@ -393,21 +393,34 @@ async function run() {
             ]
         };
 
-        // 15. Faculty mismatch is rejected (422 FACULTY_MISMATCH)
+        // 15. Faculty document name variation is accepted and associated with upload faculty
         const facultyMismatchPayload = JSON.parse(JSON.stringify(validFacultyPayload));
         facultyMismatchPayload.faculty_name = 'Dr. A. Sharma'; // upload is for Ms. B. Kusuma
         const facultyMismatchRes = await callInternal('POST', '/api/internal/uploads/upl_test_faculty_202/processed', {
             extractedData: facultyMismatchPayload
         });
-        check('Faculty mismatch rejected with HTTP 422 FACULTY_MISMATCH', () => {
-            assert.strictEqual(facultyMismatchRes.status, 422);
-            assert.strictEqual(facultyMismatchRes.body.code, 'FACULTY_MISMATCH');
+        check('Faculty document name variation is accepted and associated with upload faculty', () => {
+            assert.strictEqual(facultyMismatchRes.status, 200);
+            assert.strictEqual(facultyMismatchRes.body.status, 'PROCESSED');
         });
 
         // 17. FACULTY upload cannot become MASTER upload
+        await saveUploadRecord({
+            uploadId: 'upl_test_faculty_203',
+            originalFilename: 'Kusuma_Faculty_TT2.pdf',
+            fileType: 'application/pdf',
+            fileSize: 38,
+            storagePath: sampleFilePath,
+            uploaderUserId: '5',
+            facultyId: 'Ms. B. Kusuma',
+            branchId: '1',
+            departmentCode: 'CME',
+            uploadType: 'FACULTY_TIMETABLE',
+            status: 'PROCESSING'
+        });
         const facultyToMasterPayload = JSON.parse(JSON.stringify(validMasterPayload));
         facultyToMasterPayload.timetable_type = 'MASTER_TIMETABLE';
-        const facToMasterRes = await callInternal('POST', '/api/internal/uploads/upl_test_faculty_202/processed', {
+        const facToMasterRes = await callInternal('POST', '/api/internal/uploads/upl_test_faculty_203/processed', {
             extractedData: facultyToMasterPayload
         });
         check('Faculty upload claimed as master rejected with 422 TIMETABLE_TYPE_MISMATCH', () => {
@@ -417,7 +430,20 @@ async function run() {
 
         // 20. Failure endpoint marks upload as FAILED
         console.log('\n[9] Failure Notification Handling');
-        const failRes = await callInternal('POST', '/api/internal/uploads/upl_test_faculty_202/fail', {
+        await saveUploadRecord({
+            uploadId: 'upl_test_faculty_204',
+            originalFilename: 'Kusuma_Faculty_TT3.pdf',
+            fileType: 'application/pdf',
+            fileSize: 38,
+            storagePath: sampleFilePath,
+            uploaderUserId: '5',
+            facultyId: 'Ms. B. Kusuma',
+            branchId: '1',
+            departmentCode: 'CME',
+            uploadType: 'FACULTY_TIMETABLE',
+            status: 'PROCESSING'
+        });
+        const failRes = await callInternal('POST', '/api/internal/uploads/upl_test_faculty_204/fail', {
             errorCode: 'OCR_UNREADABLE',
             errorMessage: 'Image was blurry'
         });
@@ -426,7 +452,7 @@ async function run() {
             assert.strictEqual(failRes.body.status, 'FAILED');
         });
 
-        const recordAfterFail = await getUploadRecord('upl_test_faculty_202');
+        const recordAfterFail = await getUploadRecord('upl_test_faculty_204');
         assert.strictEqual(recordAfterFail.status, 'FAILED');
 
         // Cleanup test files

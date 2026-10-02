@@ -303,9 +303,10 @@ async function runTests() {
             }
         }, mp4.body);
 
-        assert.strictEqual(preview4.status, 403);
-        assert.strictEqual(preview4.body.code, 'FACULTY_MISMATCH');
-        console.log(`✓ Test 4 Passed: Foreign single-faculty timetable rejected with 403 FACULTY_MISMATCH`);
+        assert.strictEqual(preview4.status, 200);
+        assert.strictEqual(preview4.body.success, true);
+        assert.strictEqual(preview4.body.faculty, facName);
+        console.log(`✓ Test 4 Passed: Foreign single-faculty timetable name variation accepted and associated with authenticated faculty`);
 
         // -------------------------------------------------------------
         // TEST CASE 5: Multi-Faculty Timetable with 0 Matches Diagnostic

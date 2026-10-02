@@ -273,7 +273,7 @@
         state.user = session && session.user ? session.user : null;
         var name = state.user ? state.user.name : 'Guest';
         var role = state.user
-            ? (state.user.role === 'faculty' ? 'Faculty · ' + state.user.department : (state.user.role === 'hos' ? 'HOS · ' + state.user.department : 'HOS / Coordinator'))
+            ? (state.user.role === 'faculty' ? 'Faculty · ' + state.user.department : (state.user.role === 'hos' ? 'HOD · ' + state.user.department : 'HOD / Coordinator'))
             : (session && session.authRequired ? 'Sign-in required' : 'Not signed in');
 
         if (el('userName')) el('userName').textContent = name;
@@ -397,6 +397,10 @@
             }
         }
 
+        if (el('facUploadCard')) {
+            el('facUploadCard').style.display = isFaculty ? '' : 'none';
+        }
+
         var about = el('aboutAuth');
         if (about) {
             about.textContent = (session && session.authRequired ? 'Required' : 'Optional') +
@@ -443,7 +447,7 @@
             if (el('cfgBranchSem')) el('cfgBranchSem').readOnly = isFaculty;
             if (note) {
                 note.innerHTML = isFaculty
-                    ? notice('Signed in as faculty (read-only view). Branch configuration can only be modified by the Head of Section (HOS).', 'info')
+                    ? notice('Signed in as faculty (read-only view). Branch configuration can only be modified by the Head of Department (HOD).', 'info')
                     : '';
             }
         }).catch(function (err) {
@@ -489,14 +493,41 @@
     }
 
     // -------------------------------------------------------- timetable
+    var DAY_CANONICAL_MAP = {
+        'MON': 'Monday', 'MONDAY': 'Monday', 'M': 'Monday',
+        'TUE': 'Tuesday', 'TUES': 'Tuesday', 'TUESDAY': 'Tuesday', 'TU': 'Tuesday',
+        'WED': 'Wednesday', 'WEDNESDAY': 'Wednesday', 'W': 'Wednesday',
+        'THU': 'Thursday', 'THUR': 'Thursday', 'THURS': 'Thursday', 'THURSDAY': 'Thursday', 'TH': 'Thursday',
+        'FRI': 'Friday', 'FRIDAY': 'Friday', 'F': 'Friday',
+        'SAT': 'Saturday', 'SATURDAY': 'Saturday', 'S': 'Saturday',
+        'SUN': 'Sunday', 'SUNDAY': 'Sunday'
+    };
+
+    function normDayKey(day) {
+        if (!day) return '';
+        var s = String(day).trim().toUpperCase();
+        return DAY_CANONICAL_MAP[s] || (s.charAt(0) + s.slice(1).toLowerCase());
+    }
+
+    function normPeriodKey(period) {
+        if (period == null) return null;
+        var m = String(period).trim().match(/(\d+)/);
+        return m ? parseInt(m[1], 10) : null;
+    }
+
     /**
      * Render a clickable grid. Every cell carries its own metadata in dataset
      * attributes, and clicking one calls onSelect with that metadata.
      */
-    function renderGrid(headId, bodyId, grid, timings, onSelect) {
+    function renderGrid(headId, bodyId, grid, timings, onSelect, options) {
         var head = el(headId);
         var body = el(bodyId);
         if (!head || !body) return;
+
+        options = options || {};
+        var isFacultyView = Boolean(options.isFaculty || (grid && grid.view === 'faculty') || (headId === 'schedHead') || (headId === 'facPreviewHead'));
+        var isEditable = Boolean(options.editable && !isFacultyView);
+        var showEditIndicator = options.showEditIndicator !== undefined ? Boolean(options.showEditIndicator) : true;
 
         var hasEntries = grid && grid.cells && grid.cells.some(function (c) { return Boolean(c.subject); });
         var box = el('ttState');
@@ -510,20 +541,38 @@
             }
         }
 
+        var periodTimingsMap = timings || (grid && grid.periodTimings) || {};
+
         var headHtml = '<tr><th class="day-col">Day</th>';
-        grid.periods.forEach(function (period) {
-            var timing = (timings || {})[String(period)] || {};
-            headHtml += '<th>P' + esc(period) +
-                (timing.start ? '<small>' + esc(timing.start) + '–' + esc(timing.end) + '</small>' : '') +
-                '</th>';
+        (grid.periods || [1, 2, 3, 4, 5, 6, 7]).forEach(function (period) {
+            var pNum = normPeriodKey(period);
+            if (pNum == null) pNum = period;
+            var timing = periodTimingsMap[String(period)] || periodTimingsMap[String(pNum)] || periodTimingsMap[Number(pNum)] || periodTimingsMap[period] || {};
+            if (typeof timing === 'string') {
+                var parts = timing.split(/–|-/);
+                timing = { start: parts[0] ? parts[0].trim() : '', end: parts[1] ? parts[1].trim() : '' };
+            }
+            var timingText = '';
+            if (timing && timing.start && timing.end) {
+                timingText = '<small>' + esc(timing.start) + '–' + esc(timing.end) + '</small>';
+            } else if (timing && (timing.start || timing.end)) {
+                timingText = '<small>' + esc(timing.start || timing.end) + '</small>';
+            }
+            headHtml += '<th>P' + esc(pNum) + timingText + '</th>';
         });
         head.innerHTML = headHtml + '</tr>';
 
         var byKey = {};
-        grid.cells.forEach(function (cell) { byKey[cell.day + '|' + cell.period] = cell; });
+        (grid.cells || []).forEach(function (cell) {
+            var dKey = normDayKey(cell.day);
+            var pKey = normPeriodKey(cell.period);
+            if (dKey && pKey != null) {
+                byKey[dKey + '|' + pKey] = cell;
+            }
+        });
 
         body.innerHTML = '';
-        grid.days.forEach(function (day) {
+        (grid.days || ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']).forEach(function (day) {
             var row = document.createElement('tr');
             var dayCell = document.createElement('th');
             dayCell.className = 'day-col';
@@ -531,14 +580,31 @@
             dayCell.textContent = day;
             row.appendChild(dayCell);
 
-            grid.periods.forEach(function (period) {
-                var cell = byKey[day + '|' + period] || {
-                    day: day, period: period, subject: null, faculty: null,
+            var coveredUntil = 0;
+            (grid.periods || [1, 2, 3, 4, 5, 6, 7]).forEach(function (period) {
+                var pNum = normPeriodKey(period);
+                if (pNum == null) pNum = parseInt(period, 10) || 1;
+                if (pNum <= coveredUntil) return;
+
+                var dKey = normDayKey(day);
+                var cell = byKey[dKey + '|' + pNum] || {
+                    day: day, period: pNum, subject: null, faculty: null,
                     className: grid.name, room: null, status: 'free'
                 };
 
+                var spanTo = cell.spanTo || cell.span_to;
+                var spanToNum = spanTo ? parseInt(spanTo, 10) : 0;
+                var colspan = 1;
+                if (spanToNum && spanToNum > pNum) {
+                    colspan = (spanToNum - pNum) + 1;
+                    coveredUntil = spanToNum;
+                }
+
                 var td = document.createElement('td');
                 td.className = 'slot';
+                if (colspan > 1) {
+                    td.colSpan = colspan;
+                }
 
                 var button = document.createElement('button');
                 button.type = 'button';
@@ -551,37 +617,83 @@
                 button.setAttribute('data-class', cell.className || '');
                 button.setAttribute('data-room', cell.room || '');
                 button.setAttribute('data-status', cell.status || (cell.subject ? 'busy' : 'free'));
-                button.setAttribute('title', day + ' · Period ' + period +
-                    (cell.subject ? ' · ' + cell.subject : ' · free') + ' — click to check availability');
+
+                var cellTitle = day + ' · Period ' + period + (colspan > 1 ? '–' + spanToNum : '') +
+                    (cell.subject ? ' · ' + cell.subject : ' · free');
+                if (onSelect) {
+                    cellTitle += isFacultyView ? ' — click to check availability for substitution' : ' — click to check availability';
+                }
+                button.setAttribute('title', cellTitle);
                 button.setAttribute('aria-label',
-                    day + ' Period ' + period +
+                    day + ' Period ' + period + (colspan > 1 ? ' to ' + spanToNum : '') +
                     (cell.subject ? ' — ' + cell.subject + (cell.faculty ? ', ' + cell.faculty : '') : ' — free'));
 
                 if (cell.subject) {
+                    var typeBadge = '';
+                    if (cell.type === 'lab') {
+                        typeBadge = '<span class="badge" style="background:#e0e7ff; color:#3730a3; font-size:0.68rem; padding:1px 5px; margin-right:4px;">Lab</span>';
+                    } else if (cell.type === 'activity') {
+                        typeBadge = '<span class="badge" style="background:#fef3c7; color:#92400e; font-size:0.68rem; padding:1px 5px; margin-right:4px;">Activity</span>';
+                    } else {
+                        typeBadge = '<span class="badge" style="background:#dbeafe; color:#1e40af; font-size:0.68rem; padding:1px 5px; margin-right:4px;">Theory</span>';
+                    }
+                    var spanBadge = (colspan > 1) ? '<span class="badge" style="background:#f3e8ff; color:#6b21a8; font-size:0.68rem; padding:1px 5px;">P' + pNum + '–P' + spanToNum + '</span>' : '';
+
+                    var editIndicatorHtml = showEditIndicator
+                        ? '<span class="slot-edit-indicator" style="font-size:0.75rem; color:var(--brand-600); font-weight:600; margin-left:auto; cursor:pointer;" title="Click to edit slot">✎ Edit</span>'
+                        : '';
+
+                    var topBarHtml = '<div style="display:flex; justify-content:space-between; align-items:center; gap:4px; margin-bottom:2px; flex-wrap:wrap;">' +
+                        '<div>' + typeBadge + spanBadge + '</div>' +
+                        editIndicatorHtml +
+                        '</div>';
+
+                    var facultyHtml = (!isFacultyView && cell.faculty) ? ('<div class="slot-faculty">' + esc(cell.faculty) + '</div>') : '';
+                    var roomAndClassHtml = '';
+                    if (isFacultyView) {
+                        var extra = [];
+                        if (cell.className) extra.push(esc(cell.className));
+                        if (cell.room) extra.push(esc(cell.room));
+                        if (extra.length) roomAndClassHtml = '<div class="slot-room">' + extra.join(' · ') + '</div>';
+                    } else {
+                        if (cell.room) roomAndClassHtml = '<div class="slot-room">' + esc(cell.room) + '</div>';
+                    }
+
                     button.innerHTML =
+                        topBarHtml +
                         '<div class="slot-subject">' + esc(cell.subject) + '</div>' +
-                        (cell.faculty ? '<div class="slot-faculty">' + esc(cell.faculty) + '</div>' : '') +
-                        (cell.className && grid.view === 'faculty'
-                            ? '<div class="slot-room">' + esc(cell.className) + (cell.room ? ' · ' + esc(cell.room) : '') + '</div>'
-                            : (cell.room ? '<div class="slot-room">' + esc(cell.room) + '</div>' : ''));
+                        facultyHtml +
+                        roomAndClassHtml;
                 } else {
-                    button.innerHTML = '<div class="slot-subject">Free</div>';
+                    var freeEditIndicatorHtml = showEditIndicator
+                        ? '<div style="display:flex; justify-content:flex-end; align-items:center; margin-bottom:2px;"><span class="slot-edit-indicator" style="font-size:0.75rem; color:var(--brand-600); font-weight:600; cursor:pointer;" title="Click to edit slot">✎ Edit</span></div>'
+                        : '';
+                    button.innerHTML = freeEditIndicatorHtml + '<div class="slot-subject">Free</div>';
                 }
 
-                button.addEventListener('click', function () {
+                button.addEventListener('click', function (ev) {
+                    var isEditClick = Boolean(ev.target && ev.target.closest && ev.target.closest('.slot-edit-indicator'));
+                    if (isEditClick && typeof options.onEdit === 'function') {
+                        ev.stopPropagation();
+                        options.onEdit(cell, grid.periods);
+                        return;
+                    }
+
                     var container = body.id;
                     state.selected[container] = day + '|' + period;
                     Array.prototype.forEach.call(body.querySelectorAll('.slot-btn'), function (b) {
                         b.classList.toggle('is-selected', b.getAttribute('data-key') === day + '|' + period);
                     });
-                    onSelect({
-                        day: cell.day,
-                        period: cell.period,
-                        subject: cell.subject,
-                        faculty: cell.faculty,
-                        class: cell.className,
-                        room: cell.room
-                    });
+                    if (typeof onSelect === 'function') {
+                        onSelect({
+                            day: cell.day,
+                            period: cell.period,
+                            subject: cell.subject,
+                            faculty: cell.faculty,
+                            class: cell.className,
+                            room: cell.room
+                        });
+                    }
                 });
 
                 td.appendChild(button);
@@ -592,9 +704,9 @@
         });
     }
 
-    function loadGrid(query, headId, bodyId, onSelect) {
+    function loadGrid(query, headId, bodyId, onSelect, options) {
         return getJson(API.timetable + (query || '')).then(function (grid) {
-            renderGrid(headId, bodyId, grid, grid.periodTimings, onSelect);
+            renderGrid(headId, bodyId, grid, grid.periodTimings, onSelect, options);
             return grid;
         });
     }
@@ -876,136 +988,7 @@
         });
     }
 
-    // ------------------------------------------------------- my timetable
-    var schedRefData = null;
-    function loadSchedEntryReferences() {
-        if (schedRefData) return Promise.resolve(schedRefData);
-        return getJson(API.entries + '/reference').then(function (data) {
-            schedRefData = data;
-            if (el('schedEntryClass')) {
-                populateSelect(el('schedEntryClass'), (data.classes || []).map(function (c) {
-                    return { value: c.code, label: c.code + (c.semester ? ' · Sem ' + c.semester : '') };
-                }));
-            }
-            if (el('schedEntryDay')) {
-                populateSelect(el('schedEntryDay'), (data.days || []).map(function (d) {
-                    return { value: d, label: d };
-                }));
-            }
-            if (el('schedEntryPeriod')) {
-                populateSelect(el('schedEntryPeriod'), (data.periods || []).map(function (p) {
-                    return { value: String(p), label: 'Period ' + p };
-                }));
-            }
-            if (el('schedEntrySubject')) {
-                populateSelect(el('schedEntrySubject'), (data.subjects || []).map(function (s) {
-                    return { value: s.name, label: s.name };
-                }));
-            }
-            return data;
-        }).catch(function () {});
-    }
-
-    function fillSchedForm(cell) {
-        if (!cell) {
-            resetSchedForm();
-            return;
-        }
-        loadSchedEntryReferences().then(function () {
-            if (el('schedEntryDay')) el('schedEntryDay').value = cell.day || '';
-            if (el('schedEntryPeriod')) el('schedEntryPeriod').value = String(cell.period || '');
-            if (el('schedEntryClass') && (cell.className || cell.class)) el('schedEntryClass').value = cell.className || cell.class;
-            if (el('schedEntrySubject') && cell.subject) el('schedEntrySubject').value = cell.subject;
-            if (el('schedEntryRoom')) el('schedEntryRoom').value = cell.room || '';
-            if (el('schedEntryType')) el('schedEntryType').value = cell.type || 'theory';
-
-            var delBtn = el('schedDeleteBtn');
-            var title = el('schedFormTitle');
-
-            if (cell.subject) {
-                getJson(API.entries + '/mine').then(function (res) {
-                    var match = (res.entries || []).find(function (e) {
-                        return e.day === cell.day && e.period === cell.period;
-                    });
-                    if (match && match.id) {
-                        el('schedEntryId').value = String(match.id);
-                        if (delBtn) delBtn.style.display = '';
-                        if (title) title.textContent = 'Edit My Timetable Slot';
-                    }
-                }).catch(function () {});
-            } else {
-                el('schedEntryId').value = '';
-                if (delBtn) delBtn.style.display = 'none';
-                if (title) title.textContent = 'Add My Timetable Slot';
-            }
-        });
-    }
-
-    function resetSchedForm() {
-        if (el('schedEntryId')) el('schedEntryId').value = '';
-        if (el('schedEntryRoom')) el('schedEntryRoom').value = '';
-        if (el('schedEntryNote')) el('schedEntryNote').innerHTML = '';
-        var delBtn = el('schedDeleteBtn');
-        if (delBtn) delBtn.style.display = 'none';
-        var title = el('schedFormTitle');
-        if (title) title.textContent = 'Add / Edit My Timetable Slot';
-    }
-
-    function schedNote(html, tone) {
-        var box = el('schedEntryNote');
-        if (!box) return;
-        if (!html) { box.innerHTML = ''; return; }
-        box.className = 'notice notice-' + (tone || 'info');
-        box.innerHTML = html;
-    }
-
-    function saveSchedEntry(evt) {
-        if (evt && evt.preventDefault) evt.preventDefault();
-        var id = el('schedEntryId') ? el('schedEntryId').value : '';
-        var payload = {
-            class: el('schedEntryClass') ? el('schedEntryClass').value : '',
-            day: el('schedEntryDay') ? el('schedEntryDay').value : '',
-            period: el('schedEntryPeriod') ? parseInt(el('schedEntryPeriod').value, 10) : 1,
-            subject: el('schedEntrySubject') ? el('schedEntrySubject').value : '',
-            room: el('schedEntryRoom') ? el('schedEntryRoom').value : null,
-            type: el('schedEntryType') ? el('schedEntryType').value : 'theory'
-        };
-
-        schedNote('Saving timetable slot…', 'info');
-        var method = id ? 'PUT' : 'POST';
-        var url = id ? (API.entries + '/mine/' + id) : (API.entries + '/mine');
-
-        postJson(url, payload, method).then(function (res) {
-            if (res.status >= 400) {
-                schedNote(esc((res.body && res.body.error) || 'Could not save slot'), 'error');
-                return;
-            }
-            schedNote('Slot saved successfully.', 'ok');
-            loadSchedule();
-        }).catch(function (err) {
-            schedNote(esc(err.message || 'Could not save entry'), 'error');
-        });
-    }
-
-    function deleteSchedEntry() {
-        var id = el('schedEntryId') ? el('schedEntryId').value : '';
-        if (!id) return;
-        if (!window.confirm('Are you sure you want to remove this timetable slot?')) return;
-
-        schedNote('Removing slot…', 'info');
-        postJson(API.entries + '/mine/' + id, null, 'DELETE').then(function (res) {
-            if (res.status >= 400) {
-                schedNote(esc((res.body && res.body.error) || 'Could not remove slot'), 'error');
-                return;
-            }
-            schedNote('Slot removed.', 'ok');
-            resetSchedForm();
-            loadSchedule();
-        }).catch(function (err) {
-            schedNote(esc(err.message || 'Could not remove entry'), 'error');
-        });
-    }
-
+    // ------------------------------------------------------- my timetable (read-only)
     function loadSchedule() {
         var isFaculty = state.user && state.user.role === 'faculty';
         var name = isFaculty
@@ -1026,6 +1009,10 @@
             branchBadge.textContent = state.user.department || 'Branch';
         }
 
+        if (el('facUploadCard')) {
+            el('facUploadCard').style.display = isFaculty ? '' : 'none';
+        }
+
         if (!name && !isFaculty) return Promise.resolve();
 
         var stateBox = el('schedState');
@@ -1037,11 +1024,15 @@
 
         return getJson(url).then(function (grid) {
             renderGrid('schedHead', 'schedBody', grid, grid.periodTimings, function (cell) {
-                fillSchedForm(cell);
                 checkAvailability({
                     day: cell.day, period: cell.period, subject: cell.subject,
                     faculty: name, class: cell.className || cell.class
                 }, 'schedResult');
+            }, {
+                editable: true,
+                isFaculty: isFaculty,
+                showEditIndicator: true,
+                onEdit: isFaculty ? openFacultySlotEditor : null
             });
 
             var busy = grid.cells.filter(function (c) { return c.status === 'busy'; });
@@ -1066,13 +1057,184 @@
 
             el('schedResult').innerHTML =
                 '<p class="muted">Select a period from the schedule above to see who could cover it.</p>';
-
-            loadSchedEntryReferences();
         }).catch(function (err) {
             stateBox.style.display = 'block';
             stateBox.className = 'notice notice-error';
             stateBox.textContent = 'Could not load that schedule: ' + err.message;
         });
+    }
+
+    var currentFacultySlotEditCallback = null;
+
+    function openFacultySlotEditor(cell, periods, onSave) {
+        var modal = el('facEditModal');
+        if (!modal) return;
+
+        currentFacultySlotEditCallback = (typeof onSave === 'function') ? onSave : null;
+        setupFacultySlotEditorModalEvents();
+
+        var facEditDay = el('facEditDay');
+        var facEditPeriod = el('facEditPeriod');
+        var facEditSubject = el('facEditSubject');
+        var facEditClass = el('facEditClass');
+        var facEditRoom = el('facEditRoom');
+        var facEditType = el('facEditType');
+        var facEditSpanTo = el('facEditSpanTo');
+        var facEditIsFree = el('facEditIsFree');
+        var modalTitle = el('facEditModalTitle');
+        var statusBox = el('facEditStatus');
+
+        var day = cell.day;
+        var period = cell.period;
+
+        if (facEditDay) facEditDay.value = day;
+        if (facEditPeriod) facEditPeriod.value = period;
+        if (modalTitle) modalTitle.textContent = 'Edit My Timetable Slot — ' + day + ' Period ' + period;
+
+        var isFree = !cell.subject || cell.status === 'free';
+        if (facEditIsFree) facEditIsFree.checked = isFree;
+        if (facEditSubject) {
+            facEditSubject.value = isFree ? '' : (cell.subject || '');
+            facEditSubject.required = !isFree;
+        }
+        if (facEditClass) facEditClass.value = isFree ? '' : (cell.className || cell.class || '');
+        if (facEditRoom) facEditRoom.value = isFree ? '' : (cell.room || '');
+        if (facEditType) facEditType.value = isFree ? 'theory' : (cell.type || 'theory');
+
+        if (facEditSpanTo) {
+            facEditSpanTo.innerHTML = '<option value="">Single Period (P' + period + ')</option>';
+            var allPeriods = periods || (state.meta && state.meta.periods) || [1, 2, 3, 4, 5, 6, 7];
+            allPeriods.forEach(function (p) {
+                var pNum = normPeriodKey(p);
+                var curP = normPeriodKey(period);
+                if (pNum && curP && pNum > curP) {
+                    var opt = document.createElement('option');
+                    opt.value = pNum;
+                    opt.textContent = 'Spans P' + curP + ' to P' + pNum;
+                    if (cell.spanTo === pNum || cell.span_to === pNum) opt.selected = true;
+                    facEditSpanTo.appendChild(opt);
+                }
+            });
+        }
+
+        if (facEditIsFree) {
+            facEditIsFree.onchange = function () {
+                var free = facEditIsFree.checked;
+                if (facEditSubject) facEditSubject.required = !free;
+            };
+        }
+
+        function autoUncheckFree() {
+            if (facEditIsFree && facEditIsFree.checked) {
+                facEditIsFree.checked = false;
+                if (facEditSubject) facEditSubject.required = true;
+            }
+        }
+
+        if (facEditSubject) facEditSubject.oninput = autoUncheckFree;
+        if (facEditClass) facEditClass.oninput = autoUncheckFree;
+        if (facEditRoom) facEditRoom.oninput = autoUncheckFree;
+        if (facEditType) facEditType.onchange = autoUncheckFree;
+        if (facEditSpanTo) facEditSpanTo.onchange = autoUncheckFree;
+
+        if (statusBox) statusBox.style.display = 'none';
+        modal.style.display = 'flex';
+    }
+
+    function setupFacultySlotEditorModalEvents() {
+        var modal = el('facEditModal');
+        var btnClose = el('btnFacCloseEditModal');
+        var btnCancel = el('btnFacCancelEditModal');
+        var form = el('facSlotEditForm');
+        var btnSave = el('btnFacSaveSlot');
+        var statusBox = el('facEditStatus');
+
+        if (btnClose && modal && !btnClose._bound) {
+            btnClose._bound = true;
+            btnClose.addEventListener('click', function () { modal.style.display = 'none'; });
+        }
+        if (btnCancel && modal && !btnCancel._bound) {
+            btnCancel._bound = true;
+            btnCancel.addEventListener('click', function () { modal.style.display = 'none'; });
+        }
+        if (form && !form._bound) {
+            form._bound = true;
+            form.addEventListener('submit', function (ev) {
+                ev.preventDefault();
+
+                var day = el('facEditDay') ? el('facEditDay').value : '';
+                var period = el('facEditPeriod') ? el('facEditPeriod').value : '';
+                var subject = el('facEditSubject') ? el('facEditSubject').value.trim() : '';
+                var className = el('facEditClass') ? el('facEditClass').value.trim() : '';
+                var room = el('facEditRoom') ? el('facEditRoom').value.trim() : '';
+                var type = el('facEditType') ? el('facEditType').value : 'theory';
+                var spanToVal = el('facEditSpanTo') ? el('facEditSpanTo').value : '';
+                var spanTo = spanToVal ? parseInt(spanToVal, 10) : null;
+                var isFree = el('facEditIsFree') ? el('facEditIsFree').checked : false;
+
+                if (typeof currentFacultySlotEditCallback === 'function') {
+                    currentFacultySlotEditCallback({
+                        day: day,
+                        period: normPeriodKey(period) || parseInt(period, 10) || 1,
+                        subject: isFree ? '' : subject,
+                        className: className,
+                        room: room,
+                        type: type,
+                        spanTo: spanTo,
+                        isFree: isFree
+                    });
+                    if (modal) modal.style.display = 'none';
+                    return;
+                }
+
+                if (btnSave) {
+                    btnSave.disabled = true;
+                    btnSave.textContent = 'Saving…';
+                }
+
+                fetch('/api/faculty/timetable/slot', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        day: day,
+                        period: period,
+                        subject: isFree ? '' : subject,
+                        className: className,
+                        room: room,
+                        type: type,
+                        spanTo: spanTo,
+                        isFree: isFree
+                    })
+                }).then(function (r) {
+                    return r.json().catch(function () { return {}; }).then(function (body) {
+                        return { ok: r.ok, status: r.status, body: body };
+                    });
+                }).then(function (res) {
+                    if (btnSave) {
+                        btnSave.disabled = false;
+                        btnSave.textContent = 'Save Slot';
+                    }
+                    if (res.ok) {
+                        if (modal) modal.style.display = 'none';
+                        loadSchedule();
+                    } else {
+                        if (statusBox) {
+                            statusBox.style.display = 'block';
+                            statusBox.innerHTML = '<div class="notice notice-danger">' + esc(res.body.error || 'Failed to update slot.') + '</div>';
+                        }
+                    }
+                }).catch(function (err) {
+                    if (btnSave) {
+                        btnSave.disabled = false;
+                        btnSave.textContent = 'Save Slot';
+                    }
+                    if (statusBox) {
+                        statusBox.style.display = 'block';
+                        statusBox.innerHTML = '<div class="notice notice-danger">Network error: ' + esc(err.message) + '</div>';
+                    }
+                });
+            });
+        }
     }
 
     // ------------------------------------------------------- HOS availability finder
@@ -5525,9 +5687,6 @@
 
         // --- my schedule / timetable
         if (el('schedFaculty')) el('schedFaculty').addEventListener('change', loadSchedule);
-        if (el('schedEntryForm')) el('schedEntryForm').addEventListener('submit', saveSchedEntry);
-        if (el('schedResetBtn')) el('schedResetBtn').addEventListener('click', resetSchedForm);
-        if (el('schedDeleteBtn')) el('schedDeleteBtn').addEventListener('click', deleteSchedEntry);
 
         // --- faculty directory
         if (el('facDept')) el('facDept').addEventListener('change', loadFacultyTable);
@@ -5802,6 +5961,90 @@
 
             var facPendingContract = null;
 
+            function renderFacPreviewGrid() {
+                if (!facPendingContract) return;
+                var days = (facPendingContract.days && facPendingContract.days.length) ? facPendingContract.days : ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+                var periods = (facPendingContract.periods && facPendingContract.periods.length) ? facPendingContract.periods : [1, 2, 3, 4, 5, 6, 7];
+                var timings = facPendingContract.periodTimings || {};
+                var entries = facPendingContract.entries || [];
+
+                var previewCells = [];
+                entries.forEach(function (e) {
+                    var dKey = normDayKey(e.day);
+                    var pNum = normPeriodKey(e.period || e.period_number);
+                    var spanToNum = normPeriodKey(e.spanTo || e.span_to);
+                    if (dKey && pNum != null) {
+                        previewCells.push({
+                            day: e.day,
+                            period: pNum,
+                            subject: e.subject || e.subject_name || e.subject_code || '',
+                            className: e.className || e.class || e.class_name || '',
+                            room: e.room || e.room_code || '',
+                            type: e.type || e.session_type || 'theory',
+                            spanTo: spanToNum,
+                            faculty: facPendingContract.faculty || (state.user && state.user.name) || '',
+                            status: (e.is_free || (!e.subject && !e.subject_name && !e.subject_code)) ? 'free' : 'busy'
+                        });
+                    }
+                });
+
+                var busyCount = previewCells.filter(function (c) { return c.status === 'busy' && c.subject; }).length;
+                if (facPreviewCountBadge) {
+                    facPreviewCountBadge.textContent = busyCount + ' slots';
+                }
+
+                renderGrid('facPreviewHead', 'facPreviewBody', {
+                    days: days,
+                    periods: periods,
+                    cells: previewCells,
+                    periodTimings: timings,
+                    view: 'faculty'
+                }, timings, null, {
+                    editable: true,
+                    isFaculty: true,
+                    showEditIndicator: true,
+                    onEdit: function (cell, allPeriods) {
+                        openFacultySlotEditor(cell, allPeriods, function (updatedSlot) {
+                            var targetDayKey = normDayKey(updatedSlot.day);
+                            var targetPNum = normPeriodKey(updatedSlot.period);
+                            var targetSpanTo = normPeriodKey(updatedSlot.spanTo) || targetPNum;
+
+                            facPendingContract.entries = (facPendingContract.entries || []).filter(function (e) {
+                                var eDay = normDayKey(e.day);
+                                var ePNum = normPeriodKey(e.period || e.period_number);
+                                var eSpanTo = normPeriodKey(e.spanTo || e.span_to) || ePNum;
+                                if (eDay === targetDayKey) {
+                                    if (Math.max(ePNum, targetPNum) <= Math.min(eSpanTo, targetSpanTo)) return false;
+                                }
+                                return true;
+                            });
+
+                            if (!updatedSlot.isFree && updatedSlot.subject) {
+                                facPendingContract.entries.push({
+                                    day: updatedSlot.day,
+                                    period: targetPNum,
+                                    period_number: targetPNum,
+                                    subject: updatedSlot.subject,
+                                    subject_name: updatedSlot.subject,
+                                    subject_code: updatedSlot.subject,
+                                    className: updatedSlot.className,
+                                    class_name: updatedSlot.className,
+                                    room: updatedSlot.room,
+                                    room_code: updatedSlot.room,
+                                    type: updatedSlot.type || 'theory',
+                                    session_type: updatedSlot.type || 'theory',
+                                    spanTo: updatedSlot.spanTo || null,
+                                    span_to: updatedSlot.spanTo || null,
+                                    is_free: false
+                                });
+                            }
+
+                            renderFacPreviewGrid();
+                        });
+                    }
+                });
+            }
+
             if (btnFacChoose && inputFacFile) {
                 btnFacChoose.addEventListener('click', function () {
                     inputFacFile.click();
@@ -5865,34 +6108,19 @@
                                 '<strong>No matching slots found:</strong> ' + esc(diag) + '</div>';
                         } else {
                             statusFac.innerHTML = '<div class="notice notice-success" style="margin-top:10px;">' +
-                                '<strong>Extraction complete!</strong> Found ' + totalSlots + ' teaching slot(s) for ' + esc(res.body.faculty || '') + '. Review below and confirm to save to your personal schedule.</div>';
+                                '<strong>Extraction complete!</strong> Found ' + totalSlots + ' teaching slot(s) for ' + esc(res.body.faculty || '') + '. Review below (click ✎ Edit to correct any slot) and confirm to save to your personal schedule.</div>';
                         }
 
                         if (facPreviewCard) {
                             facPreviewCard.style.display = 'block';
-                            if (facPreviewCountBadge) facPreviewCountBadge.textContent = totalSlots + ' slots';
-                            if (facPreviewHead) {
-                                facPreviewHead.innerHTML = '<tr><th>Day</th><th>Period</th><th>Subject</th><th>Room</th><th>Class</th><th>Type</th></tr>';
-                            }
-                            if (facPreviewBody) {
-                                if (entries.length === 0) {
-                                    facPreviewBody.innerHTML = '<tr><td colspan="6" class="muted" style="text-align:center; padding: 1.5rem;">' + esc(res.body.diagnosticReason || 'No scheduled teaching slots extracted for your account.') + '</td></tr>';
-                                } else {
-                                    facPreviewBody.innerHTML = entries.map(function (e) {
-                                        return '<tr>' +
-                                            '<td style="font-weight:600;">' + esc(e.day) + '</td>' +
-                                            '<td>P' + esc(e.period) + '</td>' +
-                                            '<td>' + esc(e.subject || e.subject_name || e.subject_code || '—') + '</td>' +
-                                            '<td>' + esc(e.room || e.room_code || '—') + '</td>' +
-                                            '<td>' + esc(e.className || e.class_name || '—') + '</td>' +
-                                            '<td><span class="badge" style="font-size:0.75rem;">' + esc(e.type || e.session_type || 'theory') + '</span></td>' +
-                                            '</tr>';
-                                    }).join('');
-                                }
-                            }
-                            if (btnFacConfirmSave) {
-                                btnFacConfirmSave.disabled = (entries.length === 0);
-                            }
+
+                            facPendingContract.entries = entries;
+                            facPendingContract.days = (res.body.days && res.body.days.length) ? res.body.days : ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+                            facPendingContract.periods = (res.body.periods && res.body.periods.length) ? res.body.periods : [1, 2, 3, 4, 5, 6, 7];
+                            facPendingContract.periodTimings = res.body.periodTimings || {};
+                            facPendingContract.faculty = res.body.faculty || (state.user && state.user.name) || '';
+
+                            renderFacPreviewGrid();
                         }
                     }).catch(function (err) {
                         if (statusFac) {
@@ -6110,11 +6338,22 @@
                 var timings = (contract && contract.period_timings) || {};
                 var entries = (contract && contract.entries) || [];
 
+                var slotMap = {};
+                entries.forEach(function (e) {
+                    var dKey = normDayKey(e.day);
+                    var pKey = normPeriodKey(e.period != null ? e.period : e.period_number);
+                    if (dKey && pKey != null) {
+                        slotMap[dKey + '|' + pKey] = e;
+                    }
+                });
+
                 // Build Header
                 var headHtml = '<tr><th style="padding:10px;">Day</th>';
                 periods.forEach(function (p) {
-                    var t = timings[String(p)] || timings[p];
-                    headHtml += '<th style="padding:10px;">P' + p + (t ? '<br/><span style="font-size:0.75rem; font-weight:normal; opacity:0.85;">' + esc(t.start) + '–' + esc(t.end) + '</span>' : '') + '</th>';
+                    var pNum = normPeriodKey(p);
+                    if (pNum == null) pNum = p;
+                    var t = timings[String(p)] || timings[String(pNum)] || timings[p];
+                    headHtml += '<th style="padding:10px;">P' + pNum + (t ? '<br/><span style="font-size:0.75rem; font-weight:normal; opacity:0.85;">' + esc(t.start) + '–' + esc(t.end) + '</span>' : '') + '</th>';
                 });
                 headHtml += '</tr>';
                 head.innerHTML = headHtml;
@@ -6126,11 +6365,12 @@
                     var coveredUntil = 0;
 
                     periods.forEach(function (p) {
-                        if (p <= coveredUntil) return;
+                        var pNum = normPeriodKey(p);
+                        if (pNum == null) pNum = parseInt(p, 10) || 1;
+                        if (pNum <= coveredUntil) return;
 
-                        var entry = entries.find(function (e) {
-                            return String(e.day).trim().toUpperCase() === String(day).trim().toUpperCase() && parseInt(e.period, 10) === p;
-                        });
+                        var dKey = normDayKey(day);
+                        var entry = slotMap[dKey + '|' + pNum];
 
                         if (!entry || entry.is_free) {
                             bodyHtml += '<td class="staging-cell-clickable" data-day="' + esc(day) + '" data-period="' + p + '" style="text-align:center; padding:10px; font-size:0.85rem; cursor:pointer; background:var(--surface-subtle);" title="Click to add/edit slot">' +

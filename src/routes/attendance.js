@@ -44,7 +44,7 @@ function requireHOS(req, res, next) {
 
     if (!['hos', 'coordinator', 'admin'].includes(req.session.role)) {
         return res.status(403).json({
-            error: 'This action requires Head of Section (HOS) or Administrator role.',
+            error: 'This action requires Head of Department (HOD) or Administrator role.',
             code: 'FORBIDDEN'
         });
     }

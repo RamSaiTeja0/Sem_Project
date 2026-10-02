@@ -94,7 +94,7 @@ router.get('/branch', async (req, res) => {
 
 router.put('/branch', async (req, res) => {
     if (req.session && req.session.role === 'faculty') {
-        return res.status(403).json({ error: 'Only HOS / Administrator can configure the branch.', code: 'FORBIDDEN' });
+        return res.status(403).json({ error: 'Only HOD / Administrator can configure the branch.', code: 'FORBIDDEN' });
     }
     const body = req.body || {};
     const sessionBranch = req.session ? req.session.department : null;

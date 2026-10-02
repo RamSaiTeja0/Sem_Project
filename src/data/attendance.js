@@ -135,14 +135,14 @@ async function markAttendance({ facultyIdentifier, date, status, sessionUser }) 
     }
 
     if (sessionUser.role === 'faculty') {
-        const err = new Error('Faculty members cannot mark or modify attendance. This action requires Head of Section (HOS) role.');
+        const err = new Error('Faculty members cannot mark or modify attendance. This action requires Head of Department (HOD) role.');
         err.status = 403; err.code = 'FORBIDDEN';
         throw err;
     }
 
     const hosBranch = String(sessionUser.department || '').trim().toUpperCase();
     if (!hosBranch) {
-        const err = new Error('HOS session does not have an active branch context.');
+        const err = new Error('HOD session does not have an active branch context.');
         err.status = 400; err.code = 'MISSING_BRANCH_CONTEXT';
         throw err;
     }

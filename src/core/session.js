@@ -35,14 +35,16 @@ function safeEqual(a, b) {
 
 /** @returns {string} the cookie value for this user. */
 function create(user) {
+    const dept = user.department || user.branchCode || user.departmentCode || user.branch || '';
+    const normDept = dept ? String(dept).trim().toUpperCase() : '';
     const body = {
         id: user.id,
         username: user.username,
         name: user.name,
         phone: user.phone || null,
         role: user.role,
-        department: user.department || '',
-        branchName: user.branchName || user.department || '',
+        department: normDept,
+        branchName: user.branchName || normDept || '',
         subjects: Array.isArray(user.subjects) ? user.subjects : [],
         facultyName: user.facultyName || (user.role === 'faculty' ? user.name : null),
         facultyId: user.facultyId || null,
@@ -104,11 +106,14 @@ function middleware(req, res, next) {
             if (userExists) {
                 if (userExists.name) sessionPayload.name = userExists.name;
                 if (userExists.phone !== undefined) sessionPayload.phone = userExists.phone;
-                if (userExists.department) sessionPayload.department = userExists.department;
+                if (userExists.department) sessionPayload.department = String(userExists.department).trim().toUpperCase();
                 if (userExists.branchName) sessionPayload.branchName = userExists.branchName;
                 if (Array.isArray(userExists.subjects) && userExists.subjects.length) sessionPayload.subjects = userExists.subjects;
                 if (userExists.facultyId) sessionPayload.facultyId = userExists.facultyId;
                 if (userExists.facultyName) sessionPayload.facultyName = userExists.facultyName;
+            }
+            if (sessionPayload.department) {
+                sessionPayload.department = String(sessionPayload.department).trim().toUpperCase();
             }
             req.session = sessionPayload;
         }

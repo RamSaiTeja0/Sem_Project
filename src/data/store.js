@@ -932,6 +932,65 @@ function clearFacultyPersonalTimetableInMemory(facultyNameOrId) {
     return { cleared: existed };
 }
 
+function saveFacultyPersonalSlotInMemory(facultyNameOrId, { day, period, subject, className, room, type, spanTo, isFree }) {
+    const key = String(facultyNameOrId).toUpperCase();
+    const existing = facultyPersonalStore.get(key) || [];
+
+    const DAY_MAP = {
+        'MON': 'Monday', 'MONDAY': 'Monday', 'M': 'Monday',
+        'TUE': 'Tuesday', 'TUES': 'Tuesday', 'TUESDAY': 'Tuesday', 'TU': 'Tuesday',
+        'WED': 'Wednesday', 'WEDNESDAY': 'Wednesday', 'W': 'Wednesday',
+        'THU': 'Thursday', 'THUR': 'Thursday', 'THURS': 'Thursday', 'THURSDAY': 'Thursday', 'TH': 'Thursday',
+        'FRI': 'Friday', 'FRIDAY': 'Friday', 'F': 'Friday',
+        'SAT': 'Saturday', 'SATURDAY': 'Saturday', 'S': 'Saturday',
+        'SUN': 'Sunday', 'SUNDAY': 'Sunday'
+    };
+
+    const normDay = DAY_MAP[String(day || '').trim().toUpperCase()] || day;
+    const pNum = parseInt(period, 10);
+    if (!normDay || isNaN(pNum)) return { success: false };
+
+    const spanToNum = spanTo ? parseInt(spanTo, 10) : null;
+    const endP = (spanToNum && spanToNum > pNum) ? spanToNum : pNum;
+
+    // Filter out the affected periods
+    const filtered = existing.filter(s => {
+        const sDay = DAY_MAP[String(s.day || s.day_of_week || '').trim().toUpperCase()] || s.day;
+        const sP = parseInt(s.period, 10);
+        return !(sDay === normDay && sP >= pNum && sP <= endP);
+    });
+
+    if (isFree || !subject || subject.trim() === '' || subject.trim().toLowerCase() === 'free') {
+        facultyPersonalStore.set(key, filtered);
+        return { deleted: true, day: normDay, period: pNum };
+    }
+
+    for (let p = pNum; p <= endP; p++) {
+        filtered.push({
+            day: normDay,
+            period: p,
+            subject: subject.trim(),
+            className: className || null,
+            room: room || null,
+            type: type || 'theory',
+            spanTo: (p === pNum && endP > pNum) ? endP : null,
+            status: 'busy'
+        });
+    }
+
+    facultyPersonalStore.set(key, filtered);
+    return {
+        success: true,
+        day: normDay,
+        period: pNum,
+        spanTo: spanToNum,
+        subject: subject.trim(),
+        className: className || null,
+        room: room || null,
+        type: type || 'theory'
+    };
+}
+
 function saveSlotEntryInMemory({ className, day, period, subject, faculty, room, type }) {
     const existingEntries = state.source.timetable || [];
     const filtered = existingEntries.filter(
@@ -986,6 +1045,7 @@ module.exports = {
     saveFacultyPersonalTimetableInMemory,
     getFacultyPersonalTimetableInMemory,
     clearFacultyPersonalTimetableInMemory,
+    saveFacultyPersonalSlotInMemory,
     get allowMemoryWrites() { return allowMemoryWrites || process.env.ALLOW_MEMORY_WRITES === 'true'; },
     set allowMemoryWrites(val) { allowMemoryWrites = Boolean(val); },
     /** Replace the live dataset. In-memory only; on failure the old one stays. */

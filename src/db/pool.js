@@ -56,7 +56,8 @@ async function withTransaction(fn) {
     const p = getPool();
     if (!p) throw new Error('DATABASE_URL is not configured');
     const client = await p.connect();
-    client.on('error', err => console.error('[db] client socket error:', err.message));
+    const errorHandler = err => console.error('[db] client socket error:', err.message);
+    client.on('error', errorHandler);
     try {
         await client.query('BEGIN');
         const result = await fn(client);
@@ -66,6 +67,7 @@ async function withTransaction(fn) {
         try { await client.query('ROLLBACK'); } catch (_) { /* the original error matters more */ }
         throw err;
     } finally {
+        client.removeListener('error', errorHandler);
         client.release();
     }
 }

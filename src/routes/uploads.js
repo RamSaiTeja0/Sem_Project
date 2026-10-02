@@ -185,28 +185,28 @@ router.post('/master-timetable', fileUploadHandler, async (req, res) => {
                 try { fs.unlinkSync(req.file.path); } catch (e) {}
             }
             return res.status(403).json({
-                error: 'Only Head of Section (HOS) can upload a Master Timetable.',
+                error: 'Only Head of Department (HOD) can upload a Master Timetable.',
                 code: 'FORBIDDEN'
             });
         }
 
         // Branch is strictly inherited from authenticated session
-        const sessionDept = String(req.session.department || '').toUpperCase();
+        const sessionDept = String(req.session.department || '').trim().toUpperCase();
         if (!sessionDept) {
             return res.status(400).json({
-                error: 'Authenticated HOS session has no associated branch.',
+                error: 'Authenticated HOD session has no associated branch.',
                 code: 'NO_BRANCH'
             });
         }
 
         // Reject any client attempt to change branch
-        const clientDept = req.body && (req.body.department || req.body.branch_id || req.body.branchCode);
+        const clientDept = req.body && (req.body.department || req.body.branch_id || req.body.branchCode || req.body.departmentCode);
         if (clientDept && String(clientDept).trim().toUpperCase() !== sessionDept) {
             if (req.file && req.file.path && fs.existsSync(req.file.path)) {
                 try { fs.unlinkSync(req.file.path); } catch (e) {}
             }
             return res.status(403).json({
-                error: `As HOS of ${sessionDept}, you cannot upload a master timetable for another branch.`,
+                error: `As HOD of ${sessionDept}, you cannot upload a master timetable for another branch.`,
                 code: 'BRANCH_UPLOAD_MISMATCH'
             });
         }

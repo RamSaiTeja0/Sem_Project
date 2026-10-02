@@ -44,7 +44,7 @@ function requireHOS(req, res, next) {
 
     if (req.session.role !== 'hos' && req.session.role !== 'coordinator') {
         return res.status(403).json({
-            error: 'Forbidden: Only Head of Section (HOS) accounts can review and approve staged timetables.',
+            error: 'Forbidden: Only Head of Department (HOD) accounts can review and approve staged timetables.',
             code: 'FORBIDDEN'
         });
     }
@@ -68,12 +68,28 @@ async function verifyBranchOwnership(req, res, uploadId) {
         return null;
     }
 
-    const hosDept = String(req.session.department || '').toUpperCase();
-    const uploadDept = String(upload.departmentCode || '').toUpperCase();
+    const hosDept = req.session && req.session.department ? String(req.session.department).trim().toUpperCase() : '';
+    const uploadDept = upload.departmentCode ? String(upload.departmentCode).trim().toUpperCase() : '';
+
+    if (!hosDept) {
+        res.status(403).json({
+            error: 'Forbidden: Your authenticated HOD account has no associated branch.',
+            code: 'FORBIDDEN'
+        });
+        return null;
+    }
+
+    if (!uploadDept) {
+        res.status(400).json({
+            error: `Upload "${uploadId}" has no associated branch.`,
+            code: 'INVALID_UPLOAD_BRANCH'
+        });
+        return null;
+    }
 
     if (hosDept !== uploadDept) {
         res.status(403).json({
-            error: `Cross-branch access forbidden. You are HOS of ${hosDept}, but this upload belongs to ${uploadDept}.`,
+            error: `Cross-branch access forbidden. You are HOD of ${hosDept}, but this upload belongs to ${uploadDept}.`,
             code: 'FORBIDDEN'
         });
         return null;
@@ -88,7 +104,14 @@ async function verifyBranchOwnership(req, res, uploadId) {
  */
 router.get('/pending', async (req, res) => {
     try {
-        const hosDept = String(req.session.department || '').toUpperCase();
+        const hosDept = req.session && req.session.department ? String(req.session.department).trim().toUpperCase() : '';
+        if (!hosDept) {
+            return res.json({
+                count: 0,
+                department: '',
+                staging: []
+            });
+        }
         const pending = await listPendingStaging(hosDept);
         return res.json({
             count: pending.length,
@@ -913,7 +936,7 @@ router.post('/:uploadId/reject', async (req, res) => {
             });
         }
 
-        const reason = (req.body && req.body.reason) ? String(req.body.reason).trim() : 'Rejected by HOS';
+        const reason = (req.body && req.body.reason) ? String(req.body.reason).trim() : 'Rejected by HOD';
         const nowIso = new Date().toISOString();
         const currentUserId = req.session.userId || req.session.username || req.session.id;
 

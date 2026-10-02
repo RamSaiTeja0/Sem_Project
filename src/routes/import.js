@@ -105,13 +105,13 @@ function handleUpload(action) {
         if (action === 'commit') {
             if (req.session && req.session.role === 'faculty') {
                 return res.status(403).json({
-                    error: 'Forbidden: Only Head of Section (HOD) can import a Master Timetable.',
+                    error: 'Forbidden: Only Head of Department (HOD) can import a Master Timetable.',
                     code: 'FORBIDDEN'
                 });
             }
             if (config.authRequired && (!req.session || (req.session.role !== 'hos' && req.session.role !== 'coordinator' && req.session.role !== 'admin'))) {
                 return res.status(403).json({
-                    error: 'Forbidden: Only Head of Section (HOD) can import a Master Timetable.',
+                    error: 'Forbidden: Only Head of Department (HOD) can import a Master Timetable.',
                     code: 'FORBIDDEN'
                 });
             }
@@ -161,13 +161,13 @@ function handleUpload(action) {
                 }
             }
 
-            // HOS can only upload for their own branch
+            // HOD can only upload for their own branch
             if (req.session && req.session.role === 'hos' && req.session.department) {
                 const hosDept = req.session.department.toUpperCase();
                 const otherBranchFaculty = (result.faculty || []).filter(f => f.department && f.department.toUpperCase() !== hosDept);
                 if (otherBranchFaculty.length > 0) {
                     return res.status(403).json({
-                        error: `As HOS of ${hosDept}, you can only upload timetables for your own branch.`,
+                        error: `As HOD of ${hosDept}, you can only upload timetables for your own branch.`,
                         code: 'BRANCH_UPLOAD_MISMATCH'
                     });
                 }

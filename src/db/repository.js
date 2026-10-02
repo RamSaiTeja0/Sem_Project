@@ -2765,6 +2765,62 @@ async function clearFacultyPersonalTimetable(facultyId) {
     return { cleared: true, count: res.rowCount };
 }
 
+async function saveFacultyPersonalSlot(facultyId, { day, period, subject, className, room, type, spanTo, isFree }) {
+    const facId = await resolveFacultyDbId(db, facultyId);
+    if (!facId) {
+        const err = new Error(`Faculty not found for ID: ${facultyId}`);
+        err.status = 404;
+        throw err;
+    }
+
+    const DAY_MAP = {
+        'MON': 'Monday', 'MONDAY': 'Monday', 'M': 'Monday',
+        'TUE': 'Tuesday', 'TUES': 'Tuesday', 'TUESDAY': 'Tuesday', 'TU': 'Tuesday',
+        'WED': 'Wednesday', 'WEDNESDAY': 'Wednesday', 'W': 'Wednesday',
+        'THU': 'Thursday', 'THUR': 'Thursday', 'THURS': 'Thursday', 'THURSDAY': 'Thursday', 'TH': 'Thursday',
+        'FRI': 'Friday', 'FRIDAY': 'Friday', 'F': 'Friday',
+        'SAT': 'Saturday', 'SATURDAY': 'Saturday', 'S': 'Saturday',
+        'SUN': 'Sunday', 'SUNDAY': 'Sunday'
+    };
+
+    const normDay = DAY_MAP[String(day || '').trim().toUpperCase()] || day;
+    const pNum = parseInt(period, 10);
+    if (!normDay || isNaN(pNum)) {
+        const err = new Error('Invalid day or period');
+        err.status = 400;
+        throw err;
+    }
+
+    if (isFree || !subject || subject.trim() === '' || subject.trim().toLowerCase() === 'free') {
+        await db.query('DELETE FROM faculty_personal_timetable WHERE faculty_id = $1 AND day_of_week = $2 AND period = $3', [facId, normDay, pNum]);
+        return { deleted: true, day: normDay, period: pNum, facultyId: facId };
+    }
+
+    const spanToNum = spanTo ? parseInt(spanTo, 10) : null;
+    const endP = (spanToNum && spanToNum > pNum) ? spanToNum : pNum;
+
+    for (let p = pNum; p <= endP; p++) {
+        await db.query(`
+            INSERT INTO faculty_personal_timetable (faculty_id, day_of_week, period, class_name, subject, room, session_type)
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
+            ON CONFLICT (faculty_id, day_of_week, period)
+            DO UPDATE SET class_name = EXCLUDED.class_name, subject = EXCLUDED.subject, room = EXCLUDED.room, session_type = EXCLUDED.session_type, updated_at = now()
+        `, [facId, normDay, p, className || null, subject.trim(), room || null, type || 'theory']);
+    }
+
+    return {
+        success: true,
+        facultyId: facId,
+        day: normDay,
+        period: pNum,
+        spanTo: spanToNum,
+        subject: subject.trim(),
+        className: className || null,
+        room: room || null,
+        type: type || 'theory'
+    };
+}
+
 module.exports = {
     isEmpty, counts, loadSource,
     listEntries, getEntry, addEntry, updateEntry, deleteEntry, saveSlotEntry, replaceFacultyEntries,
@@ -2775,7 +2831,7 @@ module.exports = {
     addFaculty, getFaculty, updateFaculty, deactivateFaculty, activateFaculty, usernameFor,
     getInstanceBranch, updateInstanceBranch,
     importStagedTimetable, parseSemesterNumber, normalizeAcademicYearVariants,
-    saveFacultyPersonalTimetable, getFacultyPersonalTimetable, clearFacultyPersonalTimetable,
+    saveFacultyPersonalTimetable, getFacultyPersonalTimetable, clearFacultyPersonalTimetable, saveFacultyPersonalSlot,
     createFacultyRequest, listFacultyRequests, getFacultyRequestById, updateFacultyRequestStatus,
     listFacultyAttendanceForDate, markFacultyAttendance, deleteFacultyAttendance, getAbsentFacultyForDate, getFacultyAttendanceHistory,
     createInvigilationRequest, listInvigilationRequests, getInvigilationRequestById, updateInvigilationRequestStatus,

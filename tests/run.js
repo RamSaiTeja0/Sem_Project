@@ -20,6 +20,9 @@ const suites = [
     'singlebranch.test.js',
     'mastertimetable.test.js',
     'facultyown.test.js',
+    'faculty_my_timetable_readonly_preview.test.js',
+    'faculty_my_timetable_upload.test.js',
+    'faculty_my_timetable_edit.test.js',
     'faculty_management.test.js',
     'dynamic_timetable.test.js',
     'cross_branch_availability.test.js',
@@ -58,12 +61,14 @@ const suites = [
     'faculty_account_management.test.js',
     'hod_invigilation_dropdown.test.js',
     'branch_isolation_invigilation.test.js',
+    'hod_branch_authorization_regression.test.js',
     'live_verification.js'
 ];
 let failures = 0;
 const failedSuites = [];
 
 const dbSuites = new Set([
+    'hod_branch_authorization_regression.test.js',
     'auth_full_lifecycle_regression.test.js',
     'faculty_account_management.test.js',
     'hod_invigilation_dropdown.test.js',

@@ -183,34 +183,61 @@ router.get('/mine', async (req, res) => {
     } catch (_) {}
 
     if (personalSlots && personalSlots.length > 0) {
-        const DAY_MAP = {
-            'MON': 'Monday', 'MONDAY': 'Monday',
-            'TUE': 'Tuesday', 'TUES': 'Tuesday', 'TUESDAY': 'Tuesday',
-            'WED': 'Wednesday', 'WEDNESDAY': 'Wednesday',
-            'THU': 'Thursday', 'THUR': 'Thursday', 'THURS': 'Thursday', 'THURSDAY': 'Thursday',
-            'FRI': 'Friday', 'FRIDAY': 'Friday',
-            'SAT': 'Saturday', 'SATURDAY': 'Saturday',
+        const DAY_CANONICAL = {
+            'MON': 'Monday', 'MONDAY': 'Monday', 'M': 'Monday',
+            'TUE': 'Tuesday', 'TUES': 'Tuesday', 'TUESDAY': 'Tuesday', 'TU': 'Tuesday',
+            'WED': 'Wednesday', 'WEDNESDAY': 'Wednesday', 'W': 'Wednesday',
+            'THU': 'Thursday', 'THUR': 'Thursday', 'THURS': 'Thursday', 'THURSDAY': 'Thursday', 'TH': 'Thursday',
+            'FRI': 'Friday', 'FRIDAY': 'Friday', 'F': 'Friday',
+            'SAT': 'Saturday', 'SATURDAY': 'Saturday', 'S': 'Saturday',
             'SUN': 'Sunday', 'SUNDAY': 'Sunday'
         };
+
+        const normDay = (d) => {
+            if (!d) return '';
+            const s = String(d).trim().toUpperCase();
+            return DAY_CANONICAL[s] || (s.charAt(0) + s.slice(1).toLowerCase());
+        };
+
+        const normPeriod = (p) => {
+            if (p == null) return null;
+            const m = String(p).trim().match(/(\d+)/);
+            return m ? parseInt(m[1], 10) : null;
+        };
+
+        const slotMap = new Map();
+        personalSlots.forEach(s => {
+            const dKey = normDay(s.day);
+            const pKey = normPeriod(s.period != null ? s.period : s.period_number);
+            if (dKey && pKey != null) {
+                slotMap.set(`${dKey}|${pKey}`, s);
+            }
+        });
+
         const cells = [];
         days.forEach(day => {
             periods.forEach(period => {
-                const match = personalSlots.find(s => (s.day === day || DAY_MAP[String(s.day).toUpperCase()] === day) && s.period === period);
+                const dKey = normDay(day);
+                const pKey = normPeriod(period) || (parseInt(period, 10) || 1);
+                const match = slotMap.get(`${dKey}|${pKey}`);
                 if (match) {
                     cells.push({
-                        day, period,
+                        day,
+                        period: pKey,
                         subject: match.subject,
                         faculty: facultyName,
                         facultyId,
-                        className: match.className,
-                        room: match.room,
-                        type: match.type || 'theory',
+                        className: match.className || match.class_name || null,
+                        room: match.room || match.room_code || null,
+                        type: match.type || match.session_type || 'theory',
+                        spanTo: match.spanTo || match.span_to || null,
                         status: 'busy',
                         isPersonal: true
                     });
                 } else {
                     cells.push({
-                        day, period,
+                        day,
+                        period: pKey,
                         subject: null,
                         faculty: facultyName,
                         facultyId,
@@ -223,6 +250,16 @@ router.get('/mine', async (req, res) => {
             });
         });
 
+        let personalTimings = meta.periodTimings;
+        if (!personalTimings || Object.keys(personalTimings).length === 0) {
+            try {
+                const demo = require('../data/demoTimetable');
+                if (demo && demo.meta && demo.meta.periodTimings) {
+                    personalTimings = demo.meta.periodTimings;
+                }
+            } catch (_) {}
+        }
+
         return res.json({
             view: 'faculty',
             name: facultyName,
@@ -231,7 +268,7 @@ router.get('/mine', async (req, res) => {
             days,
             periods,
             cells,
-            periodTimings: meta.periodTimings,
+            periodTimings: personalTimings || {},
             isCustomPersonal: true
         });
     }
@@ -248,11 +285,20 @@ router.get('/mine', async (req, res) => {
         }));
         grid = { view: 'faculty', name: facultyName, days, periods, cells };
     }
+    let personalTimings = meta.periodTimings;
+    if (!personalTimings || Object.keys(personalTimings).length === 0) {
+        try {
+            const demo = require('../data/demoTimetable');
+            if (demo && demo.meta && demo.meta.periodTimings) {
+                personalTimings = demo.meta.periodTimings;
+            }
+        } catch (_) {}
+    }
     res.json({
         ...grid,
         faculty: facultyName,
         branch: req.session.department,
-        periodTimings: meta.periodTimings,
+        periodTimings: personalTimings || {},
         isCustomPersonal: false
     });
 });
@@ -412,7 +458,7 @@ router.post('/clear', async (req, res) => {
     try {
         if (!req.session || (req.session.role !== 'hos' && req.session.role !== 'coordinator')) {
             return res.status(403).json({
-                error: 'Only Head of Section (HOS) can clear timetable entries.',
+                error: 'Only Head of Department (HOD) can clear timetable entries.',
                 code: 'FORBIDDEN'
             });
         }
