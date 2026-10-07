@@ -176,21 +176,14 @@ router.get('/', async (req, res, next) => {
         if (db.isConfigured() && store.usingDatabase) {
             try {
                 const { rows } = await db.query(`
-                    SELECT u.id, u.username, u.name, u.role, u.status, u.phone, u.faculty_id,
-                           f.id AS faculty_db_id, f.code AS faculty_code, f.name AS faculty_name
+                    SELECT u.id, u.username, u.name, u.role, u.status, u.active, u.phone, u.faculty_id
                       FROM users u
-                      LEFT JOIN faculty f ON f.id = u.faculty_id
                      WHERE u.role = 'faculty'
+                       AND u.faculty_id IS NOT NULL
                 `);
                 for (const u of rows) {
                     if (u.faculty_id != null) {
                         dbUsersMap.set(String(u.faculty_id), u);
-                    }
-                    if (u.faculty_db_id != null) {
-                        dbUsersMap.set(String(u.faculty_db_id), u);
-                    }
-                    if (u.faculty_code) {
-                        dbUsersMap.set(String(u.faculty_code).toUpperCase(), u);
                     }
                 }
             } catch (_) {}
@@ -201,25 +194,19 @@ router.get('/', async (req, res, next) => {
         stats = stats.map(f => {
             let matchedUser = null;
             const facIdStr = f.id != null ? String(f.id).trim() : '';
-            const facCodeStr = f.code != null ? String(f.code).trim() : '';
 
-            // 1. Check DB map by numeric ID, code, or identifier
+            // 1. Check DB map strictly by relational faculty_id
             if (facIdStr && dbUsersMap.has(facIdStr)) {
                 matchedUser = dbUsersMap.get(facIdStr);
-            } else if (facIdStr && dbUsersMap.has(facIdStr.toUpperCase())) {
-                matchedUser = dbUsersMap.get(facIdStr.toUpperCase());
-            } else if (facCodeStr && dbUsersMap.has(facCodeStr.toUpperCase())) {
-                matchedUser = dbUsersMap.get(facCodeStr.toUpperCase());
             }
 
-            // 2. Check in-memory registered users by facultyId, facultyCode, or numeric ID
+            // 2. Check in-memory registered users by facultyId or numeric ID
             if (!matchedUser) {
                 matchedUser = registeredUsers.find(u =>
-                    u.role === 'faculty' && u.facultyId != null && (
+                    u.role === 'faculty' &&
+                    u.facultyId != null &&
+                    (
                         (facIdStr && String(u.facultyId).trim().toLowerCase() === facIdStr.toLowerCase()) ||
-                        (facCodeStr && String(u.facultyId).trim().toLowerCase() === facCodeStr.toLowerCase()) ||
-                        (u.facultyCode && facCodeStr && String(u.facultyCode).trim().toLowerCase() === facCodeStr.toLowerCase()) ||
-                        (u.facultyCode && facIdStr && String(u.facultyCode).trim().toLowerCase() === facIdStr.toLowerCase()) ||
                         (/^\d+$/.test(facIdStr) && parseInt(u.facultyId, 10) === parseInt(facIdStr, 10))
                     )
                 );
@@ -241,6 +228,10 @@ router.get('/', async (req, res, next) => {
             };
         });
 
+        if (req.query.accountOnly === 'true' || req.query.hasAccount === 'true' || req.query.availability === 'true') {
+            stats = stats.filter(f => f.hasAccount && f.account && f.account.role === 'faculty' && f.account.status === 'active' && f.status === 'active');
+        }
+
         res.json({ count: stats.length, faculty: stats, slot: options.day ? options : null });
     } catch (err) {
         next(err);
@@ -251,7 +242,7 @@ router.get('/', async (req, res, next) => {
  * Validate a submitted faculty member, reporting every problem at once.
  * @returns {{ member }} or {{ errors: string[] }}
  */
-function parseFaculty(body, knownCodes) {
+function parseFaculty(body, knownCodes, defaultBranch = null) {
     const text = value => (value == null ? '' : String(value).trim());
     const errors = [];
 
@@ -265,10 +256,10 @@ function parseFaculty(body, knownCodes) {
     if (!name) errors.push('Faculty name is required');
     else if (name.length < 3) errors.push('Faculty name is too short');
 
-    const branch = getBranch();
-    const department = text(body.department || branch.code).toUpperCase();
+    const branch = getBranch(defaultBranch);
+    const department = text(body.department || (branch ? branch.code : '')).toUpperCase();
     if (!department) errors.push('Department is required');
-    else if (!knownCodes.includes(department) && department !== branch.code) {
+    else if (!knownCodes.includes(department) && (!branch || department !== branch.code)) {
         errors.push(`Unknown department "${department}". Valid: ${knownCodes.join(', ')}`);
     }
 
@@ -298,8 +289,17 @@ function parseFaculty(body, knownCodes) {
     };
 }
 
-function requireHOS(req, res, next) {
-    if (req.session && req.session.role === 'faculty') {
+const delegations = require('../data/delegations');
+
+async function requireHOS(req, res, next) {
+    if (!req.session) {
+        return res.status(401).json({
+            error: 'Authentication required. Please sign in.',
+            code: 'UNAUTHENTICATED'
+        });
+    }
+    const isAuthorizedHOS = req.session.role === 'hos' || req.session.role === 'coordinator' || await delegations.isAuthorizedHOS(req.session);
+    if (!isAuthorizedHOS) {
         return res.status(403).json({
             error: 'Faculty members cannot register new faculty. This action requires HOS / Administrator role.',
             code: 'FORBIDDEN'
@@ -308,12 +308,16 @@ function requireHOS(req, res, next) {
     next();
 }
 
-router.post('/', requireHOS, requireDatabase, async (req, res, next) => {
-    const parsed = parseFaculty(req.body || {}, await knownBranchCodes());
+router.post('/', requireDatabase, requireHOS, async (req, res, next) => {
+    const sessionBranch = req.session ? (req.session.department || req.session.branchCode) : null;
+    const parsed = parseFaculty(req.body || {}, await knownBranchCodes(), sessionBranch);
     if (parsed.errors) {
         return res.status(400).json({
             error: parsed.errors.join('; '), code: 'INVALID_FACULTY', problems: parsed.errors
         });
+    }
+    if (sessionBranch && req.session.role !== 'admin' && parsed.member) {
+        parsed.member.department = sessionBranch;
     }
     try {
         const created = await repository.addFaculty(parsed.member);
@@ -332,32 +336,49 @@ router.post('/', requireHOS, requireDatabase, async (req, res, next) => {
 });
 
 function findFacultyMember(engine, id) {
-    if (!engine || !id) return null;
+    if (!id) return null;
     const needle = String(id).trim().toUpperCase();
-    const roster = engine.getFaculty();
-    return roster.find(f =>
-        (f.id && String(f.id).toUpperCase() === needle) ||
-        (f.code && String(f.code).toUpperCase() === needle) ||
-        (f.name && f.name.toUpperCase() === needle)
-    );
+    if (engine && typeof engine.getFaculty === 'function') {
+        const roster = engine.getFaculty();
+        const found = roster.find(f =>
+            (f.id && String(f.id).toUpperCase() === needle) ||
+            (f.code && String(f.code).toUpperCase() === needle) ||
+            (f.name && f.name.toUpperCase() === needle)
+        );
+        if (found) return found;
+    }
+    const allUsers = users.list ? users.list() : [];
+    const u = allUsers.find(user => String(user.id) === String(id) || (user.username && String(user.username).toUpperCase() === needle));
+    if (u) {
+        const fid = u.facultyId || u.faculty_id;
+        if (engine && typeof engine.getFaculty === 'function') {
+            const match = engine.getFaculty().find(f =>
+                (fid && String(f.id).toUpperCase() === String(fid).toUpperCase()) ||
+                (f.name && String(f.name).toUpperCase() === String(u.name).toUpperCase())
+            );
+            if (match) return match;
+        }
+        return {
+            id: fid || u.id,
+            name: u.name,
+            department: u.department,
+            status: u.status || 'active'
+        };
+    }
+    return null;
 }
 
-function requireHOSUser(req, res, next) {
+async function requireHOSUser(req, res, next) {
     if (!req.session) {
         return res.status(401).json({
             error: 'Authentication required. Please sign in.',
             code: 'UNAUTHENTICATED'
         });
     }
-    if (req.session.role === 'faculty') {
+    const isAuthorizedHOS = req.session.role === 'hos' || req.session.role === 'coordinator' || await delegations.isAuthorizedHOS(req.session);
+    if (!isAuthorizedHOS) {
         return res.status(403).json({
             error: 'Faculty members cannot perform HOS faculty-management operations.',
-            code: 'FORBIDDEN'
-        });
-    }
-    if (!['hos', 'coordinator', 'admin'].includes(req.session.role)) {
-        return res.status(403).json({
-            error: 'This action requires HOS or Administrator role.',
             code: 'FORBIDDEN'
         });
     }

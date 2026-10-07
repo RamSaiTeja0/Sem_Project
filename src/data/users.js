@@ -153,12 +153,7 @@ async function register(data, sessionUser = null) {
     const username = rawUsername.toLowerCase();
 
     // Check duplicate username
-    if (registeredUsers.some(u => u.username === username)) {
-        const err = new Error(`Username "${rawUsername}" is already taken.`);
-        err.status = 409; err.code = 'USERNAME_EXISTS';
-        throw err;
-    }
-    if (db.isConfigured()) {
+    if (db.isConfigured() && store.usingDatabase) {
         try {
             const { rows } = await db.query('SELECT 1 FROM users WHERE LOWER(username) = LOWER($1) LIMIT 1', [username]);
             if (rows.length > 0) {
@@ -168,6 +163,12 @@ async function register(data, sessionUser = null) {
             }
         } catch (dbErr) {
             if (dbErr.code === 'USERNAME_EXISTS') throw dbErr;
+        }
+    } else {
+        if (registeredUsers.some(u => u.username === username)) {
+            const err = new Error(`Username "${rawUsername}" is already taken.`);
+            err.status = 409; err.code = 'USERNAME_EXISTS';
+            throw err;
         }
     }
 
@@ -215,8 +216,13 @@ async function register(data, sessionUser = null) {
         targetBranchCode = bCode;
         targetBranchName = bName;
     } else if (role === 'faculty') {
-        // Faculty accounts MUST be created by an authenticated HOS session
-        const isAuthorizedHOS = sessionUser && (sessionUser.role === 'hos' || sessionUser.role === 'coordinator');
+        // Faculty accounts MUST be created by an authenticated HOS or Acting HOD session
+        const delegations = require('./delegations');
+        const isAuthorizedHOS = sessionUser && (
+            sessionUser.role === 'hos' ||
+            sessionUser.role === 'coordinator' ||
+            (await delegations.isAuthorizedHOS(sessionUser))
+        );
         if (!isAuthorizedHOS) {
             const err = new Error('Public faculty creation is not allowed. Faculty accounts must be created by the Head of Department (HOD) for your branch.');
             err.status = 403; err.code = 'FORBIDDEN';
@@ -495,12 +501,14 @@ async function authenticateAsync(username, password) {
             const { rows } = await db.query(`
                 SELECT u.id, u.username, u.name, u.phone, u.role, u.status, u.password_hash AS "passwordHash",
                        u.created_at AS "createdAt",
-                       d.code AS department, d.name AS "branchName",
+                       COALESCE(d.code, d_fac.code, '') AS department,
+                       COALESCE(d.name, d_fac.name, d.code, d_fac.code, '') AS "branchName",
                        f.id AS "facultyId", f.name AS "facultyName", f.code AS "facultyCode",
                        COALESCE((SELECT array_agg(subject) FROM faculty_subjects WHERE faculty_id = f.id), ARRAY[]::text[]) AS subjects
                   FROM users u
                   LEFT JOIN departments d ON d.id = u.department_id
                   LEFT JOIN faculty f ON f.id = u.faculty_id
+                  LEFT JOIN departments d_fac ON d_fac.id = f.department_id
                  WHERE LOWER(u.username) = $1
                  LIMIT 1
             `, [wanted]);
@@ -536,12 +544,14 @@ async function findByUsernameAsync(username) {
             const { rows } = await db.query(`
                 SELECT u.id, u.username, u.name, u.phone, u.role, u.status, u.password_hash AS "passwordHash",
                        u.created_at AS "createdAt",
-                       d.code AS department, d.name AS "branchName",
+                       COALESCE(d.code, d_fac.code, '') AS department,
+                       COALESCE(d.name, d_fac.name, d.code, d_fac.code, '') AS "branchName",
                        f.id AS "facultyId", f.name AS "facultyName", f.code AS "facultyCode",
                        COALESCE((SELECT array_agg(subject) FROM faculty_subjects WHERE faculty_id = f.id), ARRAY[]::text[]) AS subjects
                   FROM users u
                   LEFT JOIN departments d ON d.id = u.department_id
                   LEFT JOIN faculty f ON f.id = u.faculty_id
+                  LEFT JOIN departments d_fac ON d_fac.id = f.department_id
                  WHERE LOWER(u.username) = $1
                  LIMIT 1
             `, [wanted]);
@@ -861,12 +871,7 @@ async function createAccountForFaculty(data, sessionUser = null) {
     const username = rawUsername.toLowerCase();
 
     // Check duplicate username
-    if (registeredUsers.some(u => u.username === username)) {
-        const err = new Error(`Username "${rawUsername}" is already taken.`);
-        err.status = 409; err.code = 'USERNAME_EXISTS';
-        throw err;
-    }
-    if (db.isConfigured()) {
+    if (db.isConfigured() && store.usingDatabase) {
         try {
             const { rows } = await db.query('SELECT 1 FROM users WHERE LOWER(username) = LOWER($1) LIMIT 1', [username]);
             if (rows.length > 0) {
@@ -876,6 +881,12 @@ async function createAccountForFaculty(data, sessionUser = null) {
             }
         } catch (dbErr) {
             if (dbErr.code === 'USERNAME_EXISTS') throw dbErr;
+        }
+    } else {
+        if (registeredUsers.some(u => u.username === username)) {
+            const err = new Error(`Username "${rawUsername}" is already taken.`);
+            err.status = 409; err.code = 'USERNAME_EXISTS';
+            throw err;
         }
     }
 

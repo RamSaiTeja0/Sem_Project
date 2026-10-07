@@ -90,7 +90,7 @@ async function run() {
         assert.ok(anonDashboard.raw.includes('id="navFaculty" style="display:none;"'), 'navFaculty hidden by default');
         assert.ok(anonDashboard.raw.includes('id="navManage" style="display:none;"'), 'navManage hidden by default');
         assert.ok(anonDashboard.raw.includes('id="navImport" style="display:none;"'), 'navImport hidden by default');
-        assert.ok(anonDashboard.raw.includes('id="navAbout" style="display:none;"'), 'navAbout hidden by default');
+        assert.ok(!anonDashboard.raw.includes('id="navAbout"'), 'navAbout removed from dashboard');
         assert.ok(anonDashboard.raw.includes('id="sidebarLogout" style="display:none;"'), 'sidebarLogout hidden by default');
     });
 

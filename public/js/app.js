@@ -10,6 +10,16 @@
 (function () {
     'use strict';
 
+    var AUTHORITATIVE_PERIOD_TIMINGS = {
+        '1': { start: '08:00', end: '08:45' },
+        '2': { start: '08:45', end: '09:30' },
+        '3': { start: '09:30', end: '10:15' },
+        '4': { start: '10:30', end: '11:15' },
+        '5': { start: '11:15', end: '12:00' },
+        '6': { start: '12:00', end: '12:45' },
+        '7': { start: '12:45', end: '13:30' }
+    };
+
     var API = {
         meta: '/api/timetable/meta',
         timetable: '/api/timetable',
@@ -170,6 +180,22 @@
         return null;
     }
 
+    function formatAcademicYear(year) {
+        if (!year) return '';
+        var s = String(year).trim();
+        if (s === '—' || s === '-') return s;
+        var m8 = s.match(/^(\d{4})(\d{4})$/);
+        if (m8) return m8[1] + '–' + m8[2];
+        var m44 = s.match(/^(\d{4})[\-\/–—](\d{4})$/);
+        if (m44) return m44[1] + '–' + m44[2];
+        var m42 = s.match(/^(\d{4})[\-\/–—](\d{2})$/);
+        if (m42) {
+            var prefix = m42[1].slice(0, 2);
+            return m42[1] + '–' + prefix + m42[2];
+        }
+        return s;
+    }
+
     // ----------------------------------------------------------- activity
     /** A session-local trail of what was looked up. Never sent to the server. */
     function logActivity(text) {
@@ -210,7 +236,7 @@
         'hos-substitutions': 'Branch Substitutions',
         manage: 'Add Timetable',
         import: 'Upload Timetable',
-        about: 'Settings / About'
+        delegation: 'HOD Delegation'
     };
 
     var VIEW_NAMES = Object.keys(TITLES);
@@ -218,21 +244,30 @@
     /** Open the view named in the URL hash, so the home page can link into it. */
     function viewFromHash() {
         var name = (window.location.hash || '').replace(/^#/, '');
+        if (name === 'about') return 'dashboard';
         return VIEW_NAMES.indexOf(name) >= 0 ? name : null;
     }
 
-    var HOS_ONLY_VIEWS = ['faculty', 'requests', 'attendance', 'invigilation', 'invig-requests', 'hos-substitutions', 'manage', 'import', 'about'];
+    var HOS_ONLY_VIEWS = ['faculty', 'requests', 'attendance', 'invigilation', 'invig-requests', 'hos-substitutions', 'manage', 'import', 'delegation'];
     var FACULTY_ONLY_VIEWS = ['my-attendance', 'my-invigilation', 'request-invigilation', 'faculty-substitutions'];
 
     function showView(name, updateHash) {
+        if (name === 'about') {
+            name = 'dashboard';
+        }
+        var isPermanentHOS = Boolean(state.user && (state.user.role === 'hos' || state.user.role === 'coordinator' || state.user.role === 'admin'));
+        var isActingHOD = Boolean(state.user && state.user.isActingHOD);
+        var isHOS = isPermanentHOS || isActingHOD;
         var isFaculty = Boolean(state.user && state.user.role === 'faculty');
-        var isHOS = Boolean(state.user && (state.user.role === 'hos' || state.user.role === 'coordinator' || state.user.role === 'admin'));
 
         if (!state.user && (HOS_ONLY_VIEWS.indexOf(name) >= 0 || FACULTY_ONLY_VIEWS.indexOf(name) >= 0)) {
             name = 'dashboard';
-        } else if (isFaculty && HOS_ONLY_VIEWS.indexOf(name) >= 0) {
+        } else if (name === 'delegation' && !isPermanentHOS) {
+            // Acting HOD and normal faculty cannot access delegation management
+            name = 'dashboard';
+        } else if (isFaculty && !isActingHOD && HOS_ONLY_VIEWS.indexOf(name) >= 0) {
             name = 'schedule';
-        } else if (isHOS && FACULTY_ONLY_VIEWS.indexOf(name) >= 0) {
+        } else if (isPermanentHOS && FACULTY_ONLY_VIEWS.indexOf(name) >= 0) {
             name = 'dashboard';
         }
 
@@ -242,8 +277,17 @@
         Array.prototype.forEach.call(document.querySelectorAll('.nav-item[data-view]'), function (button) {
             button.classList.toggle('is-active', button.dataset.view === name);
         });
-        el('viewTitle').textContent = TITLES[name] || 'Dashboard';
-
+        if (name === 'dashboard') {
+            if (isHOS) {
+                if (el('hodDashboardOverview')) el('hodDashboardOverview').style.display = 'flex';
+                if (el('standardDashboardOverview')) el('standardDashboardOverview').style.display = 'none';
+                loadHODDashboard();
+            } else {
+                if (el('hodDashboardOverview')) el('hodDashboardOverview').style.display = 'none';
+                if (el('standardDashboardOverview')) el('standardDashboardOverview').style.display = '';
+                loadDashboard();
+            }
+        }
         if (name === 'faculty') { loadFacultyForm(); loadFacultyTable(); }
         if (name === 'requests') { loadFacultyRequests(); }
         if (name === 'attendance') { loadHOSAttendance(); }
@@ -258,27 +302,65 @@
         if (name === 'manage') { loadDocumentStatus(); loadManage(); }
         if (name === 'timetable') { applyTimetableDepartment(); }
         if (name === 'availability') { loadHOSAvailabilityForm(); applyAvailabilityDepartment(); }
-        if (name === 'about') { loadBranchConfig(); }
+        if (name === 'delegation') { loadDelegationView(); }
 
         var sidebar = el('sidebar');
         if (sidebar) sidebar.classList.remove('is-open');
 
         if (updateHash !== false && window.location.hash !== '#' + name) {
-            window.history.replaceState(null, '', '#' + name);
+            if (window.location.hash && window.location.hash !== '#dashboard' && name === 'dashboard') {
+                window.history.replaceState(null, '', '#' + name);
+            } else {
+                window.history.pushState(null, '', '#' + name);
+            }
         }
     }
 
     // ---------------------------------------------------------- session
     function renderUser(session) {
         state.user = session && session.user ? session.user : null;
+        var isPermanentHOS = Boolean(state.user && (state.user.role === 'hos' || state.user.role === 'coordinator' || state.user.role === 'admin'));
+        var isActingHOD = Boolean(state.user && state.user.isActingHOD);
+        var isFaculty = Boolean(state.user && state.user.role === 'faculty');
+        var isHOS = isPermanentHOS || isActingHOD;
+
         var name = state.user ? state.user.name : 'Guest';
-        var role = state.user
-            ? (state.user.role === 'faculty' ? 'Faculty · ' + state.user.department : (state.user.role === 'hos' ? 'HOD · ' + state.user.department : 'HOD / Coordinator'))
-            : (session && session.authRequired ? 'Sign-in required' : 'Not signed in');
+        var role = 'Not signed in';
+        if (state.user) {
+            var dept = state.user.department || (state.user.actingHOD && state.user.actingHOD.branch) || state.user.branchName || '';
+            if (isActingHOD) {
+                var actDept = (state.user.actingHOD && state.user.actingHOD.branch) || dept;
+                role = actDept ? 'Acting HOD · ' + actDept : 'Acting HOD';
+            } else if (isFaculty) {
+                role = dept ? 'Faculty · ' + dept : 'Faculty';
+            } else if (state.user.role === 'hos') {
+                role = dept ? 'HOD · ' + dept : 'HOD';
+            } else if (state.user.role === 'coordinator' || state.user.role === 'admin') {
+                role = dept ? 'HOD · ' + dept : 'HOD / Coordinator';
+            } else {
+                role = dept ? 'HOD · ' + dept : 'HOD';
+            }
+        } else if (session && session.authRequired) {
+            role = 'Sign-in required';
+        }
 
         if (el('userName')) el('userName').textContent = name;
         if (el('userRole')) el('userRole').textContent = role;
         if (el('userAvatar')) el('userAvatar').textContent = initials(name);
+
+        // Acting HOD banner
+        var banner = el('actingHodBanner');
+        if (banner) {
+            if (isActingHOD && state.user && state.user.actingHOD) {
+                banner.style.display = 'block';
+                if (el('actingHodBranchBadge')) el('actingHodBranchBadge').textContent = state.user.actingHOD.branch || state.user.department;
+                if (el('actingHodStartDate')) el('actingHodStartDate').textContent = state.user.actingHOD.startDate;
+                if (el('actingHodEndDate')) el('actingHodEndDate').textContent = state.user.actingHOD.endDate;
+                if (el('actingHodAssignedBy')) el('actingHodAssignedBy').textContent = state.user.actingHOD.hodName || 'Permanent HOD';
+            } else {
+                banner.style.display = 'none';
+            }
+        }
 
         if (el('loginLink')) el('loginLink').style.display = state.user ? 'none' : '';
         if (el('logoutBtn')) {
@@ -288,9 +370,6 @@
         if (el('sidebarLogout')) {
             el('sidebarLogout').style.display = state.user ? '' : 'none';
         }
-
-        var isFaculty = Boolean(state.user && state.user.role === 'faculty');
-        var isHOS = Boolean(state.user && (state.user.role === 'hos' || state.user.role === 'coordinator' || state.user.role === 'admin'));
 
         // Role-based navigation visibility
         if (el('navFaculty')) el('navFaculty').style.display = isHOS ? '' : 'none';
@@ -306,8 +385,16 @@
         if (el('navManageLabel')) el('navManageLabel').style.display = isHOS ? '' : 'none';
         if (el('navManage')) el('navManage').style.display = isHOS ? '' : 'none';
         if (el('navImport')) el('navImport').style.display = isHOS ? '' : 'none';
-        if (el('navAbout')) el('navAbout').style.display = isHOS ? '' : 'none';
-        if (el('navSchedule')) el('navSchedule').style.display = (isFaculty || isHOS) ? '' : 'none';
+        if (el('navDelegation')) el('navDelegation').style.display = isPermanentHOS ? '' : 'none';
+        if (el('navSchedule')) el('navSchedule').style.display = isFaculty ? '' : 'none';
+
+        if (el('hodDashboardOverview') && el('standardDashboardOverview')) {
+            el('hodDashboardOverview').style.display = isHOS ? 'flex' : 'none';
+            el('standardDashboardOverview').style.display = isHOS ? 'none' : '';
+            if (isHOS) {
+                loadHODDashboard();
+            }
+        }
 
         if (isHOS) {
             updatePendingRequestsBadge();
@@ -361,7 +448,7 @@
         var branchName = state.user ? (state.user.branchName || '') : '';
         var branchDisplay = deptCode ? (branchName && branchName !== deptCode ? deptCode + ' — ' + branchName : deptCode) : 'Branch';
 
-        ['schedBranchBadge', 'availBranchBadge', 'facBranchBadge', 'facNewBranchBadge', 'ttBranchBadge', 'aboutBranchBadge', 'reqBranchBadge', 'hosSubBranchBadge'].forEach(function (id) {
+        ['schedBranchBadge', 'availBranchBadge', 'availGridBranchBadge', 'facBranchBadge', 'facNewBranchBadge', 'ttBranchBadge', 'aboutBranchBadge', 'reqBranchBadge', 'hosSubBranchBadge'].forEach(function (id) {
             if (el(id)) el(id).textContent = deptCode;
         });
         if (el('facBranchInheritBadge')) el('facBranchInheritBadge').textContent = branchDisplay;
@@ -482,7 +569,7 @@
                     state.user.department = branch.code;
                     state.user.branchName = branch.name;
                 }
-                ['schedBranchBadge', 'availBranchBadge', 'facBranchBadge', 'facNewBranchBadge', 'facBranchInheritBadge', 'ttBranchBadge', 'aboutBranchBadge'].forEach(function (id) {
+                ['schedBranchBadge', 'availBranchBadge', 'availGridBranchBadge', 'facBranchBadge', 'facNewBranchBadge', 'facBranchInheritBadge', 'ttBranchBadge', 'aboutBranchBadge'].forEach(function (id) {
                     if (el(id)) el(id).textContent = branch.code;
                 });
             }
@@ -526,6 +613,7 @@
 
         options = options || {};
         var isFacultyView = Boolean(options.isFaculty || (grid && grid.view === 'faculty') || (headId === 'schedHead') || (headId === 'facPreviewHead'));
+        var isFacultyPreview = Boolean(options.isFacultyPreview || (headId === 'facPreviewHead'));
         var isEditable = Boolean(options.editable && !isFacultyView);
         var showEditIndicator = options.showEditIndicator !== undefined ? Boolean(options.showEditIndicator) : true;
 
@@ -535,19 +623,25 @@
             if (!hasEntries) {
                 box.style.display = 'block';
                 box.className = 'notice notice-info';
-                box.textContent = 'No master timetable has been configured yet.';
+                box.innerHTML = '<strong>No timetable entries yet.</strong> Upload a timetable or use <strong>＋ Add</strong> to create entries.';
             } else {
                 box.style.display = 'none';
             }
         }
 
-        var periodTimingsMap = timings || (grid && grid.periodTimings) || {};
+        var periodTimingsMap = (timings && Object.keys(timings).length > 0)
+            ? timings
+            : ((grid && grid.periodTimings && Object.keys(grid.periodTimings).length > 0)
+                ? grid.periodTimings
+                : ((state.meta && state.meta.periodTimings && Object.keys(state.meta.periodTimings).length > 0)
+                    ? state.meta.periodTimings
+                    : AUTHORITATIVE_PERIOD_TIMINGS));
 
         var headHtml = '<tr><th class="day-col">Day</th>';
         (grid.periods || [1, 2, 3, 4, 5, 6, 7]).forEach(function (period) {
             var pNum = normPeriodKey(period);
             if (pNum == null) pNum = period;
-            var timing = periodTimingsMap[String(period)] || periodTimingsMap[String(pNum)] || periodTimingsMap[Number(pNum)] || periodTimingsMap[period] || {};
+            var timing = periodTimingsMap[String(period)] || periodTimingsMap[String(pNum)] || periodTimingsMap[Number(pNum)] || periodTimingsMap[period] || AUTHORITATIVE_PERIOD_TIMINGS[String(pNum)] || {};
             if (typeof timing === 'string') {
                 var parts = timing.split(/–|-/);
                 timing = { start: parts[0] ? parts[0].trim() : '', end: parts[1] ? parts[1].trim() : '' };
@@ -665,18 +759,30 @@
                         facultyHtml +
                         roomAndClassHtml;
                 } else {
-                    var freeEditIndicatorHtml = showEditIndicator
-                        ? '<div style="display:flex; justify-content:flex-end; align-items:center; margin-bottom:2px;"><span class="slot-edit-indicator" style="font-size:0.75rem; color:var(--brand-600); font-weight:600; cursor:pointer;" title="Click to edit slot">✎ Edit</span></div>'
-                        : '';
+                    var freeEditIndicatorHtml = '';
+                    if (showEditIndicator) {
+                        if (isFacultyPreview) {
+                            freeEditIndicatorHtml = '<div style="display:flex; justify-content:flex-end; align-items:center; margin-bottom:2px;"><span class="slot-edit-indicator" style="font-size:0.75rem; color:var(--brand-600); font-weight:600; cursor:pointer;" title="Click to edit slot">✎ Edit</span></div>';
+                        } else {
+                            freeEditIndicatorHtml = '<div style="display:flex; justify-content:flex-end; align-items:center; margin-bottom:2px;"><span class="slot-add-indicator slot-edit-indicator" style="font-size:0.75rem; color:var(--brand-600); font-weight:600; cursor:pointer;" title="Click to add entry">＋ Add</span></div>';
+                        }
+                    }
                     button.innerHTML = freeEditIndicatorHtml + '<div class="slot-subject">Free</div>';
                 }
 
                 button.addEventListener('click', function (ev) {
-                    var isEditClick = Boolean(ev.target && ev.target.closest && ev.target.closest('.slot-edit-indicator'));
-                    if (isEditClick && typeof options.onEdit === 'function') {
+                    var editBtn = ev.target && ev.target.closest && (ev.target.closest('.slot-edit-indicator') || ev.target.closest('.slot-add-indicator'));
+                    if (editBtn) {
                         ev.stopPropagation();
-                        options.onEdit(cell, grid.periods);
-                        return;
+                        if (typeof options.onEdit === 'function') {
+                            options.onEdit(cell, grid.periods);
+                            return;
+                        } else if (headId === 'ttHead' || bodyId === 'ttBody') {
+                            if (typeof window.openMasterSlotEditor === 'function') {
+                                window.openMasterSlotEditor(cell);
+                                return;
+                            }
+                        }
                     }
 
                     var container = body.id;
@@ -729,7 +835,7 @@
 
         var freeHtml = '';
         if (freeList.length === 0) {
-            freeHtml = notice('No faculty are free during this period.', 'warn');
+            freeHtml = notice(result.emptyState || 'No faculty accounts available.', 'warn');
         } else if (sameBranchCode) {
             var sameSection = '';
             if (sameList.length > 0) {
@@ -801,20 +907,37 @@
             }).join('') + '</ul>'
             : '<p class="muted">Nobody else is teaching this period.</p>';
 
+        var rawScopeYear = (cell && cell.academicYear) || (result && result.academicYear) || (state.currentAvailabilityScope && state.currentAvailabilityScope.academicYear) || (el('availAcademicYear') && el('availAcademicYear').value) || '—';
+        var scopeYear = (rawScopeYear && rawScopeYear !== '—') ? formatAcademicYear(rawScopeYear) : '—';
+        var scopeBranch = (cell && cell.branch) || (result && result.sameBranch && result.sameBranch.branch) || (result && (result.priorityBranch || result.branch)) || (state.currentAvailabilityScope && state.currentAvailabilityScope.branch) || (state.user && state.user.department) || '—';
+        var scopeSemester = (cell && cell.semester) || (state.currentAvailabilityScope && state.currentAvailabilityScope.semester) || '—';
+        var scopeSectionClass = (cell && (cell.class || cell.className)) || (state.currentAvailabilityScope && state.currentAvailabilityScope.classCode) || '—';
+        var scopeSubject = (cell && cell.subject) || 'Free period';
+        var scopeFaculty = (cell && cell.faculty) || '—';
+
+        var slotTiming = (result && result.periodTimings && (result.periodTimings[String(cell.period)] || result.periodTimings[cell.period])) || (state.meta && state.meta.periodTimings && (state.meta.periodTimings[String(cell.period)] || state.meta.periodTimings[cell.period])) || AUTHORITATIVE_PERIOD_TIMINGS[String(cell.period)];
+        var slotTimingText = (slotTiming && slotTiming.start && slotTiming.end) ? ' (' + esc(slotTiming.start) + ' – ' + esc(slotTiming.end) + ')' : '';
+
         container.innerHTML =
             '<div class="section-label">Selected slot</div>' +
-            '<div class="slot-title">' + esc(cell.day) + ' — Period ' + esc(cell.period) + '</div>' +
+            '<div class="slot-title">' + esc(cell.day) + ' — Period ' + esc(cell.period) + slotTimingText + (cell.subject ? ' (' + esc(cell.subject) + ')' : '') + '</div>' +
             '<div style="margin-top:8px;">' +
                 '<div class="detail-row"><span class="detail-label">Day</span>' +
                     '<span class="detail-value">' + esc(cell.day) + '</span></div>' +
                 '<div class="detail-row"><span class="detail-label">Period</span>' +
-                    '<span class="detail-value">P' + esc(cell.period) + '</span></div>' +
-                '<div class="detail-row"><span class="detail-label">Class</span>' +
-                    '<span class="detail-value">' + esc(cell.class || '—') + '</span></div>' +
+                    '<span class="detail-value">P' + esc(cell.period) + slotTimingText + '</span></div>' +
+                '<div class="detail-row"><span class="detail-label">Academic Year</span>' +
+                    '<span class="detail-value">' + esc(scopeYear) + '</span></div>' +
+                '<div class="detail-row"><span class="detail-label">Branch</span>' +
+                    '<span class="detail-value"><strong style="color:var(--brand-700);">' + esc(scopeBranch) + '</strong></span></div>' +
+                '<div class="detail-row"><span class="detail-label">Semester</span>' +
+                    '<span class="detail-value">' + esc(scopeSemester) + '</span></div>' +
+                '<div class="detail-row"><span class="detail-label">Section / Class</span>' +
+                    '<span class="detail-value">' + esc(scopeSectionClass) + '</span></div>' +
                 '<div class="detail-row"><span class="detail-label">Subject</span>' +
-                    '<span class="detail-value">' + esc(cell.subject || 'Free period') + '</span></div>' +
+                    '<span class="detail-value"><strong>' + esc(scopeSubject) + '</strong></span></div>' +
                 '<div class="detail-row"><span class="detail-label">Current Faculty</span>' +
-                    '<span class="detail-value">' + esc(cell.faculty || '—') + '</span></div>' +
+                    '<span class="detail-value">' + esc(scopeFaculty) + '</span></div>' +
                 (cell.room ? '<div class="detail-row"><span class="detail-label">Room</span>' +
                     '<span class="detail-value">' + esc(cell.room) + '</span></div>' : '') +
             '</div>' +
@@ -888,11 +1011,122 @@
             '<span class="stat-link">' + esc(s.linkLabel || 'Open') + ' →</span></button>';
     }
 
+    function loadHODDashboard() {
+        var isPermanentHOS = Boolean(state.user && (state.user.role === 'hos' || state.user.role === 'coordinator' || state.user.role === 'admin'));
+        var isActingHOD = Boolean(state.user && state.user.isActingHOD);
+        var isHOS = isPermanentHOS || isActingHOD;
+        if (!isHOS) return;
+
+        var branchCode = (state.user && state.user.department) || (state.user && state.user.actingHOD && state.user.actingHOD.branch) || '';
+        var branchName = (state.user && state.user.branchName) || branchCode || 'Academic Branch';
+
+        var today = new Date();
+        var formattedDate = today.toLocaleDateString('en-US', {
+            weekday: 'long',
+            year: 'numeric',
+            month: 'long',
+            day: 'numeric'
+        });
+        var dateIso = today.toISOString().slice(0, 10);
+
+        if (el('hodDashBranchName')) {
+            el('hodDashBranchName').textContent = branchName + (branchCode && branchName !== branchCode ? ' (' + branchCode + ')' : '');
+        }
+        if (el('hodDashDate')) {
+            el('hodDashDate').textContent = formattedDate;
+        }
+
+        var query = branchCode ? '?branch=' + encodeURIComponent(branchCode) : '';
+
+        Promise.all([
+            getJson(API.summary + query).catch(function () { return null; }),
+            getJson('/api/attendance?date=' + dateIso).catch(function () { return null; }),
+            getJson(API.faculty + query).catch(function () { return null; }),
+            getJson('/api/faculty-requests').catch(function () { return null; }),
+            getJson('/api/substitutions').catch(function () { return null; }),
+            getJson('/api/invigilation/requests').catch(function () { return null; })
+        ]).then(function (results) {
+            var summary = results[0];
+            var attendanceData = results[1];
+            var facultyData = results[2];
+            var facRequestsData = results[3];
+            var substitutionsData = results[4];
+            var invigRequestsData = results[5];
+
+            // 1. Faculty Summary
+            var facultyList = (attendanceData && attendanceData.faculty) || (facultyData && facultyData.faculty) || [];
+            var totalFaculty = (summary && summary.totalFaculty != null) ? summary.totalFaculty : facultyList.length;
+            var presentToday = 0;
+            var absentToday = 0;
+
+            if (attendanceData && Array.isArray(attendanceData.faculty) && attendanceData.faculty.length > 0) {
+                absentToday = attendanceData.faculty.filter(function (f) { return f.status === 'ABSENT'; }).length;
+                presentToday = attendanceData.faculty.filter(function (f) { return f.status === 'PRESENT'; }).length;
+                if (totalFaculty === 0) totalFaculty = attendanceData.faculty.length;
+            } else if (facultyData && Array.isArray(facultyData.faculty)) {
+                totalFaculty = facultyData.faculty.length;
+                presentToday = totalFaculty;
+                absentToday = 0;
+            }
+
+            if (el('hodStatTotalFaculty')) el('hodStatTotalFaculty').textContent = totalFaculty;
+            if (el('hodStatPresentToday')) el('hodStatPresentToday').textContent = presentToday;
+            if (el('hodStatAbsentToday')) el('hodStatAbsentToday').textContent = absentToday;
+
+            // 2. Timetable Summary
+            var scheduledPeriods = 0;
+            var freePeriods = 0;
+            if (summary && Array.isArray(summary.slots)) {
+                scheduledPeriods = summary.slots.reduce(function (sum, s) { return sum + (s.busy || 0); }, 0);
+                freePeriods = summary.slots.reduce(function (sum, s) { return sum + (s.available || 0); }, 0);
+            } else if (facultyData && Array.isArray(facultyData.faculty)) {
+                scheduledPeriods = facultyData.faculty.reduce(function (sum, f) { return sum + (f.busyPeriods || 0); }, 0);
+                freePeriods = facultyData.faculty.reduce(function (sum, f) { return sum + (f.freePeriods || 0); }, 0);
+            }
+
+            if (el('hodStatScheduledPeriods')) el('hodStatScheduledPeriods').textContent = scheduledPeriods;
+            if (el('hodStatFreePeriods')) el('hodStatFreePeriods').textContent = freePeriods;
+
+            // 3. Pending Requests
+            var pendingFacRequests = 0;
+            if (facRequestsData && Array.isArray(facRequestsData.requests)) {
+                pendingFacRequests = facRequestsData.requests.filter(function (r) { return r.status === 'PENDING'; }).length;
+            }
+
+            var pendingSubstitutions = 0;
+            if (substitutionsData && Array.isArray(substitutionsData.substitutions)) {
+                pendingSubstitutions = substitutionsData.substitutions.filter(function (s) { return s.status === 'PENDING'; }).length;
+            }
+
+            var pendingInvigRequests = 0;
+            if (invigRequestsData && Array.isArray(invigRequestsData.requests)) {
+                pendingInvigRequests = invigRequestsData.requests.filter(function (r) { return r.status === 'PENDING'; }).length;
+            }
+
+            if (el('hodStatPendingFacRequests')) el('hodStatPendingFacRequests').textContent = pendingFacRequests;
+            if (el('hodStatPendingSubstitutions')) el('hodStatPendingSubstitutions').textContent = pendingSubstitutions;
+            if (el('hodStatPendingInvigRequests')) el('hodStatPendingInvigRequests').textContent = pendingInvigRequests;
+        }).catch(function (err) {
+            console.error('[HOD Dashboard] Error loading overview metrics:', err);
+        });
+    }
+
     /**
      * Stat cards. Every number comes from an API the project already has:
      * the availability summary, the timetable meta, and the faculty roster.
      */
     function loadDashboard(day, period) {
+        var isPermanentHOS = Boolean(state.user && (state.user.role === 'hos' || state.user.role === 'coordinator' || state.user.role === 'admin'));
+        var isActingHOD = Boolean(state.user && state.user.isActingHOD);
+        var isHOS = isPermanentHOS || isActingHOD;
+        if (isHOS) {
+            if (el('hodDashboardOverview')) el('hodDashboardOverview').style.display = 'flex';
+            if (el('standardDashboardOverview')) el('standardDashboardOverview').style.display = 'none';
+            loadHODDashboard();
+        } else {
+            if (el('hodDashboardOverview')) el('hodDashboardOverview').style.display = 'none';
+            if (el('standardDashboardOverview')) el('standardDashboardOverview').style.display = '';
+        }
         var query = (day && period) ? '?day=' + encodeURIComponent(day) + '&period=' + encodeURIComponent(period) : '';
         return Promise.all([
             getJson(API.summary + query),
@@ -1089,7 +1323,9 @@
 
         if (facEditDay) facEditDay.value = day;
         if (facEditPeriod) facEditPeriod.value = period;
-        if (modalTitle) modalTitle.textContent = 'Edit My Timetable Slot — ' + day + ' Period ' + period;
+        var periodTiming = (state.meta && state.meta.periodTimings && (state.meta.periodTimings[String(period)] || state.meta.periodTimings[period])) || AUTHORITATIVE_PERIOD_TIMINGS[String(period)];
+        var periodTimingStr = (periodTiming && periodTiming.start && periodTiming.end) ? ' (' + periodTiming.start + ' – ' + periodTiming.end + ')' : '';
+        if (modalTitle) modalTitle.textContent = 'Edit My Timetable Slot — ' + day + ' Period ' + period + periodTimingStr;
 
         var isFree = !cell.subject || cell.status === 'free';
         if (facEditIsFree) facEditIsFree.checked = isFree;
@@ -1110,7 +1346,9 @@
                 if (pNum && curP && pNum > curP) {
                     var opt = document.createElement('option');
                     opt.value = pNum;
-                    opt.textContent = 'Spans P' + curP + ' to P' + pNum;
+                    var pT = (state.meta && state.meta.periodTimings && (state.meta.periodTimings[String(pNum)] || state.meta.periodTimings[pNum])) || AUTHORITATIVE_PERIOD_TIMINGS[String(pNum)];
+                    var pTStr = (pT && pT.end) ? ' (until ' + pT.end + ')' : '';
+                    opt.textContent = 'Spans P' + curP + ' to P' + pNum + pTStr;
                     if (cell.spanTo === pNum || cell.span_to === pNum) opt.selected = true;
                     facEditSpanTo.appendChild(opt);
                 }
@@ -1255,21 +1493,28 @@
         }
 
         return Promise.all([
-            getJson(API.faculty),
+            getJson(API.faculty + '?accountOnly=true'),
             getJson(API.meta)
         ]).then(function (results) {
             var facultyData = results[0];
             var metaData = results[1];
-            hosAvailData = { faculty: facultyData.faculty || [], meta: metaData };
+            var rawList = facultyData.faculty || [];
+            var facultyList = rawList.filter(function (f) {
+                return f.hasAccount && (!f.account || (f.account.role === 'faculty' && f.account.status === 'active')) && (f.status === 'active' || !f.status);
+            });
+            hosAvailData = { faculty: facultyList, meta: metaData };
 
-            var facultyList = facultyData.faculty || [];
             var absentSelect = el('availAbsentFaculty');
             if (absentSelect) {
                 var opts = '<option value="">None / Auto from Attendance</option>';
-                opts += facultyList.map(function (f) {
-                    return '<option value="' + esc(f.name) + '">' + esc(f.name) +
-                        (f.designation ? ' · ' + esc(f.designation) : '') + '</option>';
-                }).join('');
+                if (facultyList.length === 0) {
+                    opts = '<option value="" disabled selected>No faculty accounts available</option>';
+                } else {
+                    opts += facultyList.map(function (f) {
+                        return '<option value="' + esc(f.name) + '">' + esc(f.name) +
+                            (f.designation ? ' · ' + esc(f.designation) : '') + '</option>';
+                    }).join('');
+                }
                 absentSelect.innerHTML = opts;
             }
 
@@ -1385,6 +1630,8 @@
                 return !sameBranchCode || (f.department || f.branch || '').toUpperCase() !== sameBranchCode.toUpperCase();
             });
 
+        var facultyList = data.faculty || data.allFaculty || [];
+
         // 1. Substitute Candidates Section
         var candidatesHtml = '<div style="margin-bottom:20px; padding:14px; background:var(--surface-subtle, #f8fafc); border-radius:var(--radius-sm, 6px); border:1px solid var(--border-color, #e2e8f0);">' +
             '<h3 style="margin:0 0 10px 0; font-size:1.02rem; color:var(--ink-900, #0f172a);">Substitute Candidates (FREE Only)</h3>';
@@ -1398,7 +1645,9 @@
                     ' <span class="badge badge-free" style="margin-left:6px;">FREE</span></li>';
             }).join('') + '</ol>';
         } else {
-            candidatesHtml += '<p class="muted" style="margin:0 0 10px 0; font-size:0.86rem;">No free faculty in same branch.</p>';
+            candidatesHtml += '<p class="muted" style="margin:0 0 10px 0; font-size:0.86rem;">' +
+                (facultyList.length === 0 ? 'No faculty accounts available.' : 'No free faculty in same branch.') +
+                '</p>';
         }
 
         // Other Branches Candidates
@@ -1412,12 +1661,13 @@
                     ' <span class="badge badge-free" style="margin-left:6px;">FREE</span></li>';
             }).join('') + '</ol>';
         } else {
-            candidatesHtml += '<p class="muted" style="margin:0; font-size:0.86rem;">No free faculty in other branches.</p>';
+            candidatesHtml += '<p class="muted" style="margin:0; font-size:0.86rem;">' +
+                (facultyList.length === 0 ? 'No faculty accounts available in other branches.' : 'No free faculty in other branches.') +
+                '</p>';
         }
         candidatesHtml += '</div>';
 
         // 2. Full Faculty Availability Status Table (FREE, BUSY [TEACHING/INVIGILATION], ABSENT)
-        var facultyList = data.faculty || data.allFaculty || [];
         var tableHtml = '<div style="margin-top:16px;">' +
             '<h3 style="margin:0 0 10px 0; font-size:1.02rem; color:var(--ink-900, #0f172a);">Faculty Availability Status</h3>' +
             '<div class="table-scroll">' +
@@ -1433,7 +1683,7 @@
             '<tbody>';
 
         if (facultyList.length === 0) {
-            tableHtml += '<tr><td colspan="4" class="muted" style="padding:12px; text-align:center;">No faculty records found.</td></tr>';
+            tableHtml += '<tr><td colspan="4" class="muted" style="padding:12px; text-align:center;">No faculty accounts available.</td></tr>';
         } else {
             facultyList.forEach(function (f) {
                 var status = String(f.status || '').toUpperCase();
@@ -3615,29 +3865,63 @@
         var regAllBtn = container.querySelector('.btn-register-all-unresolved');
         if (regAllBtn) {
             regAllBtn.addEventListener('click', function () {
+                var origText = regAllBtn.textContent || '⚡ Register All Unresolved to Catalog';
                 regAllBtn.disabled = true;
                 regAllBtn.textContent = 'Registering…';
+
                 fetch('/api/staging/' + encodeURIComponent(uploadId) + '/register-all-unresolved', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' }
-                }).then(function (r) { return r.json(); }).then(function (res) {
-                    if (res.success) {
-                        if (onRefresh) onRefresh();
+                }).then(function (r) {
+                    return r.json().catch(function () {
+                        return { error: 'Server returned non-JSON response (' + r.status + ')' };
+                    }).then(function (data) {
+                        return { ok: r.ok, status: r.status, body: data };
+                    });
+                }).then(function (res) {
+                    if (res.ok && res.body && res.body.success) {
+                        if (onRefresh) {
+                            try {
+                                var p = onRefresh();
+                                if (p && typeof p.then === 'function') {
+                                    p.then(function () {
+                                        regAllBtn.disabled = false;
+                                        regAllBtn.textContent = origText;
+                                    }).catch(function (e) {
+                                        console.error('onRefresh error:', e);
+                                        regAllBtn.disabled = false;
+                                        regAllBtn.textContent = origText;
+                                    });
+                                } else {
+                                    regAllBtn.disabled = false;
+                                    regAllBtn.textContent = origText;
+                                }
+                            } catch (e) {
+                                console.error('onRefresh error:', e);
+                                regAllBtn.disabled = false;
+                                regAllBtn.textContent = origText;
+                            }
+                        } else {
+                            regAllBtn.disabled = false;
+                            regAllBtn.textContent = origText;
+                        }
                     } else {
-                        alert(res.error || 'Failed to register entities.');
+                        var errMsg = (res.body && res.body.error) || ('Failed to register entities (HTTP ' + res.status + ')');
+                        alert(errMsg);
                         regAllBtn.disabled = false;
-                        regAllBtn.textContent = '⚡ Register All Unresolved to Catalog';
+                        regAllBtn.textContent = origText;
                     }
                 }).catch(function (err) {
-                    alert('Network error: ' + err.message);
+                    alert('Network error: ' + (err.message || err));
                     regAllBtn.disabled = false;
-                    regAllBtn.textContent = '⚡ Register All Unresolved to Catalog';
+                    regAllBtn.textContent = origText;
                 });
             });
         }
 
         container.querySelectorAll('.btn-register-entity').forEach(function (btn) {
             btn.addEventListener('click', function () {
+                var origText = btn.textContent || '+ Register New';
                 var entityType = btn.getAttribute('data-type');
                 var extractedText = btn.getAttribute('data-text');
                 var code = btn.getAttribute('data-code') || '';
@@ -3652,18 +3936,43 @@
                         extractedText: extractedText,
                         code: code
                     })
-                }).then(function (r) { return r.json(); }).then(function (res) {
-                    if (res.success) {
-                        if (onRefresh) onRefresh();
+                }).then(function (r) {
+                    return r.json().catch(function () {
+                        return { error: 'Server returned non-JSON response (' + r.status + ')' };
+                    }).then(function (data) {
+                        return { ok: r.ok, status: r.status, body: data };
+                    });
+                }).then(function (res) {
+                    if (res.ok && res.body && res.body.success) {
+                        if (onRefresh) {
+                            try {
+                                var p = onRefresh();
+                                if (p && typeof p.then === 'function') {
+                                    p.catch(function (e) {
+                                        console.error('onRefresh error:', e);
+                                        btn.disabled = false;
+                                        btn.textContent = origText;
+                                    });
+                                }
+                            } catch (e) {
+                                console.error('onRefresh error:', e);
+                                btn.disabled = false;
+                                btn.textContent = origText;
+                            }
+                        } else {
+                            btn.disabled = false;
+                            btn.textContent = origText;
+                        }
                     } else {
-                        alert(res.error || 'Failed to register entity.');
+                        var errMsg = (res.body && res.body.error) || ('Failed to register entity (HTTP ' + res.status + ')');
+                        alert(errMsg);
                         btn.disabled = false;
-                        btn.textContent = '+ Register New';
+                        btn.textContent = origText;
                     }
                 }).catch(function (err) {
-                    alert('Network error: ' + err.message);
+                    alert('Network error: ' + (err.message || err));
                     btn.disabled = false;
-                    btn.textContent = '+ Register New';
+                    btn.textContent = origText;
                 });
             });
         });
@@ -3684,14 +3993,20 @@
                         targetName: target.trim(),
                         targetCode: target.trim()
                     })
-                }).then(function (r) { return r.json(); }).then(function (res) {
-                    if (res.success) {
+                }).then(function (r) {
+                    return r.json().catch(function () {
+                        return { error: 'Server returned non-JSON response (' + r.status + ')' };
+                    }).then(function (data) {
+                        return { ok: r.ok, status: r.status, body: data };
+                    });
+                }).then(function (res) {
+                    if (res.ok && res.body && res.body.success) {
                         if (onRefresh) onRefresh();
                     } else {
-                        alert(res.error || 'Failed to map entity.');
+                        alert((res.body && res.body.error) || 'Failed to map entity.');
                     }
                 }).catch(function (e) {
-                    alert('Network error: ' + e.message);
+                    alert('Network error: ' + (e.message || e));
                 });
             });
         });
@@ -4123,8 +4438,17 @@
 
     // -------------------------------------------------------- bootstrap
     function availabilityQuery() {
-        var value = el('availClass').value || '';
-        return value ? '?class=' + encodeURIComponent(value) : '';
+        var year = (el('availAcademicYear') && el('availAcademicYear').value) || (state.currentAvailabilityScope && state.currentAvailabilityScope.academicYear) || '';
+        var sem = (el('availSemester') && el('availSemester').value) || (state.currentAvailabilityScope && state.currentAvailabilityScope.semester) || '';
+        var sec = (el('availSection') && el('availSection').value) || (state.currentAvailabilityScope && state.currentAvailabilityScope.section) || '';
+        if (sem && sec) {
+            return '?semester=' + encodeURIComponent(sem) + '&section=' + encodeURIComponent(sec) + (year ? '&academicYear=' + encodeURIComponent(year) : '');
+        }
+        var cls = (state.currentAvailabilityScope && state.currentAvailabilityScope.classCode) || '';
+        if (cls) {
+            return '?class=' + encodeURIComponent(cls) + (year ? '&academicYear=' + encodeURIComponent(year) : '');
+        }
+        return year ? '?academicYear=' + encodeURIComponent(year) : '';
     }
 
     function getClassDepartment(code) {
@@ -4294,41 +4618,339 @@
         ].filter(Boolean).join(' · ');
     }
 
-    function applyAvailabilityDepartment() {
-        var wanted = (el('availDept') && el('availDept').value) || '';
-        var meta = state.meta || { classes: [], primaryClass: null };
-        var classes = meta.classes.filter(function (code) {
-            return !wanted || getClassDepartment(code) === wanted;
+    function describeAvailabilityClass(scope) {
+        var box = el('availTimetableMeta');
+        if (!box) return;
+        var s = scope || state.currentAvailabilityScope || {};
+        var branch = s.branch || (state.user && state.user.department) || (state.availabilityScopes && state.availabilityScopes.branch) || '';
+        var rawYear = s.academicYear || (el('availAcademicYear') && el('availAcademicYear').value) || '';
+        var year = formatAcademicYear(rawYear) || rawYear;
+        var sem = s.semester || (el('availSemester') && el('availSemester').value) || '';
+        var sec = s.section || (el('availSection') && el('availSection').value) || '';
+
+        var parts = [];
+        if (branch) parts.push('Branch: ' + branch);
+        if (year) parts.push('Academic Year ' + year);
+        if (sem) parts.push(sem);
+        if (sec) parts.push('Section ' + sec);
+        box.textContent = parts.join(' · ');
+    }
+
+    function getValidSemestersForYear(data, selectedYear) {
+        var branchClasses = (data && data.classes) || [];
+        var allBranchSemesters = (data && data.semesters && data.semesters.length)
+            ? data.semesters.slice()
+            : ['SEM-1', 'SEM-2', 'SEM-3', 'SEM-4', 'SEM-5', 'SEM-6'];
+
+        var yearClasses = branchClasses.filter(function (c) {
+            return !selectedYear || !c.academicYear || c.academicYear === selectedYear ||
+                formatAcademicYear(c.academicYear) === formatAcademicYear(selectedYear);
         });
-        if (!wanted && !classes.length) classes = meta.classes.slice();
 
-        var previous = (el('availClass') && el('availClass').value) || '';
-        var keep = classes.indexOf(previous) >= 0 ? previous : classes[0];
-        fillSelect(el('availClass'), classes.map(function (c) {
-            var info = state.classMeta[c] || {};
-            var dept = info.department || getClassDepartment(c);
-            return {
-                value: c,
-                label: 'Class — ' + c + (dept ? ' (' + dept + ')' : '')
-            };
-        }), keep);
+        var semSet = [];
+        yearClasses.forEach(function (c) {
+            if (c.semester) {
+                var sNum = parseSemesterNumber(c.semester);
+                var sNorm = sNum ? ('SEM-' + sNum) : c.semester;
+                if (semSet.indexOf(sNorm) < 0) semSet.push(sNorm);
+            }
+        });
 
+        if (!semSet.length) {
+            semSet = allBranchSemesters.slice();
+        } else {
+            allBranchSemesters.forEach(function (s) {
+                if (semSet.indexOf(s) < 0) semSet.push(s);
+            });
+        }
+
+        semSet.sort(function (a, b) {
+            return (parseSemesterNumber(a) || 0) - (parseSemesterNumber(b) || 0);
+        });
+        return semSet;
+    }
+
+    function getValidSectionsForSem(data, selectedYear, selectedSem) {
+        var branchClasses = (data && data.classes) || [];
+        var allSections = (data && data.sections && data.sections.length)
+            ? data.sections.slice()
+            : ['A', 'B', 'C'];
+
+        var targetSemNum = parseSemesterNumber(selectedSem);
+
+        var semClasses = branchClasses.filter(function (c) {
+            var yearMatch = !selectedYear || !c.academicYear || c.academicYear === selectedYear ||
+                formatAcademicYear(c.academicYear) === formatAcademicYear(selectedYear);
+            var semMatch = !targetSemNum || parseSemesterNumber(c.semester) === targetSemNum;
+            return yearMatch && semMatch;
+        });
+
+        var secSet = [];
+        semClasses.forEach(function (c) {
+            if (c.section) {
+                var secClean = String(c.section).toUpperCase().replace(/^(?:SEC(?:TION)?[-_\s]*)/, '');
+                if (secClean && secSet.indexOf(secClean) < 0) secSet.push(secClean);
+            }
+        });
+
+        if (!secSet.length) {
+            secSet = allSections.slice();
+        } else {
+            allSections.forEach(function (s) {
+                if (secSet.indexOf(s) < 0) secSet.push(s);
+            });
+        }
+
+        secSet.sort();
+        return secSet;
+    }
+
+    function updateAvailabilityScopeCascade(level) {
+        var data = state.availabilityScopes || {};
+        var availYearEl = el('availAcademicYear');
+        var semEl = el('availSemester');
+        var secEl = el('availSection');
+
+        var selectedYear = availYearEl ? availYearEl.value : '';
+
+        if (level === 'year') {
+            var semOptions = getValidSemestersForYear(data, selectedYear);
+            var prevSem = semEl ? semEl.value : '';
+            var prevSemNum = parseSemesterNumber(prevSem);
+            var matchSem = semOptions.find(function (s) {
+                return s.toLowerCase() === String(prevSem).toLowerCase() ||
+                    (parseSemesterNumber(s) === prevSemNum && prevSemNum != null);
+            });
+            var selectedSem = matchSem || semOptions[0];
+
+            if (semEl) {
+                fillSelect(semEl, semOptions.map(function (s) { return { value: s, label: s }; }), selectedSem);
+                semEl.value = selectedSem;
+            }
+
+            var secOptions = getValidSectionsForSem(data, selectedYear, selectedSem);
+            var prevSec = secEl ? secEl.value : '';
+            var normSec = String(prevSec).toUpperCase().replace(/^(?:SEC(?:TION)?[-_\s]*)/, '');
+            var matchSec = secOptions.find(function (sec) {
+                return String(sec).toUpperCase() === normSec;
+            });
+            var selectedSec = matchSec || secOptions[0];
+
+            if (secEl) {
+                fillSelect(secEl, secOptions.map(function (s) { return { value: s, label: 'Section ' + s }; }), selectedSec);
+                secEl.value = selectedSec;
+            }
+        } else if (level === 'sem') {
+            var currSem = semEl ? semEl.value : '';
+            var secOptionsSem = getValidSectionsForSem(data, selectedYear, currSem);
+            var prevSecSem = secEl ? secEl.value : '';
+            var normSecSem = String(prevSecSem).toUpperCase().replace(/^(?:SEC(?:TION)?[-_\s]*)/, '');
+            var matchSecSem = secOptionsSem.find(function (sec) {
+                return String(sec).toUpperCase() === normSecSem;
+            });
+            var selectedSecSem = matchSecSem || secOptionsSem[0];
+
+            if (secEl) {
+                fillSelect(secEl, secOptionsSem.map(function (s) { return { value: s, label: 'Section ' + s }; }), selectedSecSem);
+                secEl.value = selectedSecSem;
+            }
+        }
+
+        loadAvailabilityGrid();
+        if (el('availResult')) {
+            el('availResult').innerHTML = '<p class="muted">Select a period from the timetable.</p>';
+        }
+    }
+
+    function loadAvailabilityScopes(preferredScope) {
+        return getJson('/api/timetable/scopes').then(function (data) {
+            state.availabilityScopes = data || {};
+            var availYearEl = el('availAcademicYear');
+            var semEl = el('availSemester');
+            var secEl = el('availSection');
+            var branchBadge = el('availGridBranchBadge');
+            var topBranchBadge = el('availBranchBadge');
+
+            var branch = (data && data.branch) || (state.user && state.user.department) || 'Branch';
+            if (branchBadge) branchBadge.textContent = branch;
+            if (topBranchBadge) topBranchBadge.textContent = branch;
+
+            var branchClasses = (data && data.classes) || [];
+            var activeClass = branchClasses.find(function (c) { return (c.entryCount > 0); }) || branchClasses[0] || null;
+
+            // 1. Academic Years
+            var yearSet = [];
+            if (data && Array.isArray(data.academicYears) && data.academicYears.length > 0) {
+                data.academicYears.forEach(function (y) {
+                    if (y && yearSet.indexOf(y) < 0) yearSet.push(y);
+                });
+            }
+            branchClasses.forEach(function (c) {
+                if (c.academicYear && yearSet.indexOf(c.academicYear) < 0) {
+                    yearSet.push(c.academicYear);
+                }
+            });
+            if (!yearSet.length) {
+                var defYear = (data && data.academicYear) || (activeClass && activeClass.academicYear) || '2026-27';
+                yearSet.push(defYear);
+            }
+
+            var currentYear = (preferredScope && preferredScope.academicYear) ||
+                (availYearEl && availYearEl.value) ||
+                (activeClass && activeClass.academicYear) ||
+                yearSet[0];
+            if (yearSet.indexOf(currentYear) < 0) {
+                var matchFmt = yearSet.find(function (y) {
+                    return formatAcademicYear(y) === formatAcademicYear(currentYear);
+                });
+                currentYear = matchFmt || yearSet[0];
+            }
+
+            if (availYearEl) {
+                fillSelect(availYearEl, yearSet.map(function (y) {
+                    return { value: y, label: formatAcademicYear(y) };
+                }), currentYear);
+                availYearEl.value = currentYear;
+            }
+
+            // 2. Semesters for selected year
+            var semOptions = getValidSemestersForYear(data, currentYear);
+            var activeYearClass = branchClasses.find(function (c) {
+                var yMatch = !currentYear || !c.academicYear || c.academicYear === currentYear ||
+                    formatAcademicYear(c.academicYear) === formatAcademicYear(currentYear);
+                return yMatch && c.entryCount > 0 && c.semester;
+            }) || activeClass;
+
+            var currentSem = (preferredScope && preferredScope.semester) ||
+                (semEl && semEl.value) ||
+                (activeYearClass && activeYearClass.semester) ||
+                semOptions[0];
+            var currentSemNum = parseSemesterNumber(currentSem);
+            var matchSem = semOptions.find(function (s) {
+                return s.toLowerCase() === String(currentSem).toLowerCase() ||
+                    (parseSemesterNumber(s) === currentSemNum && currentSemNum != null);
+            });
+            var selectedSem = matchSem || semOptions[0];
+
+            if (semEl) {
+                fillSelect(semEl, semOptions.map(function (s) {
+                    return { value: s, label: s };
+                }), selectedSem);
+                semEl.value = selectedSem;
+            }
+
+            // 3. Sections for selected year & semester
+            var secOptions = getValidSectionsForSem(data, currentYear, selectedSem);
+            var activeSemClass = branchClasses.find(function (c) {
+                var yMatch = !currentYear || !c.academicYear || c.academicYear === currentYear ||
+                    formatAcademicYear(c.academicYear) === formatAcademicYear(currentYear);
+                var sMatch = parseSemesterNumber(c.semester) === parseSemesterNumber(selectedSem);
+                return yMatch && sMatch && c.entryCount > 0 && c.section;
+            }) || activeYearClass;
+
+            var currentSec = (preferredScope && preferredScope.section) ||
+                (secEl && secEl.value) ||
+                (activeSemClass && activeSemClass.section) ||
+                secOptions[0];
+            var normSec = String(currentSec).toUpperCase().replace(/^(?:SEC(?:TION)?[-_\s]*)/, '');
+            var matchSec = secOptions.find(function (sec) {
+                return String(sec).toUpperCase() === normSec;
+            });
+            var selectedSec = matchSec || secOptions[0];
+
+            if (secEl) {
+                fillSelect(secEl, secOptions.map(function (sec) {
+                    return { value: sec, label: 'Section ' + sec };
+                }), selectedSec);
+                secEl.value = selectedSec;
+            }
+
+            var availClassSection = el('availClassSection');
+            if (availClassSection && branchClasses.length > 0) {
+                var classOpts = '<option value="">All Classes</option>';
+                classOpts += branchClasses.map(function (c) {
+                    return '<option value="' + esc(c.code || c.class) + '">' + esc(c.code || c.class) + '</option>';
+                }).join('');
+                availClassSection.innerHTML = classOpts;
+            }
+
+            return loadAvailabilityGrid();
+        }).catch(function (err) {
+            console.error('loadAvailabilityScopes error:', err);
+        });
+    }
+
+    function loadAvailabilityGrid() {
         var query = availabilityQuery();
-        return loadGrid(query, 'availHead', 'availBody', onAvailabilitySelect);
+        return getJson(API.timetable + (query || '')).then(function (grid) {
+            var scope = grid.scope || {};
+            var selectedYear = (el('availAcademicYear') && el('availAcademicYear').value) || scope.academicYear || grid.academicYear || (state.availabilityScopes && state.availabilityScopes.academicYears && state.availabilityScopes.academicYears[0]) || '2026-27';
+            var selectedSem = (el('availSemester') && el('availSemester').value) || scope.semester || '';
+            var selectedSec = (el('availSection') && el('availSection').value) || scope.section || '';
+            var branch = scope.branch || (state.user && state.user.department) || (state.availabilityScopes && state.availabilityScopes.branch) || '';
+
+            var branchClasses = (state.availabilityScopes && state.availabilityScopes.classes) || [];
+            var matchingClass = branchClasses.find(function (c) {
+                var yMatch = !selectedYear || !c.academicYear || c.academicYear === selectedYear ||
+                    formatAcademicYear(c.academicYear) === formatAcademicYear(selectedYear);
+                var sMatch = parseSemesterNumber(c.semester) === parseSemesterNumber(selectedSem);
+                var secMatch = String(c.section || '').toUpperCase().replace(/^(?:SEC(?:TION)?[-_\s]*)/, '') === String(selectedSec).toUpperCase();
+                return yMatch && sMatch && secMatch;
+            });
+            var classCode = scope.classCode || (matchingClass && (matchingClass.code || matchingClass.class)) || grid.name || (branch + '-' + (parseSemesterNumber(selectedSem) || 1) + '-' + selectedSec);
+
+            state.currentAvailabilityScope = {
+                branch: branch,
+                academicYear: selectedYear,
+                semester: selectedSem,
+                section: selectedSec,
+                classCode: classCode
+            };
+
+            describeAvailabilityClass(state.currentAvailabilityScope);
+
+            renderGrid('availHead', 'availBody', grid, grid.periodTimings, onAvailabilitySelect, {
+                showEditIndicator: false,
+                editable: false,
+                isFaculty: false
+            });
+            return grid;
+        });
+    }
+
+    function applyAvailabilityDepartment(preferredScope) {
+        return loadAvailabilityScopes(preferredScope);
     }
 
     function onAvailabilitySelect(cell) {
+        var scope = state.currentAvailabilityScope || {};
+        cell.academicYear = scope.academicYear || (el('availAcademicYear') ? el('availAcademicYear').value : '');
+        cell.branch = scope.branch || (state.user ? state.user.department : '') || (el('availGridBranchBadge') ? el('availGridBranchBadge').textContent : '');
+        cell.semester = scope.semester || (el('availSemester') ? el('availSemester').value : '');
+        cell.section = scope.section || (el('availSection') ? el('availSection').value : '');
+        cell.class = cell.class || cell.className || scope.classCode || '';
+
         checkAvailability(cell, 'availResult', {
-            department: (el('availDept') && el('availDept').value) || '',
+            department: cell.branch || (el('availDept') && el('availDept').value) || '',
             search: (el('availSearch') && el('availSearch').value) || ''
         });
     }
 
     function jumpToAvailability(cell) {
         showView('availability');
-        var target = document.querySelector(
-            '#availBody .slot-btn[data-key="' + cell.day + '|' + cell.period + '"]');
-        if (target) target.click();
+        var selDay = cell.day;
+        var selPeriod = cell.period;
+        var preferredScope = null;
+        if (cell.class) {
+            preferredScope = { className: cell.class };
+        }
+        applyAvailabilityDepartment(preferredScope).then(function () {
+            setTimeout(function () {
+                var target = document.querySelector(
+                    '#availBody .slot-btn[data-key="' + selDay + '|' + selPeriod + '"]');
+                if (target) target.click();
+            }, 50);
+        });
     }
 
     function initFacultyManagementEvents() {
@@ -4536,6 +5158,7 @@
                         noteBox.className = 'notice notice-danger';
                         noteBox.textContent = 'Passwords do not match.';
                         noteBox.style.display = 'block';
+                        try { noteBox.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); } catch (_) {}
                     }
                     return;
                 }
@@ -4558,7 +5181,7 @@
                 .then(function (res) {
                     return res.json().then(function (data) {
                         if (!res.ok) {
-                            var err = new Error(data.error || 'Failed to create faculty account.');
+                            var err = new Error(data.error || data.message || 'Failed to create faculty account.');
                             err.status = res.status;
                             err.code = data.code;
                             throw err;
@@ -4588,6 +5211,7 @@
                         noteBox.className = 'notice notice-danger';
                         noteBox.textContent = err.message || 'Failed to create account.';
                         noteBox.style.display = 'block';
+                        try { noteBox.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); } catch (_) {}
                     }
                     if (err.status === 409 || (err.code && err.code.includes('ACCOUNT_EXISTS'))) {
                         loadFacultyTable();
@@ -4682,13 +5306,19 @@
             }
 
             fillSelect(el('dashDay'), meta.days, meta.days[0]);
-            fillSelect(el('dashPeriod'), (meta.periods || []).map(function (p) {
-                return { value: p, label: 'Period ' + p };
+            fillSelect(el('dashPeriod'), (meta.periods || [1, 2, 3, 4, 5, 6, 7]).map(function (p) {
+                var t = (meta.periodTimings && (meta.periodTimings[String(p)] || meta.periodTimings[p])) || AUTHORITATIVE_PERIOD_TIMINGS[String(p)];
+                var tStr = (t && t.start && t.end) ? ' (' + t.start + ' – ' + t.end + ')' : '';
+                return { value: p, label: 'Period ' + p + tStr };
             }), meta.periods[0]);
             fillSelect(el('subDay'), meta.days, meta.days[0]);
             fillSelect(el('facSlotDay'), [{ value: '', label: '— any —' }].concat(meta.days));
             fillSelect(el('facSlotPeriod'), [{ value: '', label: '— any —' }].concat(
-                (meta.periods || []).map(function (p) { return { value: p, label: 'Period ' + p }; })));
+                (meta.periods || [1, 2, 3, 4, 5, 6, 7]).map(function (p) {
+                    var t = (meta.periodTimings && (meta.periodTimings[String(p)] || meta.periodTimings[p])) || AUTHORITATIVE_PERIOD_TIMINGS[String(p)];
+                    var tStr = (t && t.start && t.end) ? ' (' + t.start + ' – ' + t.end + ')' : '';
+                    return { value: p, label: 'Period ' + p + tStr };
+                })));
 
             var views = (meta.classes || []).map(function (c) {
                 var dept = getClassDepartment(c);
@@ -4915,8 +5545,10 @@
                     return { value: d.code, label: d.code + ' — ' + d.name };
                 })), el('manageDept').value);
             fillSelect(el('manageDay'), reference.days);
-            fillSelect(el('managePeriod'), reference.periods.map(function (p) {
-                return { value: p, label: 'Period ' + p };
+            fillSelect(el('managePeriod'), (reference.periods || [1, 2, 3, 4, 5, 6, 7]).map(function (p) {
+                var t = (state.meta && state.meta.periodTimings && (state.meta.periodTimings[String(p)] || state.meta.periodTimings[p])) || AUTHORITATIVE_PERIOD_TIMINGS[String(p)];
+                var tStr = (t && t.start && t.end) ? ' (' + t.start + ' – ' + t.end + ')' : '';
+                return { value: p, label: 'Period ' + p + tStr };
             }));
             fillSelect(el('manageRoom'), [{ value: '', label: '— none —' }].concat(
                 reference.rooms.map(function (r) { return r.code; })));
@@ -5331,6 +5963,105 @@
         }).catch(function () { /* leave the card as-is */ });
     }
 
+    // ------------------------------------------------------------ swipe / gesture navigation
+    function handleSwipeLeftNavigation() {
+        if (state.user) {
+            // Authenticated user (HOD, Acting HOD, Faculty, Coordinator):
+            // Return directly to the authenticated Dashboard without hitting public landing page or losing session
+            showView('dashboard');
+        } else {
+            // Unauthenticated / public guest user: Keep existing behavior to navigate to public landing page
+            window.location.href = '/';
+        }
+    }
+
+    function initSwipeNavigation() {
+        var startX = 0;
+        var startY = 0;
+        var startTime = 0;
+        var isTracking = false;
+        var activePointerId = null;
+
+        function handleSwipeStart(x, y, target) {
+            // Do not intercept interactive form controls, inputs, editable areas, or buttons
+            if (target && target.closest && target.closest('input, textarea, select, button, a, [contenteditable="true"], .modal, .password-input-wrapper')) {
+                return false;
+            }
+            startX = x;
+            startY = y;
+            startTime = Date.now();
+            isTracking = true;
+            return true;
+        }
+
+        function handleSwipeEnd(endX, endY, target) {
+            if (!isTracking) return;
+            isTracking = false;
+
+            var deltaX = endX - startX;
+            var deltaY = endY - startY;
+            var deltaTime = Date.now() - startTime;
+
+            // Swipe to the LEFT: horizontal distance at least 60px to the left, mostly horizontal, within 1000ms
+            if (deltaX < -60 && Math.abs(deltaX) > Math.abs(deltaY) * 1.2 && deltaTime < 1000) {
+                // If user is inside a horizontally scrollable element that has remaining scroll room to the right, do not navigate
+                if (target && target.closest) {
+                    var scrollContainer = target.closest('.table-scroll, .preview-table-scroll, [data-scrollable]');
+                    if (scrollContainer && (scrollContainer.scrollWidth > scrollContainer.clientWidth)) {
+                        var maxScrollLeft = scrollContainer.scrollWidth - scrollContainer.clientWidth;
+                        if (scrollContainer.scrollLeft < maxScrollLeft - 20) {
+                            return; // User was scrolling table content
+                        }
+                    }
+                }
+
+                handleSwipeLeftNavigation();
+            }
+        }
+
+        // Touch events for mobile / touchscreens
+        document.addEventListener('touchstart', function (e) {
+            if (e.touches && e.touches.length === 1) {
+                handleSwipeStart(e.touches[0].clientX, e.touches[0].clientY, e.target);
+            }
+        }, { passive: true });
+
+        document.addEventListener('touchend', function (e) {
+            if (e.changedTouches && e.changedTouches.length === 1) {
+                handleSwipeEnd(e.changedTouches[0].clientX, e.changedTouches[0].clientY, e.target);
+            }
+        }, { passive: true });
+
+        // Pointer events for pointer drag gestures
+        document.addEventListener('pointerdown', function (e) {
+            if (e.pointerType === 'mouse' && e.button !== 0) return;
+            if (handleSwipeStart(e.clientX, e.clientY, e.target)) {
+                activePointerId = e.pointerId;
+            }
+        }, { passive: true });
+
+        document.addEventListener('pointerup', function (e) {
+            if (activePointerId !== null && e.pointerId === activePointerId) {
+                activePointerId = null;
+                handleSwipeEnd(e.clientX, e.clientY, e.target);
+            }
+        }, { passive: true });
+
+        window.__testSwipeNavigation.handleSwipeStart = handleSwipeStart;
+        window.__testSwipeNavigation.handleSwipeEnd = handleSwipeEnd;
+    }
+
+    // Expose test helper for automated regression testing
+    window.__testSwipeNavigation = {
+        setUser: function (u) { state.user = u; },
+        getUser: function () { return state.user; },
+        showView: showView,
+        handleSwipeLeftNavigation: handleSwipeLeftNavigation,
+        initSwipeNavigation: initSwipeNavigation
+    };
+
+    initSwipeNavigation();
+
     // ------------------------------------------------------------ wiring
     document.addEventListener('DOMContentLoaded', function () {
         renderPresets();
@@ -5349,6 +6080,16 @@
             });
         }
 
+        if (el('hodDashboardOverview')) {
+            el('hodDashboardOverview').addEventListener('click', function (event) {
+                var targetBtn = event.target.closest('[data-nav-target]');
+                if (targetBtn && targetBtn.dataset.navTarget) {
+                    event.preventDefault();
+                    showView(targetBtn.dataset.navTarget);
+                }
+            });
+        }
+
         var toggle = el('sidebarToggle');
         if (toggle) {
             toggle.addEventListener('click', function () { el('sidebar').classList.toggle('is-open'); });
@@ -5357,9 +6098,14 @@
         if (el('logoutBtn')) el('logoutBtn').addEventListener('click', logout);
         if (el('sidebarLogout')) el('sidebarLogout').addEventListener('click', logout);
 
+        window.addEventListener('popstate', function () {
+            var name = viewFromHash() || 'dashboard';
+            showView(name, false);
+        });
+
         window.addEventListener('hashchange', function () {
-            var name = viewFromHash();
-            if (name) showView(name, false);
+            var name = viewFromHash() || 'dashboard';
+            showView(name, false);
         });
 
         // --- dashboard
@@ -5466,9 +6212,15 @@
             function populateEditDropdowns(selectedCell) {
                 var days = (state.meta && state.meta.days) || ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
                 var periods = (state.meta && state.meta.periods) || [1, 2, 3, 4, 5, 6, 7];
+                var pTimings = (state.meta && state.meta.periodTimings) || AUTHORITATIVE_PERIOD_TIMINGS;
+                var pOptions = periods.map(function (p) {
+                    var t = pTimings[String(p)] || pTimings[p] || AUTHORITATIVE_PERIOD_TIMINGS[String(p)];
+                    var tStr = (t && t.start && t.end) ? ' (' + t.start + ' – ' + t.end + ')' : '';
+                    return { value: p, label: 'Period ' + p + tStr };
+                });
 
                 if (selDay) fillSelect(selDay, days, selectedCell && selectedCell.day);
-                if (selPeriod) fillSelect(selPeriod, periods, selectedCell && selectedCell.period);
+                if (selPeriod) fillSelect(selPeriod, pOptions, selectedCell && selectedCell.period);
 
                 getJson(API.entryReference).then(function (ref) {
                     state.entryReference = ref;
@@ -5497,15 +6249,32 @@
                 if (statusBox) statusBox.style.display = 'none';
             }
 
+            window.openMasterSlotEditor = function (selectedCell) {
+                var isHOS = Boolean(state.user && (state.user.role === 'hos' || state.user.role === 'coordinator' || state.user.role === 'admin' || state.user.isActingHOD));
+                if (!isHOS) return;
+                modal.style.display = 'block';
+                var modalTitle = el('ttEditModalTitle');
+                if (modalTitle) {
+                    if (selectedCell && selectedCell.subject) {
+                        modalTitle.textContent = '✏️ Edit Master Timetable Slot';
+                    } else {
+                        modalTitle.textContent = '＋ Add Master Timetable Entry';
+                    }
+                }
+                populateEditDropdowns(selectedCell);
+                try {
+                    modal.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                } catch (_) {}
+            };
+
             if (btnEditMode) {
                 btnEditMode.addEventListener('click', function () {
-                    var isHOS = Boolean(state.user && (state.user.role === 'hos' || state.user.role === 'coordinator' || state.user.role === 'admin'));
+                    var isHOS = Boolean(state.user && (state.user.role === 'hos' || state.user.role === 'coordinator' || state.user.role === 'admin' || state.user.isActingHOD));
                     if (!isHOS) return;
                     if (modal.style.display === 'none' || !modal.style.display) {
-                        modal.style.display = 'block';
                         var key = state.selected.ttBody;
                         var parts = key ? key.split('|') : [];
-                        populateEditDropdowns({ day: parts[0], period: parts[1] ? Number(parts[1]) : 1 });
+                        window.openMasterSlotEditor({ day: parts[0] || 'Monday', period: parts[1] ? Number(parts[1]) : 1 });
                     } else {
                         modal.style.display = 'none';
                     }
@@ -5619,15 +6388,19 @@
         if (el('manageFilterClass')) el('manageFilterClass').addEventListener('change', loadManageList);
 
         // --- availability
-        if (el('availClass')) {
-            el('availClass').addEventListener('change', function () {
-                var selectedClass = el('availClass').value;
-                var dept = getClassDepartment(selectedClass);
-                if (dept && el('availDept') && el('availDept').value !== dept) {
-                    el('availDept').value = dept;
-                }
-                loadGrid(availabilityQuery(), 'availHead', 'availBody', onAvailabilitySelect);
-                if (el('availResult')) el('availResult').innerHTML = '<p class="muted">Select a period from the timetable.</p>';
+        if (el('availAcademicYear')) {
+            el('availAcademicYear').addEventListener('change', function () {
+                updateAvailabilityScopeCascade('year');
+            });
+        }
+        if (el('availSemester')) {
+            el('availSemester').addEventListener('change', function () {
+                updateAvailabilityScopeCascade('sem');
+            });
+        }
+        if (el('availSection')) {
+            el('availSection').addEventListener('change', function () {
+                updateAvailabilityScopeCascade('sec');
             });
         }
         if (el('availDept')) {
@@ -6461,7 +7234,7 @@
                 if (actionStatus) actionStatus.style.display = 'none';
                 if (rejectBox) rejectBox.style.display = 'none';
 
-                fetch('/api/staging/' + encodeURIComponent(uploadId)).then(function (res) {
+                return fetch('/api/staging/' + encodeURIComponent(uploadId)).then(function (res) {
                     return res.json().catch(function () { return {}; }).then(function (data) {
                         return { ok: res.ok, status: res.status, data: data };
                     });
@@ -6935,6 +7708,20 @@
             });
         }
 
+        // HOD Delegation listeners
+        var delegationForm = el('delegationForm');
+        if (delegationForm) {
+            delegationForm.addEventListener('submit', handleAssignDelegation);
+        }
+
+        var btnRefreshDelegations = el('btnRefreshDelegations');
+        if (btnRefreshDelegations) {
+            btnRefreshDelegations.addEventListener('click', function () {
+                loadDelegationFacultyList();
+                loadDelegationsTable();
+            });
+        }
+
         setupTimetableUploads();
 
         loadSession().then(function () {
@@ -6943,4 +7730,204 @@
             return bootstrap();
         });
     });
+
+    // -------------------------------------------------------- HOD Delegation
+    function loadDelegationView() {
+        if (!state.user) return;
+        var hodNameEl = el('delCurrentHOD');
+        if (hodNameEl) hodNameEl.value = (state.user.name || '') + ' (' + (state.user.username || '') + ')';
+
+        var badgeEl = el('delCurrentBranchBadge');
+        if (badgeEl) badgeEl.textContent = state.user.department || 'Branch';
+
+        var today = new Date().toISOString().slice(0, 10);
+        var startInput = el('delStartDate');
+        if (startInput && !startInput.value) {
+            startInput.value = today;
+        }
+
+        var endInput = el('delEndDate');
+        if (endInput && !endInput.value) {
+            var futureDate = new Date();
+            futureDate.setDate(futureDate.getDate() + 3);
+            endInput.value = futureDate.toISOString().slice(0, 10);
+        }
+
+        loadDelegationFacultyList();
+        loadDelegationsTable();
+    }
+
+    function loadDelegationFacultyList() {
+        var select = el('delFacultySelect');
+        if (!select || !state.user) return;
+        select.innerHTML = '<option value="">-- Loading eligible faculty... --</option>';
+
+        fetch('/api/delegations/candidates')
+            .then(function (res) { return res.json(); })
+            .then(function (data) {
+                var options = data.candidates || [];
+
+                if (options.length === 0) {
+                    select.innerHTML = '<option value="">-- No eligible faculty with active login account in branch --</option>';
+                    return;
+                }
+
+                select.innerHTML = '<option value="">-- Select Active Faculty Member (' + options.length + ' available) --</option>' +
+                    options.map(function (f) {
+                        var desig = f.designation ? ' (' + f.designation + ')' : '';
+                        var userSuffix = f.username ? ' [@' + f.username + ']' : '';
+                        return '<option value="' + esc(f.id || f.facultyId || f.name) + '">' + esc(f.name) + desig + esc(userSuffix) + '</option>';
+                    }).join('');
+            })
+            .catch(function (err) {
+                select.innerHTML = '<option value="">Error loading faculty list: ' + esc(err.message) + '</option>';
+            });
+    }
+
+    function loadDelegationsTable() {
+        var tbody = el('delegationsTableBody');
+        var emptyNotice = el('delEmptyNotice');
+        if (!tbody || !state.user) return;
+        tbody.innerHTML = '<tr><td colspan="8" class="muted" style="text-align:center; padding:16px;">Loading delegations...</td></tr>';
+
+        fetch('/api/delegations')
+            .then(function (res) { return res.json(); })
+            .then(function (data) {
+                var list = data.delegations || [];
+                if (list.length === 0) {
+                    tbody.innerHTML = '';
+                    if (emptyNotice) emptyNotice.style.display = 'block';
+                    return;
+                }
+
+                if (emptyNotice) emptyNotice.style.display = 'none';
+
+                tbody.innerHTML = list.map(function (d) {
+                    var statusBadge = '';
+                    if (d.status === 'ACTIVE') {
+                        if (d.isCurrentActive) {
+                            statusBadge = '<span class="badge badge-success">ACTIVE (NOW)</span>';
+                        } else {
+                            statusBadge = '<span class="badge badge-info">UPCOMING</span>';
+                        }
+                    } else if (d.status === 'EXPIRED') {
+                        statusBadge = '<span class="badge badge-secondary" style="background:#6b7280; color:#fff;">EXPIRED</span>';
+                    } else if (d.status === 'CANCELLED') {
+                        statusBadge = '<span class="badge badge-danger">CANCELLED</span>';
+                    } else {
+                        statusBadge = '<span class="badge badge-secondary">' + esc(d.status) + '</span>';
+                    }
+
+                    var actionHtml = '—';
+                    if (d.status === 'ACTIVE') {
+                        actionHtml = '<button type="button" class="btn btn-secondary btn-sm btn-cancel-delegation" data-id="' + esc(d.id) + '" style="color:#ef4444; border-color:rgba(239,68,68,0.3);">Cancel</button>';
+                    }
+
+                    var createdDate = d.createdAt ? new Date(d.createdAt).toLocaleDateString() : '—';
+                    var desig = d.actingFacultyDesignation || 'Faculty';
+
+                    return '<tr>' +
+                        '<td><strong>' + esc(d.actingFacultyName || 'Faculty') + '</strong></td>' +
+                        '<td>' + esc(desig) + '</td>' +
+                        '<td>' + esc(d.startDate) + '</td>' +
+                        '<td>' + esc(d.endDate) + '</td>' +
+                        '<td>' + statusBadge + '</td>' +
+                        '<td>' + esc(d.hodName || 'Permanent HOD') + '</td>' +
+                        '<td><span class="muted" style="font-size:0.85em;">' + esc(createdDate) + '</span></td>' +
+                        '<td>' + actionHtml + '</td>' +
+                    '</tr>';
+                }).join('');
+
+                // Bind cancel buttons
+                Array.prototype.forEach.call(tbody.querySelectorAll('.btn-cancel-delegation'), function (btn) {
+                    btn.addEventListener('click', function () {
+                        var id = btn.dataset.id;
+                        if (confirm('Are you sure you want to cancel this Acting HOD delegation?')) {
+                            handleCancelDelegation(id);
+                        }
+                    });
+                });
+            })
+            .catch(function (err) {
+                tbody.innerHTML = '<tr><td colspan="8" class="text-danger" style="text-align:center; padding:16px;">Failed to load delegations: ' + esc(err.message) + '</td></tr>';
+            });
+    }
+
+    function handleAssignDelegation(e) {
+        if (e) e.preventDefault();
+        var msgEl = el('delFormMsg');
+        var btn = el('btnAssignDelegation');
+
+        var facultyId = el('delFacultySelect') ? el('delFacultySelect').value : '';
+        var startDate = el('delStartDate') ? el('delStartDate').value : '';
+        var endDate = el('delEndDate') ? el('delEndDate').value : '';
+        var notes = el('delNotes') ? el('delNotes').value : '';
+
+        if (!facultyId) {
+            if (msgEl) msgEl.innerHTML = '<div class="notice notice-danger">Please select a faculty member.</div>';
+            return;
+        }
+        if (!startDate || !endDate) {
+            if (msgEl) msgEl.innerHTML = '<div class="notice notice-danger">Start date and end date are required.</div>';
+            return;
+        }
+
+        if (btn) btn.disabled = true;
+        if (msgEl) msgEl.innerHTML = '<div class="notice notice-info">Assigning Acting HOD...</div>';
+
+        fetch('/api/delegations', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                facultyId: facultyId,
+                startDate: startDate,
+                endDate: endDate,
+                notes: notes
+            })
+        })
+            .then(function (res) {
+                return res.json().then(function (data) {
+                    return { ok: res.ok, status: res.status, data: data };
+                });
+            })
+            .then(function (result) {
+                if (btn) btn.disabled = false;
+                if (!result.ok) {
+                    var errMsg = (result.data && result.data.error) || 'Failed to create delegation.';
+                    if (msgEl) msgEl.innerHTML = '<div class="notice notice-danger">' + esc(errMsg) + '</div>';
+                    return;
+                }
+
+                if (msgEl) {
+                    msgEl.innerHTML = '<div class="notice notice-success">' + esc(result.data.message || 'Acting HOD assigned successfully!') + '</div>';
+                }
+
+                if (el('delNotes')) el('delNotes').value = '';
+                loadDelegationsTable();
+            })
+            .catch(function (err) {
+                if (btn) btn.disabled = false;
+                if (msgEl) msgEl.innerHTML = '<div class="notice notice-danger">' + esc(err.message) + '</div>';
+            });
+    }
+
+    function handleCancelDelegation(id) {
+        var msgEl = el('delFormMsg');
+        fetch('/api/delegations/' + encodeURIComponent(id) + '/cancel', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+        })
+            .then(function (res) { return res.json(); })
+            .then(function (data) {
+                if (data.error) {
+                    if (msgEl) msgEl.innerHTML = '<div class="notice notice-danger">' + esc(data.error) + '</div>';
+                } else {
+                    if (msgEl) msgEl.innerHTML = '<div class="notice notice-success">Delegation cancelled successfully.</div>';
+                    loadDelegationsTable();
+                }
+            })
+            .catch(function (err) {
+                if (msgEl) msgEl.innerHTML = '<div class="notice notice-danger">' + esc(err.message) + '</div>';
+            });
+    }
 })();

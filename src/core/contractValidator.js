@@ -5,7 +5,7 @@
  * and verifies authoritative upload metadata ownership (branch, faculty, upload_type).
  */
 
-const { normalizeDayName, normalizePeriodNumber, WORKING_DAYS } = require('./normalizer');
+const { normalizeDayName, normalizePeriodNumber, normalizeDepartmentCode, WORKING_DAYS } = require('./normalizer');
 const store = require('../data/store');
 
 const CONTRACT_VERSION = '2.1';
@@ -56,7 +56,8 @@ function validateExtractedContract(payload, uploadRecord = null, options = {}) {
     }
 
     // 3. Department / Branch code check
-    const deptCode = payload.department_code ? String(payload.department_code).trim().toUpperCase() : '';
+    const rawDeptCode = payload.department_code ? String(payload.department_code).trim().toUpperCase() : '';
+    const deptCode = normalizeDepartmentCode(rawDeptCode);
     if (!deptCode || deptCode === 'UNKNOWN' || deptCode === 'UNRESOLVED' || !/^[A-Z0-9_-]{2,16}$/.test(deptCode)) {
         errors.push('The timetable branch could not be verified from the uploaded document. Branch information is unresolved.');
         code = code || 'UNRESOLVED_BRANCH';
@@ -66,10 +67,10 @@ function validateExtractedContract(payload, uploadRecord = null, options = {}) {
     if (uploadRecord) {
         // Branch Authority check
         if (uploadRecord.departmentCode) {
-            const authDept = String(uploadRecord.departmentCode).trim().toUpperCase();
+            const authDept = normalizeDepartmentCode(uploadRecord.departmentCode);
             if (deptCode && deptCode !== authDept && deptCode !== 'UNKNOWN' && deptCode !== 'UNRESOLVED') {
                 errors.push('This timetable belongs to another branch and cannot be added to your branch Master Timetable.');
-                errors.push(`Detected branch: ${deptCode}`);
+                errors.push(`Detected branch: ${rawDeptCode || deptCode}`);
                 errors.push(`Your branch: ${authDept}`);
                 code = 'BRANCH_MISMATCH';
             }

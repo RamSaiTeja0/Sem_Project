@@ -78,27 +78,26 @@ function getRegisteredBranchCodes() {
 
 function isBranchRegistered(code) {
     if (!code) return false;
-    const raw = String(code).trim().toUpperCase();
-    return branches.has(raw) || (raw.startsWith('D') && branches.has(raw.slice(1)));
+    const raw = normalizeDepartmentCode(code);
+    return branches.has(raw);
 }
 
 function isConfigured(code) {
     if (code) {
-        const raw = String(code).trim().toUpperCase();
-        return branches.has(raw) || (raw.startsWith('D') && branches.has(raw.slice(1)));
+        const raw = normalizeDepartmentCode(code);
+        return branches.has(raw);
     }
     return branches.size > 0;
 }
 
 function getBranch(code = null) {
     if (code) {
-        const raw = String(code).trim().toUpperCase();
+        const raw = normalizeDepartmentCode(code);
         if (branches.has(raw)) return branches.get(raw);
-        if (raw.startsWith('D') && branches.has(raw.slice(1))) return branches.get(raw.slice(1));
     }
     // If environment branch exists, return it
-    if (config.branchCode && branches.has(config.branchCode.toUpperCase())) {
-        return branches.get(config.branchCode.toUpperCase());
+    if (config.branchCode && branches.has(normalizeDepartmentCode(config.branchCode))) {
+        return branches.get(normalizeDepartmentCode(config.branchCode));
     }
     // Return first registered branch ONLY if exactly one branch is registered and no code was specified
     if (!code && branches.size === 1) {
@@ -116,7 +115,7 @@ function getBranch(code = null) {
 }
 
 function setBranch(changes = {}) {
-    const code = changes.code ? String(changes.code).trim().toUpperCase() : null;
+    const code = changes.code ? normalizeDepartmentCode(changes.code) : null;
     const name = changes.name ? String(changes.name).trim() : null;
 
     if (code && name) {
@@ -175,7 +174,7 @@ function resetBranchForTesting() {
     if (config.branchCode && config.branchName) {
         const envBranch = {
             configured: true,
-            code: config.branchCode.toUpperCase(),
+            code: normalizeDepartmentCode(config.branchCode),
             name: config.branchName,
             academicYear: config.academicYear || null,
             semester: config.semester || null,
@@ -193,18 +192,74 @@ function getBranchSemesters(branchCode = null) {
     return Array.from({ length: count }, (_, i) => `SEM-${i + 1}`);
 }
 
-const ALIASES = { EE: 'EEE' };
+/**
+ * Authoritative alias mapping for known academic department / branch codes.
+ * Maps explicit branch aliases / diploma prefixes (e.g. DCME -> CME) to canonical branch codes.
+ *
+ * NOTE: Only explicit, verified aliases are included. No arbitrary prefix stripping or fuzzy matching.
+ */
+const BRANCH_ALIASES = {
+    // Computer Engineering
+    DCME: 'CME',
+    DCSE: 'CME',
+    // Electrical & Electronics Engineering
+    DEEE: 'EEE',
+    EE: 'EEE',
+    DEE: 'EEE',
+    // Mechanical Engineering
+    DMEC: 'MEC',
+    DME: 'MEC',
+    ME: 'MEC',
+    MECH: 'MEC',
+    DMECH: 'MEC',
+    // Electronics & Communication Engineering
+    DECE: 'ECE',
+    EC: 'ECE',
+    DEC: 'ECE',
+    // Civil Engineering
+    DCIVIL: 'CIVIL',
+    CIVIL: 'CIVIL',
+    DCIV: 'CIVIL',
+    CIV: 'CIVIL',
+    DCE: 'CIVIL',
+    // Artificial Intelligence
+    DAIML: 'AIML',
+    DAIDS: 'AIDS',
+    // Information Technology
+    DIT: 'IT',
+    // Mining / Automobile
+    DMIN: 'MIN',
+    DMINING: 'MINING',
+    DAUT: 'AUTOMOBILE',
+    DAUTOMOBILE: 'AUTOMOBILE'
+};
+
+const ALIASES = BRANCH_ALIASES;
+
+/**
+ * Normalizes a raw/extracted department or branch code to its canonical uppercase representation.
+ * Returns the canonical branch code (e.g. "DCME" -> "CME", "CME" -> "CME", "DEEE" -> "EEE").
+ * If the input is null or undefined, returns null.
+ * Unknown codes are returned as trimmed uppercase without guessing.
+ *
+ * @param {string|null|undefined} code
+ * @returns {string|null}
+ */
+function normalizeDepartmentCode(code) {
+    if (code == null) return null;
+    const upper = String(code).trim().toUpperCase();
+    if (!upper) return '';
+    return BRANCH_ALIASES[upper] || upper;
+}
 
 function canonical(code) {
-    const upper = String(code || '').trim().toUpperCase();
-    return ALIASES[upper] || upper;
+    return normalizeDepartmentCode(code);
 }
 
 function find(code) {
     if (!code) return null;
-    const raw = canonical(code);
+    const raw = normalizeDepartmentCode(code);
     if (branches.has(raw)) return branches.get(raw);
-    if (raw.startsWith('D') && branches.has(raw.slice(1))) return branches.get(raw.slice(1));
     return null;
 }
 
@@ -234,6 +289,8 @@ function isActive(code) {
 module.exports = {
     DEPARTMENTS,
     ALIASES,
+    BRANCH_ALIASES,
+    normalizeDepartmentCode,
     registerBranch,
     unregisterBranch,
     getBranch,

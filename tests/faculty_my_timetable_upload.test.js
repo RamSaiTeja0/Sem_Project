@@ -11,7 +11,11 @@
  * 7. Another faculty cannot modify or upload to this faculty's timetable (authenticated session authority).
  * 8. Dynamic timetable structures (days, periods, spans) are preserved.
  * 9. HOD Master Timetable faculty mapping and validation remain unchanged and functional.
+ *
+ * DATABASE ISOLATION: This test is in-memory only.
  */
+process.env.DATABASE_URL = '';
+process.env.TEST_DATABASE_URL = '';
 
 const assert = require('assert');
 const fs = require('fs');

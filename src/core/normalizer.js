@@ -154,6 +154,7 @@ function normalize(source, options = {}) {
 
     // ---- faculty roster -------------------------------------------------
     const faculty = [];
+    const byNameAndDept = new Map();
     const byName = new Map();
 
     (Array.isArray(source.faculty) ? source.faculty : []).forEach(entry => {
@@ -162,12 +163,19 @@ function normalize(source, options = {}) {
             add('error', 'FACULTY_NO_NAME', 'A faculty entry has no name', entry);
             return;
         }
-        if (byName.has(name.toUpperCase())) {
-            add('error', 'FACULTY_DUPLICATE', `Duplicate faculty name: "${name}"`, { name });
-            return;
+        const dept = text(entry && entry.department) || 'General';
+        const key = `${dept.toUpperCase()}:::${name.toUpperCase()}`;
+        if (byNameAndDept.has(key)) {
+            add('warning', 'FACULTY_DUPLICATE', `Duplicate faculty name: "${name}"`, { name, department: dept });
         }
-        faculty.push(buildMember(text(entry.id) || name, name, entry));
-        byName.set(name.toUpperCase(), faculty[faculty.length - 1]);
+        const member = buildMember(text(entry.id) || name, name, entry);
+        faculty.push(member);
+        if (!byNameAndDept.has(key)) {
+            byNameAndDept.set(key, member);
+        }
+        if (!byName.has(name.toUpperCase())) {
+            byName.set(name.toUpperCase(), member);
+        }
     });
 
     // A faculty referenced by a timetable entry but absent from the roster is
@@ -197,11 +205,14 @@ function normalize(source, options = {}) {
     function resolveFaculty(name, context) {
         const clean = text(name);
         if (!clean) return null;
-        const existing = byName.get(clean.toUpperCase());
+        const targetDept = text(context && (context.department || (context.entry && context.entry.department))) || 'General';
+        const key = `${targetDept.toUpperCase()}:::${clean.toUpperCase()}`;
+        const existing = byNameAndDept.get(key) || byName.get(clean.toUpperCase());
         if (existing) return existing;
-        const member = buildMember(clean, clean, null);
+        const member = buildMember(clean, clean, { department: targetDept });
         faculty.push(member);
-        byName.set(clean.toUpperCase(), member);
+        byNameAndDept.set(key, member);
+        if (!byName.has(clean.toUpperCase())) byName.set(clean.toUpperCase(), member);
         add('warning', 'FACULTY_AUTO_ADDED',
             `Faculty "${clean}" was not in the roster and has been added from the timetable`, context);
         return member;
@@ -388,13 +399,17 @@ function normalize(source, options = {}) {
     const classNames = [...new Set(declaredClasses.concat(busyRecords.map(r => r.className).filter(Boolean)))];
     const primaryClass = text(rawMeta.primaryClass) || classNames[0] || null;
 
+    const timings = (rawMeta.periodTimings && Object.keys(rawMeta.periodTimings).length > 0)
+        ? rawMeta.periodTimings
+        : AUTHORITATIVE_PERIOD_TIMINGS;
+
     return {
         meta: {
             institution: text(rawMeta.institution),
             title: text(rawMeta.title) || 'Timetable',
             days,
             periods,
-            periodTimings: rawMeta.periodTimings || {},
+            periodTimings: timings,
             classes: classNames,
             primaryClass
         },
@@ -405,15 +420,30 @@ function normalize(source, options = {}) {
     };
 }
 
+const AUTHORITATIVE_PERIOD_TIMINGS = {
+    "1": { start: "08:00", end: "08:45" },
+    "2": { start: "08:45", end: "09:30" },
+    "3": { start: "09:30", end: "10:15" },
+    "4": { start: "10:30", end: "11:15" },
+    "5": { start: "11:15", end: "12:00" },
+    "6": { start: "12:00", end: "12:45" },
+    "7": { start: "12:45", end: "13:30" }
+};
+
+const { normalizeDepartmentCode, BRANCH_ALIASES } = require('../data/departments');
+
 module.exports = {
     normalize,
     classifySessionType,
     normalizeDayName,
     describeDayError,
     normalizePeriodNumber,
+    normalizeDepartmentCode,
+    BRANCH_ALIASES,
     parseSlotHeader,
     isFreeToken,
     DEFAULT_DAYS,
     WORKING_DAYS,
-    DEFAULT_PERIODS
+    DEFAULT_PERIODS,
+    AUTHORITATIVE_PERIOD_TIMINGS
 };

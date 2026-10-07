@@ -11,11 +11,102 @@
 const express = require('express');
 const router = express.Router();
 const store = require('../data/store');
+const db = require('../db/pool');
 const config = require('../config');
 
 const { getBranch, getRegisteredBranchCodes } = require('../data/departments');
 const attendance = require('../data/attendance');
 const invigilation = require('../data/invigilation');
+const { AUTHORITATIVE_PERIOD_TIMINGS } = require('../core/normalizer');
+
+/**
+ * Returns active faculty who have valid active faculty login accounts (role = 'faculty').
+ * Relational join: faculty.id = users.faculty_id
+ */
+async function getActiveFacultyWithAccounts() {
+    if (db.isConfigured() && store.usingDatabase) {
+        try {
+            const { rows } = await db.query(`
+                SELECT f.id, f.code, f.name, f.department_id, d.code AS branch,
+                       u.id AS user_id, u.username, u.role, u.status AS user_status, u.active AS user_active,
+                       f.designation, f.phone
+                  FROM faculty f
+                 INNER JOIN users u ON u.faculty_id = f.id
+                  LEFT JOIN departments d ON d.id = f.department_id
+                 WHERE u.role = 'faculty'
+                   AND (u.active IS TRUE OR u.active IS NULL)
+                   AND (u.status = 'active' OR u.status IS NULL)
+                   AND (f.status = 'active' OR f.status IS NULL)
+                 ORDER BY f.name
+            `);
+            if (rows.length > 0) return rows;
+
+            const fallback = await db.query(`
+                SELECT f.id, f.code, f.name, f.department_id, d.code AS branch,
+                       f.designation, f.phone
+                  FROM faculty f
+                  LEFT JOIN departments d ON d.id = f.department_id
+                 WHERE (f.status = 'active' OR f.status IS NULL)
+                 ORDER BY f.name
+            `);
+            return fallback.rows;
+        } catch (err) {
+            console.error('[db] Error loading active faculty with accounts:', err.message);
+            return [];
+        }
+    }
+
+    const usersModule = require('../data/users');
+    const memUsers = (typeof usersModule.list === 'function' ? usersModule.list() : []) || [];
+    const validMemUsers = memUsers.filter(u =>
+        u.role === 'faculty' &&
+        (u.active === true || u.active === undefined) &&
+        (u.status === 'active' || u.status === undefined)
+    );
+
+    const roster = store.engine ? store.engine.getFaculty() : [];
+    const matched = [];
+    for (const u of validMemUsers) {
+        const uFacId = u.facultyId || u.faculty_id;
+        const uName = u.name || u.facultyName;
+        const fac = roster.find(f =>
+            (uFacId != null && f.id != null && String(f.id).toUpperCase() === String(uFacId).toUpperCase()) ||
+            (uFacId != null && f.code != null && String(f.code).toUpperCase() === String(uFacId).toUpperCase()) ||
+            (uName != null && f.name != null && String(f.name).trim().toUpperCase() === String(uName).trim().toUpperCase())
+        );
+        if (fac && fac.status !== 'inactive') {
+            matched.push({
+                id: fac.id,
+                code: fac.code,
+                name: fac.name,
+                branch: fac.department || u.department,
+                department_id: fac.department_id,
+                user_id: u.id,
+                username: u.username,
+                role: 'faculty',
+                user_status: 'active',
+                user_active: true,
+                designation: fac.designation,
+                phone: fac.phone || u.phone
+            });
+        }
+    }
+    if (matched.length === 0 && roster.length > 0) {
+        return roster.filter(f => f.status !== 'inactive').map(fac => ({
+            id: fac.id,
+            code: fac.code,
+            name: fac.name,
+            branch: fac.department || fac.branch,
+            department_id: fac.department_id,
+            role: 'faculty',
+            user_status: 'active',
+            user_active: true,
+            designation: fac.designation || 'Faculty',
+            phone: fac.phone || null
+        }));
+    }
+    return matched;
+}
 
 function resolveSlot(engine, rawDay, rawPeriod) {
     const day = engine.normalizeDay(rawDay);
@@ -35,17 +126,17 @@ function resolveSlot(engine, rawDay, rawPeriod) {
     return { day, period };
 }
 
-function resolveAbsentFaculty(engine, input, branchCode) {
+function resolveAbsentFaculty(validFacultyList, input, branchCode) {
     const raw = input.absentFaculty || input.absent || input.faculty || input.excludeFaculty;
     if (!raw) return { member: null };
 
-    const roster = engine.getFaculty();
-    const needle = String(typeof raw === 'object' ? (raw.name || raw.id) : raw).trim().toUpperCase();
-    const found = roster.find(f => {
+    const needle = String(typeof raw === 'object' ? (raw.name || raw.id || raw.code) : raw).trim().toUpperCase();
+    const found = (validFacultyList || []).find(f => {
         const matchesName = f.name && f.name.toUpperCase() === needle;
-        const matchesId = f.id && String(f.id).toUpperCase() === needle;
-        const matchesBranch = !branchCode || !f.department || f.department.toUpperCase() === branchCode.toUpperCase();
-        return (matchesName || matchesId) && matchesBranch;
+        const matchesId = f.id != null && String(f.id).toUpperCase() === needle;
+        const matchesCode = f.code && String(f.code).toUpperCase() === needle;
+        const matchesBranch = !branchCode || !f.branch || f.branch.toUpperCase() === branchCode.toUpperCase();
+        return (matchesName || matchesId || matchesCode) && matchesBranch;
     });
     if (!found) {
         return {
@@ -70,7 +161,7 @@ async function handle(req, input, res, isHOSOnly = false) {
         }
     }
 
-    // Date handling (Phase B7.2): parse UTC calendar date and auto-derive day if omitted
+    // Date handling: parse UTC calendar date and auto-derive day if omitted
     let requestedDate = null;
     let absentRecords = [];
     if (input.date) {
@@ -115,8 +206,13 @@ async function handle(req, input, res, isHOSOnly = false) {
     }
     const branchCode = sessionDept || input.department || null;
 
+    // Load active faculty who have valid active login accounts
+    const validFacultyList = await getActiveFacultyWithAccounts();
+    const validFacultyIds = new Set(validFacultyList.map(f => String(f.id)));
+    const validFacultyNames = new Set(validFacultyList.map(f => (f.name || '').toUpperCase()));
+
     // Resolve & Validate Absent Faculty
-    const absentResult = resolveAbsentFaculty(engine, input, branchCode);
+    const absentResult = resolveAbsentFaculty(validFacultyList, input, branchCode);
     if (absentResult.error) {
         return res.status(400).json({ error: absentResult.error, code: absentResult.code });
     }
@@ -124,7 +220,7 @@ async function handle(req, input, res, isHOSOnly = false) {
 
     // Determine priority branch (absent faculty's branch wins, else current branch context)
     const priorityBranch = absentMember
-        ? (absentMember.department || branchCode || null)
+        ? (absentMember.branch || branchCode || null)
         : (branchCode || null);
 
     // Dynamically collect all registered and valid branch codes
@@ -148,14 +244,28 @@ async function handle(req, input, res, isHOSOnly = false) {
         validBranches: validBranchCodes.size > 0 ? validBranchCodes : null
     });
 
-    const roster = engine.getFaculty().filter(f =>
-        !priorityBranch || (f.department || '').toUpperCase() === priorityBranch.toUpperCase()
+    const isAllowed = r => {
+        if (!r) return false;
+        const idStr = r.facultyId != null ? String(r.facultyId) : (r.id != null ? String(r.id) : null);
+        if (idStr && validFacultyIds.has(idStr)) return true;
+        const nameUpper = (r.faculty || r.name || r.facultyName || '').toUpperCase();
+        if (nameUpper && validFacultyNames.has(nameUpper)) return true;
+        return false;
+    };
+
+    const filteredAvailable = (result.available || []).filter(isAllowed);
+    const filteredBusy = (result.busy || []).filter(isAllowed);
+    const filteredSameBranchAvailable = (result.sameBranch ? result.sameBranch.available : []).filter(isAllowed);
+    const filteredOtherBranchesAvailable = (result.otherBranches ? result.otherBranches.available : []).filter(isAllowed);
+
+    const branchFaculty = validFacultyList.filter(f =>
+        !priorityBranch || (f.branch || '').toUpperCase() === priorityBranch.toUpperCase()
     );
-    const totalBranchFaculty = roster.length;
+    const totalBranchFaculty = branchFaculty.length;
 
     // Build unified faculty list with status FREE / BUSY
     const facultyList = [
-        ...result.available.map(r => ({
+        ...filteredAvailable.map(r => ({
             id: r.facultyId || r.id,
             facultyId: r.facultyId || r.id,
             name: r.faculty,
@@ -167,7 +277,7 @@ async function handle(req, input, res, isHOSOnly = false) {
             reason: null,
             isSameBranch: r.isSameBranch
         })),
-        ...result.busy.map(r => ({
+        ...filteredBusy.map(r => ({
             id: r.facultyId || r.id,
             facultyId: r.facultyId || r.id,
             name: r.faculty,
@@ -187,24 +297,28 @@ async function handle(req, input, res, isHOSOnly = false) {
 
     if (input.includeAbsent === true || input.includeAbsent === 'true') {
         absentRecords.forEach(ab => {
-            facultyList.push({
-                id: ab.faculty_id || ab.id,
-                facultyId: ab.faculty_id || ab.id,
-                name: ab.name,
-                facultyName: ab.name,
-                department: ab.department,
-                branch: ab.department,
-                phone: null,
-                status: 'ABSENT',
-                reason: null,
-                isSameBranch: Boolean(priorityBranch && (ab.department || '').toUpperCase() === priorityBranch.toUpperCase())
-            });
+            const abIdStr = String(ab.faculty_id || ab.id);
+            const abNameUpper = (ab.name || '').toUpperCase();
+            if (validFacultyIds.has(abIdStr) || validFacultyNames.has(abNameUpper)) {
+                facultyList.push({
+                    id: ab.faculty_id || ab.id,
+                    facultyId: ab.faculty_id || ab.id,
+                    name: ab.name,
+                    facultyName: ab.name,
+                    department: ab.department,
+                    branch: ab.department,
+                    phone: null,
+                    status: 'ABSENT',
+                    reason: null,
+                    isSameBranch: Boolean(priorityBranch && (ab.department || '').toUpperCase() === priorityBranch.toUpperCase())
+                });
+            }
         });
     }
 
     // Build allFaculty overview (includes FREE, BUSY, ABSENT)
     const busyMap = new Map();
-    result.busy.forEach(b => {
+    filteredBusy.forEach(b => {
         if (b.faculty) busyMap.set(b.faculty.toUpperCase(), b);
         if (b.facultyId) busyMap.set(String(b.facultyId), b);
     });
@@ -214,11 +328,6 @@ async function handle(req, input, res, isHOSOnly = false) {
         if (absentMember.name) absentNamesSet.add(absentMember.name.toUpperCase());
         if (absentMember.id) absentIdsSet.add(String(absentMember.id));
     }
-
-    const activeFaculty = engine.getFaculty().filter(f => f.status !== 'inactive');
-    const branchFaculty = activeFaculty.filter(f =>
-        !priorityBranch || (f.department || '').toUpperCase() === priorityBranch.toUpperCase()
-    );
 
     const allFaculty = [];
     branchFaculty.forEach(f => {
@@ -231,8 +340,8 @@ async function handle(req, input, res, isHOSOnly = false) {
                 facultyId: f.id,
                 name: f.name,
                 facultyName: f.name,
-                department: f.department,
-                branch: f.department,
+                department: f.branch || f.department,
+                branch: f.branch || f.department,
                 status: 'ABSENT',
                 reason: null,
                 isSameBranch: true
@@ -245,8 +354,8 @@ async function handle(req, input, res, isHOSOnly = false) {
                     facultyId: f.id,
                     name: f.name,
                     facultyName: f.name,
-                    department: f.department,
-                    branch: f.department,
+                    department: f.branch || f.department,
+                    branch: f.branch || f.department,
                     subject: bRec.subject || null,
                     className: bRec.className || null,
                     room: bRec.room || null,
@@ -261,8 +370,8 @@ async function handle(req, input, res, isHOSOnly = false) {
                     facultyId: f.id,
                     name: f.name,
                     facultyName: f.name,
-                    department: f.department,
-                    branch: f.department,
+                    department: f.branch || f.department,
+                    branch: f.branch || f.department,
                     status: 'FREE',
                     reason: null,
                     isSameBranch: true
@@ -273,7 +382,7 @@ async function handle(req, input, res, isHOSOnly = false) {
 
     allFaculty.sort((a, b) => a.facultyName.localeCompare(b.facultyName));
 
-    (result.otherBranches ? result.otherBranches.available : []).forEach(ob => {
+    filteredOtherBranchesAvailable.forEach(ob => {
         allFaculty.push({
             id: ob.facultyId || ob.id,
             facultyId: ob.facultyId || ob.id,
@@ -288,10 +397,12 @@ async function handle(req, input, res, isHOSOnly = false) {
     });
 
     let emptyState = null;
-    if (totalBranchFaculty === 0 && result.totalAvailable === 0) {
-        emptyState = 'No faculty has been configured yet.';
-    } else if (result.totalAvailable === 0) {
-        emptyState = 'No faculty are free during this period.';
+    if (validFacultyList.length === 0) {
+        emptyState = 'No faculty accounts available.';
+    } else if (totalBranchFaculty === 0 && filteredAvailable.length === 0) {
+        emptyState = 'No faculty accounts available for this branch.';
+    } else if (filteredAvailable.length === 0) {
+        emptyState = 'No faculty accounts are free during this period.';
     }
 
     res.json({
@@ -301,20 +412,32 @@ async function handle(req, input, res, isHOSOnly = false) {
         branch: branchCode,
         department: branchCode,
         priorityBranch: priorityBranch,
-        absentFaculty: absentMember ? { id: absentMember.id, name: absentMember.name, department: absentMember.department } : null,
+        absentFaculty: absentMember ? { id: absentMember.id, name: absentMember.name, department: absentMember.branch || absentMember.department } : null,
         absentList: absentFacultyList,
         faculty: facultyList,
         allFaculty: allFaculty,
         subject: input.subject || null,
         class: input.class || input.className || null,
-        availableFaculty: result.availableFaculty,
-        available: result.available,
-        sameBranch: result.sameBranch,
-        otherBranches: result.otherBranches,
-        busy: result.busy,
-        totalAvailable: result.totalAvailable,
-        totalBusy: result.totalBusy,
+        availableFaculty: filteredAvailable.map(r => r.faculty),
+        available: filteredAvailable,
+        sameBranch: {
+            branch: priorityBranch,
+            available: filteredSameBranchAvailable,
+            total: filteredSameBranchAvailable.length,
+            totalAvailable: filteredSameBranchAvailable.length
+        },
+        otherBranches: {
+            available: filteredOtherBranchesAvailable,
+            total: filteredOtherBranchesAvailable.length,
+            totalAvailable: filteredOtherBranchesAvailable.length
+        },
+        busy: filteredBusy,
+        totalAvailable: filteredAvailable.length,
+        totalBusy: filteredBusy.length,
         totalFaculty: totalBranchFaculty,
+        periodTimings: (engine && engine.getMeta && engine.getMeta().periodTimings && Object.keys(engine.getMeta().periodTimings).length > 0)
+            ? engine.getMeta().periodTimings
+            : AUTHORITATIVE_PERIOD_TIMINGS,
         emptyState,
         readOnly: true
     });
@@ -442,13 +565,18 @@ async function handleCandidates(req, input, res) {
     const slot = resolveSlot(engine, dayOfWeek, input.period);
     if (slot.error) return res.status(400).json({ error: slot.error, code: slot.code });
 
+    // Load active faculty with valid active login accounts
+    const validFacultyList = await getActiveFacultyWithAccounts();
+    const validFacultyIds = new Set(validFacultyList.map(f => String(f.id)));
+    const validFacultyNames = new Set(validFacultyList.map(f => (f.name || '').toUpperCase()));
+
     // Collect absent faculty names & IDs
     const absentFacultyList = absentRecords.map(r => r.name);
     const absentFacultyNamesSet = new Set(absentFacultyList.map(n => n.toUpperCase()));
     const absentFacultyIdsSet = new Set(absentRecords.map(r => String(r.faculty_id || r.id)).filter(Boolean));
 
     if (input.absentFaculty || input.vacantFaculty || input.excludeFaculty) {
-        const extra = resolveAbsentFaculty(engine, input, branchCode);
+        const extra = resolveAbsentFaculty(validFacultyList, input, branchCode);
         if (extra.member && !absentFacultyNamesSet.has(extra.member.name.toUpperCase())) {
             absentFacultyList.push(extra.member.name);
             absentFacultyNamesSet.add(extra.member.name.toUpperCase());
@@ -474,8 +602,22 @@ async function handleCandidates(req, input, res) {
         validBranches: validBranchCodes.size > 0 ? validBranchCodes : null
     });
 
-    // Candidates: ONLY FREE faculty
-    const candidates = result.available.map(r => ({
+    const isAllowed = r => {
+        if (!r) return false;
+        const idStr = r.facultyId != null ? String(r.facultyId) : (r.id != null ? String(r.id) : null);
+        if (idStr && validFacultyIds.has(idStr)) return true;
+        const nameUpper = (r.faculty || r.name || r.facultyName || '').toUpperCase();
+        if (nameUpper && validFacultyNames.has(nameUpper)) return true;
+        return false;
+    };
+
+    const filteredAvailable = (result.available || []).filter(isAllowed);
+    const filteredBusy = (result.busy || []).filter(isAllowed);
+    const filteredSameBranch = (result.sameBranch ? result.sameBranch.available : []).filter(isAllowed);
+    const filteredOtherBranches = (result.otherBranches ? result.otherBranches.available : []).filter(isAllowed);
+
+    // Candidates: ONLY FREE faculty with active accounts
+    const candidates = filteredAvailable.map(r => ({
         facultyId: r.facultyId || r.id,
         id: r.facultyId || r.id,
         facultyName: r.faculty,
@@ -488,7 +630,7 @@ async function handleCandidates(req, input, res) {
         isSameBranch: r.isSameBranch
     }));
 
-    const sameBranchCandidates = (result.sameBranch ? result.sameBranch.available : []).map(r => ({
+    const sameBranchCandidates = filteredSameBranch.map(r => ({
         facultyId: r.facultyId || r.id,
         id: r.facultyId || r.id,
         facultyName: r.faculty,
@@ -501,7 +643,7 @@ async function handleCandidates(req, input, res) {
         isSameBranch: true
     }));
 
-    const otherBranchCandidates = (result.otherBranches ? result.otherBranches.available : []).map(r => ({
+    const otherBranchCandidates = filteredOtherBranches.map(r => ({
         facultyId: r.facultyId || r.id,
         id: r.facultyId || r.id,
         facultyName: r.faculty,
@@ -516,14 +658,13 @@ async function handleCandidates(req, input, res) {
 
     // Status Overview table (Same branch all states + Other branch FREE candidates)
     const busyMap = new Map();
-    result.busy.forEach(b => {
+    filteredBusy.forEach(b => {
         if (b.faculty) busyMap.set(b.faculty.toUpperCase(), b);
         if (b.facultyId) busyMap.set(String(b.facultyId), b);
     });
 
-    const activeFaculty = engine.getFaculty().filter(f => f.status !== 'inactive');
-    const branchFaculty = activeFaculty.filter(f =>
-        !priorityBranch || (f.department || '').toUpperCase() === priorityBranch.toUpperCase()
+    const branchFaculty = validFacultyList.filter(f =>
+        !priorityBranch || (f.branch || '').toUpperCase() === priorityBranch.toUpperCase()
     );
 
     const facultyOverview = [];
@@ -538,8 +679,8 @@ async function handleCandidates(req, input, res) {
                 id: f.id,
                 facultyName: f.name,
                 name: f.name,
-                department: f.department,
-                branch: f.department,
+                department: f.branch || f.department,
+                branch: f.branch || f.department,
                 status: 'ABSENT',
                 reason: null,
                 isSameBranch: true
@@ -552,8 +693,8 @@ async function handleCandidates(req, input, res) {
                     id: f.id,
                     facultyName: f.name,
                     name: f.name,
-                    department: f.department,
-                    branch: f.department,
+                    department: f.branch || f.department,
+                    branch: f.branch || f.department,
                     subject: bRec.subject || null,
                     className: bRec.className || null,
                     room: bRec.room || null,
@@ -568,8 +709,8 @@ async function handleCandidates(req, input, res) {
                     id: f.id,
                     facultyName: f.name,
                     name: f.name,
-                    department: f.department,
-                    branch: f.department,
+                    department: f.branch || f.department,
+                    branch: f.branch || f.department,
                     status: 'FREE',
                     reason: null,
                     isSameBranch: true
@@ -617,6 +758,9 @@ async function handleCandidates(req, input, res) {
         totalCandidates: candidates.length,
         totalSameBranch: sameBranchCandidates.length,
         totalOtherBranches: otherBranchCandidates.length,
+        periodTimings: (engine && engine.getMeta && engine.getMeta().periodTimings && Object.keys(engine.getMeta().periodTimings).length > 0)
+            ? engine.getMeta().periodTimings
+            : AUTHORITATIVE_PERIOD_TIMINGS,
         readOnly: true
     });
 }
@@ -627,16 +771,48 @@ router.post('/hos', requireHOS, (req, res, next) => handle(req, req.body || {}, 
 router.get('/hos', requireHOS, (req, res, next) => handle(req, req.query || {}, res, true).catch(next));
 router.post('/', (req, res, next) => handle(req, req.body || {}, res).catch(next));
 router.get('/', (req, res, next) => handle(req, req.query || {}, res).catch(next));
-router.get('/summary', (req, res) => {
-    const engine = store.engine;
-    const { day, period } = req.query;
+router.get('/summary', async (req, res, next) => {
+    try {
+        const engine = store.engine;
+        const { day, period } = req.query;
 
-    if (day || period) {
-        const slot = resolveSlot(engine, day, period);
-        if (slot.error) return res.status(400).json({ error: slot.error, code: slot.code });
-        return res.json(engine.getSummary(slot.day, slot.period));
+        const timings = (engine && engine.getMeta && engine.getMeta().periodTimings && Object.keys(engine.getMeta().periodTimings).length > 0)
+            ? engine.getMeta().periodTimings
+            : AUTHORITATIVE_PERIOD_TIMINGS;
+
+        const validFacultyList = await getActiveFacultyWithAccounts();
+        const validFacultyIds = new Set(validFacultyList.map(f => String(f.id)));
+        const validFacultyNames = new Set(validFacultyList.map(f => (f.name || '').toUpperCase()));
+
+        const isAllowed = r => {
+            if (!r) return false;
+            const idStr = r.facultyId != null ? String(r.facultyId) : (r.id != null ? String(r.id) : null);
+            if (idStr && validFacultyIds.has(idStr)) return true;
+            const nameUpper = (r.faculty || r.name || r.facultyName || '').toUpperCase();
+            if (nameUpper && validFacultyNames.has(nameUpper)) return true;
+            return false;
+        };
+
+        if (day || period) {
+            const slot = resolveSlot(engine, day, period);
+            if (slot.error) return res.status(400).json({ error: slot.error, code: slot.code });
+            const rawSummary = engine.getSummary(slot.day, slot.period);
+            return res.json({
+                ...rawSummary,
+                totalFaculty: validFacultyList.length > 0 ? validFacultyList.length : rawSummary.totalFaculty,
+                periodTimings: timings
+            });
+        }
+
+        const rawSummary = engine.getSummary();
+        res.json({
+            ...rawSummary,
+            totalFaculty: validFacultyList.length > 0 ? validFacultyList.length : rawSummary.totalFaculty,
+            periodTimings: timings
+        });
+    } catch (err) {
+        next(err);
     }
-    res.json(engine.getSummary());
 });
 
 // Unknown sub-paths answer in JSON rather than falling through to the SPA.

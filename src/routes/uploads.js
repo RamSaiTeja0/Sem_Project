@@ -22,6 +22,7 @@ const https = require('https');
 const router = express.Router();
 
 const config = require('../config');
+const { normalizeDepartmentCode } = require('../data/departments');
 const {
     ensureUploadDir,
     generateUploadId,
@@ -169,6 +170,8 @@ function dispatchN8nWebhook(uploadRecord) {
     }
 }
 
+const delegations = require('../data/delegations');
+
 /**
  * POST /api/uploads/master-timetable
  * HOS only. Uploads a master timetable image or PDF for the HOS's branch.
@@ -179,8 +182,12 @@ router.post('/master-timetable', fileUploadHandler, async (req, res) => {
             return res.status(401).json({ error: 'Sign in to use this endpoint.', code: 'UNAUTHENTICATED' });
         }
 
-        const role = req.session.role;
-        if (role !== 'hos' && role !== 'coordinator') {
+        const isAuthorizedHOS = req.session && (
+            req.session.role === 'hos' ||
+            req.session.role === 'coordinator' ||
+            await delegations.isAuthorizedHOS(req.session)
+        );
+        if (!isAuthorizedHOS) {
             if (req.file && req.file.path && fs.existsSync(req.file.path)) {
                 try { fs.unlinkSync(req.file.path); } catch (e) {}
             }
@@ -191,7 +198,7 @@ router.post('/master-timetable', fileUploadHandler, async (req, res) => {
         }
 
         // Branch is strictly inherited from authenticated session
-        const sessionDept = String(req.session.department || '').trim().toUpperCase();
+        const sessionDept = normalizeDepartmentCode(req.session.department);
         if (!sessionDept) {
             return res.status(400).json({
                 error: 'Authenticated HOD session has no associated branch.',
@@ -201,7 +208,7 @@ router.post('/master-timetable', fileUploadHandler, async (req, res) => {
 
         // Reject any client attempt to change branch
         const clientDept = req.body && (req.body.department || req.body.branch_id || req.body.branchCode || req.body.departmentCode);
-        if (clientDept && String(clientDept).trim().toUpperCase() !== sessionDept) {
+        if (clientDept && normalizeDepartmentCode(clientDept) !== sessionDept) {
             if (req.file && req.file.path && fs.existsSync(req.file.path)) {
                 try { fs.unlinkSync(req.file.path); } catch (e) {}
             }
@@ -283,7 +290,7 @@ router.post('/faculty-timetable', fileUploadHandler, async (req, res) => {
             });
         }
 
-        const sessionDept = String(req.session.department || '').toUpperCase();
+        const sessionDept = normalizeDepartmentCode(req.session.department);
         const sessionFaculty = req.session.facultyName || req.session.name || req.session.username;
         const sessionFacultyId = req.session.facultyId || sessionFaculty;
 
@@ -301,7 +308,7 @@ router.post('/faculty-timetable', fileUploadHandler, async (req, res) => {
         }
 
         const clientDept = req.body && (req.body.department || req.body.branch_id || req.body.branchCode);
-        if (clientDept && String(clientDept).trim().toUpperCase() !== sessionDept) {
+        if (clientDept && normalizeDepartmentCode(clientDept) !== sessionDept) {
             if (req.file && req.file.path && fs.existsSync(req.file.path)) {
                 try { fs.unlinkSync(req.file.path); } catch (e) {}
             }
@@ -371,8 +378,8 @@ router.get('/:uploadId', async (req, res) => {
             return res.status(404).json({ error: 'Upload not found.', code: 'NOT_FOUND' });
         }
 
-        const sessionDept = String(req.session.department || '').toUpperCase();
-        if (upload.departmentCode && upload.departmentCode !== sessionDept) {
+        const sessionDept = normalizeDepartmentCode(req.session.department);
+        if (upload.departmentCode && normalizeDepartmentCode(upload.departmentCode) !== sessionDept) {
             return res.status(403).json({
                 error: 'Cross-branch upload access is forbidden.',
                 code: 'FORBIDDEN'
@@ -417,7 +424,7 @@ router.get('/', async (req, res) => {
             return res.status(401).json({ error: 'Sign in to use this endpoint.', code: 'UNAUTHENTICATED' });
         }
 
-        const sessionDept = String(req.session.department || '').toUpperCase();
+        const sessionDept = normalizeDepartmentCode(req.session.department);
         const filters = { department: sessionDept };
 
         if (req.session.role === 'faculty') {

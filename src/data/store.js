@@ -157,7 +157,7 @@ async function initFromDatabase(options = {}) {
 
         const source = await repository.loadSource(demoTimetable.meta);
         const counts = await repository.counts();
-        if (!source.classes.length || counts.timetable === 0) {
+        if (!source.classes.length || counts.timetable === 0 || !source.faculty.length || counts.faculty === 0) {
             source.allowEmpty = true;
         }
 
@@ -214,7 +214,7 @@ async function reloadFromDatabase() {
 
     const source = await repository.loadSource(demoTimetable.meta);
     const counts = await repository.counts();
-    if (!source.classes.length || counts.timetable === 0) source.allowEmpty = true;
+    if (!source.classes.length || counts.timetable === 0 || !source.faculty.length || counts.faculty === 0) source.allowEmpty = true;
     state = buildState(source, 'neon-postgres');
     databaseBacked = true;
     return true;
@@ -326,10 +326,15 @@ function listEntriesInMemory(filters = {}) {
 function addFacultyInMemory(member) {
     if (!state.source.faculty) state.source.faculty = [];
     const id = member.id || `FAC_${Date.now()}`;
-    const exists = state.source.faculty.find(f =>
-        (f.name && member.name && f.name.toLowerCase() === member.name.toLowerCase()) ||
-        (f.id && id && String(f.id).toLowerCase() === String(id).toLowerCase())
-    );
+    const targetDept = member.department ? String(member.department).toUpperCase() : null;
+    const exists = state.source.faculty.find(f => {
+        const sameId = (f.id && id && String(f.id).toLowerCase() === String(id).toLowerCase()) ||
+                       (f.code && id && String(f.code).toLowerCase() === String(id).toLowerCase());
+        const sameName = (f.name && member.name && f.name.toLowerCase() === member.name.toLowerCase());
+        const fDept = f.department ? String(f.department).toUpperCase() : null;
+        const sameDept = (!targetDept || !fDept || fDept === targetDept);
+        return sameId || (sameName && sameDept);
+    });
     if (exists) {
         if (member.phone) exists.phone = member.phone;
         if (member.subjects) exists.subjects = member.subjects;

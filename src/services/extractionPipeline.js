@@ -25,6 +25,130 @@ const {
 const { validateExtractedContract } = require('../core/contractValidator');
 const { extractTimetableWithGemini, verifyTimetableWithGemini, GeminiExtractionError } = require('../core/geminiExtractor');
 const { resolveContract } = require('../core/entityResolver');
+const { normalizeDepartmentCode } = require('../data/departments');
+
+/**
+ * Normalizes extracted timetable contract JSON, preserving subject->faculty mapping,
+ * resolving cell text faculty names, department alias canonicalization, and ensuring B2.1 consistency.
+ */
+function normalizeExtractedContract(contract, uploadContext = {}) {
+    if (!contract || typeof contract !== 'object') {
+        return contract;
+    }
+
+    if (contract.department_code) {
+        if (!contract.raw_department_code) {
+            contract.raw_department_code = contract.department_code;
+        }
+        contract.department_code = normalizeDepartmentCode(contract.department_code);
+    } else if (contract.metadata && (contract.metadata.branch || contract.metadata.department)) {
+        const raw = contract.metadata.branch || contract.metadata.department;
+        if (!contract.raw_department_code) {
+            contract.raw_department_code = raw;
+        }
+        contract.department_code = normalizeDepartmentCode(raw);
+    }
+
+    const entries = Array.isArray(contract.entries) ? contract.entries : (Array.isArray(contract.cells) ? contract.cells : []);
+    if (entries.length === 0 && !contract.faculty_subject_mapping && !contract.subject_faculty_mapping) {
+        return contract;
+    }
+
+    const mapping = contract.faculty_subject_mapping || contract.subject_faculty_mapping || contract.faculty_subjects || {};
+    const normalizedMap = {};
+    if (typeof mapping === 'object' && mapping !== null) {
+        for (const [k, v] of Object.entries(mapping)) {
+            if (typeof v === 'string' && v.trim()) {
+                normalizedMap[k.trim()] = v.trim();
+            } else if (Array.isArray(v)) {
+                for (const sub of v) {
+                    if (typeof sub === 'string' && sub.trim()) {
+                        normalizedMap[sub.trim()] = k.trim();
+                    }
+                }
+            }
+        }
+    }
+
+    // Inspect subject_legend
+    if (Array.isArray(contract.subject_legend)) {
+        for (const sLeg of contract.subject_legend) {
+            const subjName = (sLeg.name || '').trim();
+            const fac = (sLeg.faculty_name || sLeg.faculty || sLeg.faculty_code || sLeg.faculty_incharge || sLeg.instructor || sLeg.staff || '').trim();
+            if (subjName && fac) {
+                normalizedMap[subjName] = fac;
+            } else if (subjName && sLeg.short_name) {
+                const sn = String(sLeg.short_name).trim();
+                if (
+                    /^[A-Z]{2,5}[-_][A-Z0-9]+$/i.test(sn) ||
+                    /^F\d+$/i.test(sn) ||
+                    /^(DR|PROF|SRI|MR|MRS|MS)\b/i.test(sn) ||
+                    (sLeg.code === null && subjName.toUpperCase() !== sn.toUpperCase())
+                ) {
+                    normalizedMap[subjName] = sn;
+                }
+            }
+        }
+    }
+
+    // Inspect entries raw_cell_text
+    for (const entry of entries) {
+        if (entry.is_free) continue;
+        const subj = (entry.subject_name || entry.subject_code || '').trim();
+        let fac = (entry.faculty_name || entry.faculty || entry.faculty_code || '').trim();
+
+        if (!fac && entry.raw_cell_text) {
+            const raw = String(entry.raw_cell_text).trim();
+            const lines = raw.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+            if (lines.length >= 2) {
+                fac = lines[lines.length - 1];
+            } else if (subj && raw.toUpperCase().startsWith(subj.toUpperCase())) {
+                const rem = raw.slice(subj.length).trim();
+                if (rem) fac = rem;
+            }
+        }
+
+        if (subj && fac && !normalizedMap[subj]) {
+            normalizedMap[subj] = fac;
+        }
+    }
+
+    // Apply discovered mapping to all entries
+    for (const entry of entries) {
+        if (entry.is_free) continue;
+        const subj = (entry.subject_name || entry.subject_code || '').trim();
+        let fac = (entry.faculty_name || entry.faculty || entry.faculty_code || '').trim();
+
+        if (!fac && subj && normalizedMap[subj]) {
+            fac = normalizedMap[subj];
+        }
+
+        if (fac) {
+            entry.faculty_name = fac;
+        }
+    }
+
+    contract.faculty_subject_mapping = normalizedMap;
+
+    // Ensure faculty_legend has entries for all unique mapped faculty
+    if (!Array.isArray(contract.faculty_legend)) {
+        contract.faculty_legend = [];
+    }
+    const existingCodes = new Set(contract.faculty_legend.map(f => String(f.code || f.name || '').toUpperCase()));
+    for (const fac of Object.values(normalizedMap)) {
+        if (fac && !existingCodes.has(fac.toUpperCase())) {
+            contract.faculty_legend.push({
+                code: fac,
+                name: fac,
+                designation: 'Faculty',
+                department: uploadContext.departmentCode || contract.department_code || null
+            });
+            existingCodes.add(fac.toUpperCase());
+        }
+    }
+
+    return contract;
+}
 
 /**
  * Runs the extraction pipeline for an upload.
@@ -97,7 +221,7 @@ async function runExtractionPipeline(uploadId, options = {}) {
 
     const fileBuffer = fs.readFileSync(filePath);
     const uploadContext = {
-        departmentCode: upload.departmentCode,
+        departmentCode: normalizeDepartmentCode(upload.departmentCode),
         uploadType: upload.uploadType,
         facultyName: upload.facultyId,
         className: options.className || upload.className || null,
@@ -174,8 +298,9 @@ async function runExtractionPipeline(uploadId, options = {}) {
     }
 
     // -------------------------------------------------------------------------
-    // Step 3: Final B2.1 Validation on Verified Stage 2 JSON
+    // Step 3: Final B2.1 Validation on Verified & Normalized Stage 2 JSON
     // -------------------------------------------------------------------------
+    stage2Json = normalizeExtractedContract(stage2Json, uploadContext);
     const validation = validateExtractedContract(stage2Json, upload, { skipCatalogCheck: true });
 
     if (!validation.ok) {
@@ -202,7 +327,8 @@ async function runExtractionPipeline(uploadId, options = {}) {
     // -------------------------------------------------------------------------
     // Step 4: Staging & Branch Catalog Entity Resolution
     // -------------------------------------------------------------------------
-    const resolution = await resolveContract(stage2Json, upload.departmentCode);
+    const canonicalDept = normalizeDepartmentCode(upload.departmentCode);
+    const resolution = await resolveContract(stage2Json, canonicalDept);
     await saveStagedData(uploadId, stage2Json, 'VALID', null, {
         importStatus: 'STAGED',
         unresolvedEntities: resolution.unresolvedEntities
@@ -215,7 +341,7 @@ async function runExtractionPipeline(uploadId, options = {}) {
         success: true,
         uploadId: updated.uploadId,
         status: updated.status,
-        department: upload.departmentCode,
+        department: canonicalDept,
         uploadType: upload.uploadType,
         entryCount: Array.isArray(stage2Json.entries) ? stage2Json.entries.length : 0,
         staged: true,
@@ -242,5 +368,6 @@ async function markFailed(uploadId, errorCode, errorMessage, details = null, raw
 
 module.exports = {
     runExtractionPipeline,
-    markFailed
+    markFailed,
+    normalizeExtractedContract
 };

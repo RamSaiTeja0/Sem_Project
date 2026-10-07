@@ -112,6 +112,13 @@ function middleware(req, res, next) {
                 if (userExists.facultyId) sessionPayload.facultyId = userExists.facultyId;
                 if (userExists.facultyName) sessionPayload.facultyName = userExists.facultyName;
             }
+            if (!sessionPayload.department && (sessionPayload.role === 'hos' || sessionPayload.role === 'coordinator' || sessionPayload.role === 'admin')) {
+                try {
+                    const { getBranch } = require('../data/departments');
+                    const br = getBranch();
+                    if (br && br.code) sessionPayload.department = br.code;
+                } catch (_) {}
+            }
             if (sessionPayload.department) {
                 sessionPayload.department = String(sessionPayload.department).trim().toUpperCase();
             }

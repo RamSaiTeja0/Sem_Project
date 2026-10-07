@@ -29,12 +29,15 @@ const {
 } = require('../data/uploads');
 const { resolveContract } = require('../core/entityResolver');
 const { validateExtractedContract } = require('../core/contractValidator');
+const { normalizeDepartmentCode } = require('../data/departments');
+
+const delegations = require('../data/delegations');
 
 /**
  * Authentication & Authorization Guard:
- * Requires authenticated session with role === 'hos'.
+ * Requires authenticated session with role === 'hos' or active Acting HOD.
  */
-function requireHOS(req, res, next) {
+async function requireHOS(req, res, next) {
     if (!req.session || !(req.session.id || req.session.username || req.session.userId)) {
         return res.status(401).json({
             error: 'Sign in to use this endpoint.',
@@ -42,7 +45,8 @@ function requireHOS(req, res, next) {
         });
     }
 
-    if (req.session.role !== 'hos' && req.session.role !== 'coordinator') {
+    const isAuthorizedHOS = req.session.role === 'hos' || req.session.role === 'coordinator' || await delegations.isAuthorizedHOS(req.session);
+    if (!isAuthorizedHOS) {
         return res.status(403).json({
             error: 'Forbidden: Only Head of Department (HOD) accounts can review and approve staged timetables.',
             code: 'FORBIDDEN'
@@ -68,8 +72,8 @@ async function verifyBranchOwnership(req, res, uploadId) {
         return null;
     }
 
-    const hosDept = req.session && req.session.department ? String(req.session.department).trim().toUpperCase() : '';
-    const uploadDept = upload.departmentCode ? String(upload.departmentCode).trim().toUpperCase() : '';
+    const hosDept = req.session && req.session.department ? normalizeDepartmentCode(req.session.department) : '';
+    const uploadDept = upload.departmentCode ? normalizeDepartmentCode(upload.departmentCode) : '';
 
     if (!hosDept) {
         res.status(403).json({
@@ -104,7 +108,7 @@ async function verifyBranchOwnership(req, res, uploadId) {
  */
 router.get('/pending', async (req, res) => {
     try {
-        const hosDept = req.session && req.session.department ? String(req.session.department).trim().toUpperCase() : '';
+        const hosDept = req.session && req.session.department ? normalizeDepartmentCode(req.session.department) : '';
         if (!hosDept) {
             return res.json({
                 count: 0,
@@ -445,11 +449,11 @@ router.put('/:uploadId/entry', async (req, res) => {
  * Helper to register an extracted entity into the branch catalog.
  */
 async function registerEntityIntoCatalog(entityType, extractedText, extra = {}, branchCode = 'General') {
-    const type = String(entityType).toLowerCase();
-    const branch = String(branchCode || 'General').toUpperCase();
+    const type = String(entityType || '').toLowerCase().trim();
+    const branch = normalizeDepartmentCode(branchCode) || 'General';
 
     if (db.isConfigured() && store.usingDatabase) {
-        return db.withTransaction(async client => {
+        const result = await db.withTransaction(async client => {
             let deptRes = await client.query('SELECT id FROM departments WHERE UPPER(code) = UPPER($1)', [branch]);
             let deptId = deptRes.rows.length > 0 ? deptRes.rows[0].id : null;
             if (!deptId) {
@@ -538,62 +542,191 @@ async function registerEntityIntoCatalog(entityType, extractedText, extra = {}, 
                 return res.rows[0];
             } else if (type === 'subject') {
                 const name = String(extra.name || extractedText).trim();
-                const code = String(extra.code || name.replace(/[^A-Z0-9]/gi, '').slice(0, 10).toUpperCase() || 'SUBJ');
+                const code = String(extra.code || '').trim();
                 const subjectType = String(extra.type || (/lab|practical|workshop|drawing/i.test(name) ? 'lab' : 'theory')).toLowerCase();
+
+                // 1. Check if subject already exists for this branch (or global/null department)
                 const existing = await client.query(
-                    'SELECT id, code, name FROM subjects WHERE (UPPER(code) = UPPER($1) OR UPPER(name) = UPPER($2)) AND (department_id = $3 OR department_id IS NULL) LIMIT 1',
-                    [code, name, deptId]
+                    `SELECT id, code, name, department_id, subject_type 
+                       FROM subjects 
+                      WHERE (UPPER(TRIM(name)) = UPPER(TRIM($1)) OR ($2 <> '' AND UPPER(TRIM(code)) = UPPER(TRIM($2))))
+                        AND (department_id = $3 OR department_id IS NULL)
+                      ORDER BY (department_id = $3) DESC, id ASC 
+                      LIMIT 1`,
+                    [name, code, deptId]
                 );
                 if (existing.rows.length > 0) return existing.rows[0];
+
+                // 2. Generate or verify code uniqueness
+                let finalCode = code || (name.replace(/[^A-Za-z0-9]/g, '').slice(0, 10).toUpperCase() || 'SUBJ');
+                const codeConflict = await client.query(
+                    'SELECT id, department_id, name FROM subjects WHERE UPPER(TRIM(code)) = UPPER(TRIM($1))',
+                    [finalCode]
+                );
+                if (codeConflict.rows.length > 0) {
+                    const conflictingRow = codeConflict.rows[0];
+                    if (conflictingRow.name && conflictingRow.name.toUpperCase() === name.toUpperCase() && conflictingRow.department_id === null) {
+                        await client.query('UPDATE subjects SET department_id = $1 WHERE id = $2', [deptId, conflictingRow.id]);
+                        return { id: conflictingRow.id, code: finalCode, name, department_id: deptId, subject_type: subjectType };
+                    }
+                    finalCode = `${branch}_${finalCode}`.slice(0, 30);
+                    const secondConflict = await client.query(
+                        'SELECT id FROM subjects WHERE UPPER(TRIM(code)) = UPPER(TRIM($1))',
+                        [finalCode]
+                    );
+                    if (secondConflict.rows.length > 0) {
+                        finalCode = `${finalCode.slice(0, 24)}_${Date.now().toString().slice(-4)}`;
+                    }
+                }
+
                 const res = await client.query(
                     `INSERT INTO subjects (code, name, department_id, subject_type)
                      VALUES (UPPER($1), $2, $3, $4)
-                     ON CONFLICT (code) DO UPDATE SET name = EXCLUDED.name, department_id = COALESCE(EXCLUDED.department_id, subjects.department_id)
+                     ON CONFLICT (code) DO UPDATE SET name = EXCLUDED.name, department_id = COALESCE(subjects.department_id, EXCLUDED.department_id)
                      RETURNING id, code, name`,
-                    [code, name, deptId, subjectType]
+                    [finalCode, name, deptId, subjectType]
                 );
                 return res.rows[0];
             } else if (type === 'faculty') {
                 const name = String(extra.name || extractedText).trim();
-                const code = String(extra.code || (branch + '_' + name.replace(/[^A-Z0-9]/gi, '_').toUpperCase()).slice(0, 30));
+                let code = String(extra.code || '').trim();
+                if (!code) {
+                    code = (branch + '_' + name.replace(/[^A-Z0-9]/gi, '_').toUpperCase()).slice(0, 30);
+                }
+
                 const existing = await client.query(
-                    'SELECT id, code, name FROM faculty WHERE (UPPER(code) = UPPER($1) OR UPPER(name) = UPPER($2)) AND (department_id = $3 OR department_id IS NULL) LIMIT 1',
-                    [code, name, deptId]
+                    `SELECT id, code, name FROM faculty 
+                      WHERE (UPPER(TRIM(name)) = UPPER(TRIM($1)) OR UPPER(TRIM(code)) = UPPER(TRIM($2)))
+                        AND (department_id = $3 OR department_id IS NULL)
+                      ORDER BY (department_id = $3) DESC, id ASC LIMIT 1`,
+                    [name, code, deptId]
                 );
                 if (existing.rows.length > 0) return existing.rows[0];
+
+                let finalCode = code;
+                const codeConflict = await client.query('SELECT id FROM faculty WHERE UPPER(TRIM(code)) = UPPER(TRIM($1))', [finalCode]);
+                if (codeConflict.rows.length > 0) {
+                    finalCode = `${finalCode.slice(0, 24)}_${Date.now().toString().slice(-4)}`;
+                }
+
                 const res = await client.query(
                     `INSERT INTO faculty (code, name, department_id, designation, status, max_weekly_periods)
                      VALUES ($1, $2, $3, $4, 'active', 28)
-                     ON CONFLICT (code) DO UPDATE SET name = EXCLUDED.name, department_id = COALESCE(EXCLUDED.department_id, faculty.department_id)
+                     ON CONFLICT (code) DO UPDATE SET name = EXCLUDED.name, department_id = COALESCE(faculty.department_id, EXCLUDED.department_id)
                      RETURNING id, code, name`,
-                    [code, name, deptId, extra.designation || 'Faculty']
+                    [finalCode, name, deptId, extra.designation || 'Faculty']
+                );
+
+                let uName = String(name).toLowerCase()
+                    .replace(/^(dr|prof|mr|mrs|ms)\.?\s+/, '')
+                    .replace(/[^a-z0-9]+/g, '.')
+                    .replace(/^\.|\.$/g, '');
+                if (!uName) uName = `fac_${res.rows[0].id}`;
+                const uCheck = await client.query('SELECT id FROM users WHERE LOWER(username) = LOWER($1) AND (faculty_id != $2 OR faculty_id IS NULL)', [uName, res.rows[0].id]);
+                if (uCheck.rows.length > 0) {
+                    uName = `${uName}.${res.rows[0].id}`;
+                }
+                await client.query(`
+                    INSERT INTO users (username, name, role, department_id, faculty_id, status)
+                    VALUES ($1, $2, 'faculty', $3, $4, 'active')
+                    ON CONFLICT (username) DO UPDATE SET faculty_id = EXCLUDED.faculty_id, department_id = EXCLUDED.department_id, status = 'active'`,
+                    [uName, name, deptId, res.rows[0].id]
                 );
                 return res.rows[0];
+            } else if (type === 'room') {
+                const code = String(extra.code || extractedText).trim().toUpperCase();
+                const name = String(extra.name || extra.code || extractedText).trim();
+                const roomType = String(extra.type || (/lab|workshop/i.test(name) ? 'lab' : 'classroom')).toLowerCase();
+                const existing = await client.query(
+                    'SELECT id, code, name, room_type FROM rooms WHERE UPPER(TRIM(code)) = UPPER(TRIM($1)) OR UPPER(TRIM(name)) = UPPER(TRIM($2)) LIMIT 1',
+                    [code, name]
+                );
+                if (existing.rows.length > 0) return existing.rows[0];
+                const res = await client.query(
+                    `INSERT INTO rooms (code, name, room_type)
+                     VALUES ($1, $2, $3)
+                     ON CONFLICT (code) DO NOTHING
+                     RETURNING id, code, name`,
+                    [code, name, roomType]
+                );
+                return res.rows.length > 0 ? res.rows[0] : { code, name, room_type: roomType };
             }
         });
+        return result;
     }
 
+    // In-memory catalog
     const source = store.source || {};
     if (!source.classes) source.classes = [];
     if (!source.subjects) source.subjects = [];
     if (!source.faculty) source.faculty = [];
+    if (!source.rooms) source.rooms = [];
 
     if (type === 'class') {
         const code = String(extra.code || extractedText).trim();
+        const existing = source.classes.find(c =>
+            ((c.class && c.class.toUpperCase() === code.toUpperCase()) ||
+             (c.code && c.code.toUpperCase() === code.toUpperCase())) &&
+            (!c.department || c.department.toUpperCase() === branch)
+        );
+        if (existing) return existing;
         const obj = { id: source.classes.length + 1, class: code, code, department: branch };
         source.classes.push(obj);
         return obj;
     } else if (type === 'subject') {
         const name = String(extra.name || extractedText).trim();
-        const code = String(extra.code || name.replace(/[^A-Z0-9]/gi, '').slice(0, 10).toUpperCase() || 'SUBJ');
-        const obj = { id: source.subjects.length + 1, code, name, department: branch, type: extra.type || 'theory' };
+        const explicitCode = String(extra.code || '').trim();
+        const subjectType = String(extra.type || (/lab|practical|workshop|drawing/i.test(name) ? 'lab' : 'theory')).toLowerCase();
+
+        const existing = source.subjects.find(s =>
+            ((s.name && s.name.toUpperCase() === name.toUpperCase()) ||
+             (explicitCode && s.code && s.code.toUpperCase() === explicitCode.toUpperCase())) &&
+            (!s.department || s.department.toUpperCase() === branch)
+        );
+        if (existing) return existing;
+
+        let finalCode = explicitCode || (name.replace(/[^A-Za-z0-9]/g, '').slice(0, 10).toUpperCase() || 'SUBJ');
+        const codeConflict = source.subjects.find(s => s.code && s.code.toUpperCase() === finalCode.toUpperCase());
+        if (codeConflict) {
+            finalCode = `${branch}_${finalCode}`.slice(0, 30);
+            const secondConflict = source.subjects.find(s => s.code && s.code.toUpperCase() === finalCode.toUpperCase());
+            if (secondConflict) {
+                finalCode = `${finalCode.slice(0, 24)}_${Date.now().toString().slice(-4)}`;
+            }
+        }
+
+        const obj = { id: source.subjects.length + 1, code: finalCode, name, department: branch, type: subjectType };
         source.subjects.push(obj);
         return obj;
     } else if (type === 'faculty') {
         const name = String(extra.name || extractedText).trim();
-        const code = String(extra.code || name);
-        const obj = { id: source.faculty.length + 1, code, name, department: branch, status: 'active' };
+        const explicitCode = String(extra.code || '').trim();
+        const existing = source.faculty.find(f =>
+            ((f.name && f.name.toUpperCase() === name.toUpperCase()) ||
+             (explicitCode && f.code && f.code.toUpperCase() === explicitCode.toUpperCase())) &&
+            (!f.department || f.department.toUpperCase() === branch)
+        );
+        if (existing) return existing;
+
+        let finalCode = explicitCode || (branch + '_' + name.replace(/[^A-Z0-9]/gi, '_').toUpperCase()).slice(0, 30);
+        const codeConflict = source.faculty.find(f => f.code && f.code.toUpperCase() === finalCode.toUpperCase());
+        if (codeConflict) {
+            finalCode = `${finalCode.slice(0, 24)}_${Date.now().toString().slice(-4)}`;
+        }
+
+        const obj = { id: source.faculty.length + 1, code: finalCode, name, department: branch, status: 'active' };
         source.faculty.push(obj);
+        return obj;
+    } else if (type === 'room') {
+        const code = String(extra.code || extractedText).trim().toUpperCase();
+        const name = String(extra.name || extra.code || extractedText).trim();
+        const existing = source.rooms.find(r =>
+            (r.code && r.code.toUpperCase() === code.toUpperCase()) ||
+            (r.name && r.name.toUpperCase() === name.toUpperCase())
+        );
+        if (existing) return existing;
+        const obj = { id: source.rooms.length + 1, code, name, type: extra.type || 'classroom' };
+        source.rooms.push(obj);
         return obj;
     }
 }
@@ -681,45 +814,63 @@ router.post('/:uploadId/register-all-unresolved', async (req, res) => {
             ? staging.extractedJson.faculty_legend : [];
 
         for (const item of initialRes.unresolvedEntities) {
-            if (item.entityType === 'class') {
-                const reg = await registerEntityIntoCatalog('class', item.extractedText, {
-                    semester: staging.extractedJson && staging.extractedJson.semester,
-                    academicYear: staging.extractedJson && staging.extractedJson.academic_year,
-                    section: staging.extractedJson && staging.extractedJson.section
-                }, upload.departmentCode);
-                registeredList.push({ type: 'class', text: item.extractedText, record: reg });
-            } else if (item.entityType === 'subject') {
-                if (item.extractedText.includes('/')) {
-                    const parts = item.extractedText.split('/').map(p => p.trim()).filter(Boolean);
-                    for (const p of parts) {
-                        const leg = subjectLegends.find(l => l.name === p || l.short_name === p);
-                        const code = (leg && leg.code) || null;
-                        await registerEntityIntoCatalog('subject', p, { code }, upload.departmentCode);
+            const eType = String(item.entityType || '').toLowerCase();
+            const extractedText = String(item.extractedText || '').trim();
+            if (!extractedText) continue;
+
+            try {
+                if (eType === 'class') {
+                    const reg = await registerEntityIntoCatalog('class', extractedText, {
+                        semester: staging.extractedJson && staging.extractedJson.semester,
+                        academicYear: staging.extractedJson && staging.extractedJson.academic_year,
+                        section: staging.extractedJson && staging.extractedJson.section
+                    }, upload.departmentCode);
+                    registeredList.push({ type: 'class', text: extractedText, record: reg });
+                } else if (eType === 'subject') {
+                    if (extractedText.includes('/')) {
+                        const parts = extractedText.split('/').map(p => p.trim()).filter(Boolean);
+                        for (const p of parts) {
+                            const leg = subjectLegends.find(l => l.name === p || l.short_name === p);
+                            const code = (leg && leg.code) || null;
+                            await registerEntityIntoCatalog('subject', p, { code }, upload.departmentCode);
+                        }
+                        const reg = await registerEntityIntoCatalog('subject', extractedText, { code: item.code || null }, upload.departmentCode);
+                        registeredList.push({ type: 'subject', text: extractedText, record: reg });
+                    } else {
+                        const leg = subjectLegends.find(l => l.name === extractedText || l.short_name === extractedText);
+                        const code = (leg && leg.code) || item.code || null;
+                        const reg = await registerEntityIntoCatalog('subject', extractedText, { code }, upload.departmentCode);
+                        registeredList.push({ type: 'subject', text: extractedText, record: reg });
                     }
-                    const reg = await registerEntityIntoCatalog('subject', item.extractedText, { code: item.code || null }, upload.departmentCode);
-                    registeredList.push({ type: 'subject', text: item.extractedText, record: reg });
-                } else {
-                    const leg = subjectLegends.find(l => l.name === item.extractedText || l.short_name === item.extractedText);
-                    const code = (leg && leg.code) || item.code || null;
-                    const reg = await registerEntityIntoCatalog('subject', item.extractedText, { code }, upload.departmentCode);
-                    registeredList.push({ type: 'subject', text: item.extractedText, record: reg });
-                }
-            } else if (item.entityType === 'faculty') {
-                if (item.extractedText.includes('/')) {
-                    const parts = item.extractedText.split('/').map(p => p.trim()).filter(Boolean);
-                    for (const p of parts) {
-                        const leg = facultyLegends.find(l => l.name === p);
-                        const code = (leg && leg.code) || null;
-                        await registerEntityIntoCatalog('faculty', p, { code }, upload.departmentCode);
+                } else if (eType === 'faculty') {
+                    // Do NOT auto-register placeholder/needs review faculty
+                    const lowerText = extractedText.toLowerCase();
+                    if (lowerText === 'needs review' || lowerText === 'unassigned' || lowerText === 'unresolved' || lowerText === 'unknown') {
+                        // Skip auto-creation of fake faculty, keep as unresolved for HOD review/mapping
+                        continue;
                     }
-                    const reg = await registerEntityIntoCatalog('faculty', item.extractedText, { code: item.code || null }, upload.departmentCode);
-                    registeredList.push({ type: 'faculty', text: item.extractedText, record: reg });
-                } else {
-                    const leg = facultyLegends.find(l => l.name === item.extractedText);
-                    const code = (leg && leg.code) || null;
-                    const reg = await registerEntityIntoCatalog('faculty', item.extractedText, { code }, upload.departmentCode);
-                    registeredList.push({ type: 'faculty', text: item.extractedText, record: reg });
+
+                    if (extractedText.includes('/')) {
+                        const parts = extractedText.split('/').map(p => p.trim()).filter(Boolean);
+                        for (const p of parts) {
+                            const leg = facultyLegends.find(l => l.name === p);
+                            const code = (leg && leg.code) || null;
+                            await registerEntityIntoCatalog('faculty', p, { code }, upload.departmentCode);
+                        }
+                        const reg = await registerEntityIntoCatalog('faculty', extractedText, { code: item.code || null }, upload.departmentCode);
+                        registeredList.push({ type: 'faculty', text: extractedText, record: reg });
+                    } else {
+                        const leg = facultyLegends.find(l => l.name === extractedText);
+                        const code = (leg && leg.code) || null;
+                        const reg = await registerEntityIntoCatalog('faculty', extractedText, { code }, upload.departmentCode);
+                        registeredList.push({ type: 'faculty', text: extractedText, record: reg });
+                    }
+                } else if (eType === 'room') {
+                    const reg = await registerEntityIntoCatalog('room', extractedText, { code: item.code || extractedText }, upload.departmentCode);
+                    registeredList.push({ type: 'room', text: extractedText, record: reg });
                 }
+            } catch (entityErr) {
+                console.warn(`[register-all-unresolved] Skipping "${extractedText}" (${eType}) due to error:`, entityErr.message);
             }
         }
 
@@ -801,14 +952,18 @@ router.post('/:uploadId/approve', async (req, res) => {
         // 4. Determine Authoritative Target Scope
         const currentUserId = req.session.userId || req.session.username || req.session.id;
         const targetScope = (req.body && req.body.targetScope) ? req.body.targetScope : {
-            branch: (req.body && (req.body.targetBranch || req.body.branch || req.body.departmentCode)) || upload.departmentCode,
+            branch: normalizeDepartmentCode((req.body && (req.body.targetBranch || req.body.branch || req.body.departmentCode)) || upload.departmentCode),
             academicYear: (req.body && (req.body.targetAcademicYear || req.body.academicYear)) || upload.academicYear,
             semester: (req.body && (req.body.targetSemester || req.body.semester)) || upload.semester,
             section: (req.body && (req.body.targetSection || req.body.section)) || upload.section,
             className: (req.body && (req.body.targetClass || req.body.className)) || upload.targetClass
         };
 
-        const targetBranchCode = targetScope.branch || upload.departmentCode;
+        if (targetScope.branch) {
+            targetScope.branch = normalizeDepartmentCode(targetScope.branch);
+        }
+
+        const targetBranchCode = normalizeDepartmentCode(targetScope.branch || upload.departmentCode);
 
         // 5. Entity Resolution Gate: Strictly block if unresolved entities remain
         const resolution = await resolveContract(

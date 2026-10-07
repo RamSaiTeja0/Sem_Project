@@ -29,6 +29,7 @@ const {
 } = require('../core/geminiExtractor');
 const { validateExtractedContract } = require('../core/contractValidator');
 const { resolveContract } = require('../core/entityResolver');
+const { normalizeDepartmentCode } = require('../data/departments');
 const { saveUploadRecord, saveStagedData } = require('../data/uploads');
 
 const SUPPORTED_IMAGE_EXTS = new Set(['.png', '.jpg', '.jpeg', '.webp']);
@@ -62,9 +63,16 @@ function contractToSource(payload, uploadContext = {}) {
         throw new Error('Invalid contract JSON payload');
     }
 
+    if (payload.department_code) {
+        if (!payload.raw_department_code) {
+            payload.raw_department_code = payload.department_code;
+        }
+        payload.department_code = normalizeDepartmentCode(payload.department_code);
+    }
+
     const isFacultyTimetable = payload.timetable_type === 'FACULTY_TIMETABLE' || (uploadContext && uploadContext.uploadType === 'FACULTY_TIMETABLE');
     const defaultClass = payload.class_name || (uploadContext && uploadContext.className) || null;
-    const department = payload.department_code || (uploadContext && uploadContext.departmentCode) || 'General';
+    const department = payload.department_code || normalizeDepartmentCode(uploadContext && uploadContext.departmentCode) || 'General';
 
     // Dynamic Meta: Preserve exact days and periods from source
     const rawDays = Array.isArray(payload.days) && payload.days.length > 0
@@ -211,8 +219,9 @@ async function parse(buffer, options = {}) {
     }
 
     const isFaculty = (options.session && options.session.role === 'faculty') || options.uploadType === 'FACULTY_TIMETABLE' || options.isFacultyTimetable === true;
+    const authDept = normalizeDepartmentCode((options.session && options.session.department) || options.departmentCode || config.branchCode || 'CME');
     const uploadContext = {
-        departmentCode: (options.session && options.session.department) || options.departmentCode || config.branchCode || 'CME',
+        departmentCode: authDept,
         uploadType: isFaculty ? 'FACULTY_TIMETABLE' : (options.uploadType || 'MASTER_TIMETABLE'),
         facultyName: isFaculty ? ((options.session && (options.session.facultyName || options.session.username)) || options.facultyName || null) : (options.facultyName || null),
         className: options.defaultClass || options.className || null,
@@ -276,12 +285,19 @@ async function parse(buffer, options = {}) {
         customTransport: options.stage2Transport || options.geminiTransport || options.customTransport
     });
 
+    if (stage2Json && stage2Json.department_code) {
+        if (!stage2Json.raw_department_code) {
+            stage2Json.raw_department_code = stage2Json.department_code;
+        }
+        stage2Json.department_code = normalizeDepartmentCode(stage2Json.department_code);
+    }
+
     // Final B2.1 Contract Validation
     const validationRecord = {
         uploadId: uploadId || null,
         uploadType: uploadContext.uploadType,
         facultyId: uploadContext.facultyName,
-        ...(options.session && options.session.department ? { departmentCode: options.session.department } : {})
+        ...(options.session && options.session.department ? { departmentCode: normalizeDepartmentCode(options.session.department) } : { departmentCode: authDept })
     };
 
     const validation = validateExtractedContract(stage2Json, validationRecord, {

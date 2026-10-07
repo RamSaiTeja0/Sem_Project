@@ -19,6 +19,7 @@ const crypto = require('crypto');
 const db = require('../db/pool');
 const repository = require('../db/repository');
 const store = require('./store');
+const delegations = require('./delegations');
 
 let inMemoryRequests = [];
 let inMemoryActive = [];
@@ -274,7 +275,8 @@ async function createDirectAssignment({ facultyIdentifier, date, periods, notes,
         throw err;
     }
 
-    if (sessionUser.role === 'faculty') {
+    const isAuthorized = await delegations.isAuthorizedHOS(sessionUser, date);
+    if (!isAuthorized) {
         const err = new Error('Faculty members cannot directly create active invigilation assignments. Submit an invigilation request instead.');
         err.status = 403; err.code = 'FORBIDDEN';
         throw err;
@@ -638,7 +640,8 @@ async function approveRequest(requestId, sessionUser) {
         throw err;
     }
 
-    if (sessionUser.role === 'faculty') {
+    const isAuthorized = await delegations.isAuthorizedHOS(sessionUser);
+    if (!isAuthorized) {
         const err = new Error('Faculty members cannot approve invigilation requests. This action requires Head of Department (HOD) role.');
         err.status = 403; err.code = 'FORBIDDEN';
         throw err;
@@ -850,7 +853,8 @@ async function rejectRequest(requestId, rejectionReason = null, sessionUser) {
         throw err;
     }
 
-    if (sessionUser.role === 'faculty') {
+    const isAuthorized = await delegations.isAuthorizedHOS(sessionUser);
+    if (!isAuthorized) {
         const err = new Error('Faculty members cannot reject invigilation requests.');
         err.status = 403; err.code = 'FORBIDDEN';
         throw err;
@@ -1002,7 +1006,8 @@ async function deleteAssignment(id, sessionUser) {
         throw err;
     }
 
-    if (sessionUser.role === 'faculty') {
+    const isAuthorized = await delegations.isAuthorizedHOS(sessionUser);
+    if (!isAuthorized) {
         const err = new Error('Faculty members cannot delete invigilation assignments.');
         err.status = 403; err.code = 'FORBIDDEN';
         throw err;

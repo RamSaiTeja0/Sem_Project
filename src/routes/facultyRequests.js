@@ -14,10 +14,12 @@ const router = express.Router();
 const facultyRequests = require('../data/facultyRequests');
 const { getRegisteredBranchCodes, getBranch } = require('../data/departments');
 
+const delegations = require('../data/delegations');
+
 /**
- * Guard for HOS-only request management endpoints.
+ * Guard for HOS / Acting HOD request management endpoints.
  */
-function requireHOS(req, res, next) {
+async function requireHOS(req, res, next) {
     if (!req.session || !req.session.username) {
         return res.status(401).json({
             error: 'Authentication required. Please sign in.',
@@ -25,21 +27,30 @@ function requireHOS(req, res, next) {
         });
     }
 
+    if (['hos', 'coordinator', 'admin'].includes(req.session.role)) {
+        return next();
+    }
+
     if (req.session.role === 'faculty') {
+        try {
+            const activeDelegation = await delegations.getActiveDelegationForFaculty(req.session);
+            if (activeDelegation) {
+                req.isActingHOD = true;
+                req.activeDelegation = activeDelegation;
+                return next();
+            }
+        } catch (_) {}
+
         return res.status(403).json({
             error: 'Faculty members cannot access registration requests.',
             code: 'FORBIDDEN'
         });
     }
 
-    if (!['hos', 'coordinator', 'admin'].includes(req.session.role)) {
-        return res.status(403).json({
-            error: 'This action requires Head of Section (HOS) or Administrator role.',
-            code: 'FORBIDDEN'
-        });
-    }
-
-    next();
+    return res.status(403).json({
+        error: 'This action requires Head of Department (HOD) or Administrator role.',
+        code: 'FORBIDDEN'
+    });
 }
 
 /**

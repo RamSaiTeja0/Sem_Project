@@ -471,101 +471,118 @@ router.get('/:id(\\d+)', async (req, res, next) => {
     } catch (err) { next(err); }
 });
 
-function checkPostOwnership(req, res, next) {
+const delegations = require('../data/delegations');
+
+async function checkPostOwnership(req, res, next) {
     if (req.session && req.session.role === 'faculty') {
-        const sessionFaculty = req.session.facultyName || req.session.name;
-        const sessionFacId = req.session.facultyId || req.session.id;
-        if (req.body && req.body.faculty && String(req.body.faculty).trim().toUpperCase() !== sessionFaculty.toUpperCase()) {
-            return res.status(403).json({
-                error: 'Faculty members cannot create master timetable entries for another faculty.',
-                code: 'FORBIDDEN'
-            });
+        const isActingHOD = await delegations.isAuthorizedHOS(req.session);
+        if (!isActingHOD) {
+            const sessionFaculty = req.session.facultyName || req.session.name;
+            const sessionFacId = req.session.facultyId || req.session.id;
+            if (req.body && req.body.faculty && String(req.body.faculty).trim().toUpperCase() !== sessionFaculty.toUpperCase()) {
+                return res.status(403).json({
+                    error: 'Faculty members cannot create master timetable entries for another faculty.',
+                    code: 'FORBIDDEN'
+                });
+            }
+            if (req.body && req.body.faculty_id && (!sessionFacId || String(req.body.faculty_id) !== String(sessionFacId))) {
+                return res.status(403).json({
+                    error: 'Faculty members cannot create master timetable entries for another faculty.',
+                    code: 'FORBIDDEN'
+                });
+            }
+            if (req.body && req.body.facultyName && String(req.body.facultyName).trim().toUpperCase() !== sessionFaculty.toUpperCase()) {
+                return res.status(403).json({
+                    error: 'Faculty members cannot create master timetable entries for another faculty.',
+                    code: 'FORBIDDEN'
+                });
+            }
+            req.body.faculty = sessionFaculty;
         }
-        if (req.body && req.body.faculty_id && (!sessionFacId || String(req.body.faculty_id) !== String(sessionFacId))) {
-            return res.status(403).json({
-                error: 'Faculty members cannot create master timetable entries for another faculty.',
-                code: 'FORBIDDEN'
-            });
-        }
-        if (req.body && req.body.facultyName && String(req.body.facultyName).trim().toUpperCase() !== sessionFaculty.toUpperCase()) {
-            return res.status(403).json({
-                error: 'Faculty members cannot create master timetable entries for another faculty.',
-                code: 'FORBIDDEN'
-            });
-        }
-        req.body.faculty = sessionFaculty;
     }
     next();
 }
 
 async function checkModifyOwnership(req, res, next) {
     if (req.session && req.session.role === 'faculty') {
-        const sessionFaculty = req.session.facultyName || req.session.name;
-        const sessionFacId = req.session.facultyId || req.session.id;
-        const entryId = parseInt(req.params.id, 10);
-        let existing = null;
-        if (db.isConfigured() && store.usingDatabase) {
-            existing = await repository.getEntry(entryId);
-        } else {
-            existing = store.getEntryInMemory(entryId);
+        const isActingHOD = await delegations.isAuthorizedHOS(req.session);
+        if (!isActingHOD) {
+            const sessionFaculty = req.session.facultyName || req.session.name;
+            const sessionFacId = req.session.facultyId || req.session.id;
+            const entryId = parseInt(req.params.id, 10);
+            let existing = null;
+            if (db.isConfigured() && store.usingDatabase) {
+                existing = await repository.getEntry(entryId);
+            } else {
+                existing = store.getEntryInMemory(entryId);
+            }
+            if (!existing) {
+                return res.status(404).json({ error: 'No such timetable entry', code: 'NOT_FOUND' });
+            }
+            if (!existing.faculty || String(existing.faculty).trim().toUpperCase() !== sessionFaculty.toUpperCase()) {
+                return res.status(403).json({
+                    error: 'Faculty members cannot modify another faculty member\'s master timetable entry.',
+                    code: 'FORBIDDEN'
+                });
+            }
+            if (req.body && req.body.faculty && String(req.body.faculty).trim().toUpperCase() !== sessionFaculty.toUpperCase()) {
+                return res.status(403).json({
+                    error: 'Faculty members cannot reassign an entry to another faculty member.',
+                    code: 'FORBIDDEN'
+                });
+            }
+            if (req.body && req.body.faculty_id && (!sessionFacId || String(req.body.faculty_id) !== String(sessionFacId))) {
+                return res.status(403).json({
+                    error: 'Faculty members cannot reassign an entry to another faculty member.',
+                    code: 'FORBIDDEN'
+                });
+            }
+            if (req.body && req.body.facultyName && String(req.body.facultyName).trim().toUpperCase() !== sessionFaculty.toUpperCase()) {
+                return res.status(403).json({
+                    error: 'Faculty members cannot reassign an entry to another faculty member.',
+                    code: 'FORBIDDEN'
+                });
+            }
+            req.body.faculty = sessionFaculty;
         }
-        if (!existing) {
-            return res.status(404).json({ error: 'No such timetable entry', code: 'NOT_FOUND' });
-        }
-        if (!existing.faculty || String(existing.faculty).trim().toUpperCase() !== sessionFaculty.toUpperCase()) {
-            return res.status(403).json({
-                error: 'Faculty members cannot modify another faculty member\'s master timetable entry.',
-                code: 'FORBIDDEN'
-            });
-        }
-        if (req.body && req.body.faculty && String(req.body.faculty).trim().toUpperCase() !== sessionFaculty.toUpperCase()) {
-            return res.status(403).json({
-                error: 'Faculty members cannot reassign an entry to another faculty member.',
-                code: 'FORBIDDEN'
-            });
-        }
-        if (req.body && req.body.faculty_id && (!sessionFacId || String(req.body.faculty_id) !== String(sessionFacId))) {
-            return res.status(403).json({
-                error: 'Faculty members cannot reassign an entry to another faculty member.',
-                code: 'FORBIDDEN'
-            });
-        }
-        if (req.body && req.body.facultyName && String(req.body.facultyName).trim().toUpperCase() !== sessionFaculty.toUpperCase()) {
-            return res.status(403).json({
-                error: 'Faculty members cannot reassign an entry to another faculty member.',
-                code: 'FORBIDDEN'
-            });
-        }
-        req.body.faculty = sessionFaculty;
     }
     next();
 }
 
 async function checkDeleteOwnership(req, res, next) {
     if (req.session && req.session.role === 'faculty') {
-        const sessionFaculty = req.session.facultyName || req.session.name;
-        const entryId = parseInt(req.params.id, 10);
-        let existing = null;
-        if (db.isConfigured() && store.usingDatabase) {
-            existing = await repository.getEntry(entryId);
-        } else {
-            existing = store.getEntryInMemory(entryId);
-        }
-        if (!existing) {
-            return res.status(404).json({ error: 'No such timetable entry', code: 'NOT_FOUND' });
-        }
-        if (!existing.faculty || String(existing.faculty).trim().toUpperCase() !== sessionFaculty.toUpperCase()) {
-            return res.status(403).json({
-                error: 'Faculty members cannot delete another faculty member\'s master timetable entry.',
-                code: 'FORBIDDEN'
-            });
+        const isActingHOD = await delegations.isAuthorizedHOS(req.session);
+        if (!isActingHOD) {
+            const sessionFaculty = req.session.facultyName || req.session.name;
+            const entryId = parseInt(req.params.id, 10);
+            let existing = null;
+            if (db.isConfigured() && store.usingDatabase) {
+                existing = await repository.getEntry(entryId);
+            } else {
+                existing = store.getEntryInMemory(entryId);
+            }
+            if (!existing) {
+                return res.status(404).json({ error: 'No such timetable entry', code: 'NOT_FOUND' });
+            }
+            if (!existing.faculty || String(existing.faculty).trim().toUpperCase() !== sessionFaculty.toUpperCase()) {
+                return res.status(403).json({
+                    error: 'Faculty members cannot delete another faculty member\'s master timetable entry.',
+                    code: 'FORBIDDEN'
+                });
+            }
         }
     }
     next();
 }
 
 router.post('/slot', async (req, res, next) => {
-    if (!req.session || (req.session.role !== 'hos' && req.session.role !== 'coordinator' && req.session.role !== 'admin')) {
+    const isAuthorizedHOS = req.session && (
+        req.session.role === 'hos' ||
+        req.session.role === 'coordinator' ||
+        req.session.role === 'admin' ||
+        await delegations.isAuthorizedHOS(req.session)
+    );
+    if (!isAuthorizedHOS) {
         return res.status(403).json({
             error: 'Forbidden: Only Head of Section (HOD) can edit the official Master Timetable.',
             code: 'FORBIDDEN'

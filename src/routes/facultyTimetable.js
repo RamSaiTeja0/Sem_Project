@@ -18,6 +18,8 @@ const store = require('../data/store');
 const db = require('../db/pool');
 const repository = require('../db/repository');
 const importer = require('../importers');
+const { AUTHORITATIVE_PERIOD_TIMINGS } = require('../core/normalizer');
+const { normalizeDepartmentCode } = require('../data/departments');
 
 const upload = multer({
     storage: multer.memoryStorage(),
@@ -297,13 +299,15 @@ router.post('/preview', upload.single('timetable'), async (req, res) => {
         });
 
         // 2. Branch verification
-        const docDept = (result.meta && result.meta.department) || (result.rawContract && result.rawContract.department_code) || '';
-        if (docDept && sessionDept && docDept.toUpperCase() !== sessionDept && docDept.toUpperCase() !== 'GENERAL') {
-            console.warn(`[Faculty Timetable Preview] Branch mismatch: detected "${docDept}", session "${sessionDept}"`);
+        const rawDocDept = (result.meta && result.meta.department) || (result.rawContract && result.rawContract.department_code) || '';
+        const docDept = normalizeDepartmentCode(rawDocDept);
+        const canonSessionDept = normalizeDepartmentCode(sessionDept);
+        if (docDept && canonSessionDept && docDept.toUpperCase() !== canonSessionDept && docDept.toUpperCase() !== 'GENERAL') {
+            console.warn(`[Faculty Timetable Preview] Branch mismatch: detected "${rawDocDept}" (normalized: "${docDept}"), session "${sessionDept}" (normalized: "${canonSessionDept}")`);
             return res.status(403).json({
                 error: `This timetable belongs to another branch and cannot be added to your My Timetable.`,
                 code: 'BRANCH_MISMATCH',
-                detectedBranch: docDept.toUpperCase(),
+                detectedBranch: rawDocDept || docDept.toUpperCase(),
                 yourBranch: sessionDept
             });
         }
@@ -349,12 +353,7 @@ router.post('/preview', upload.single('timetable'), async (req, res) => {
             } catch (_) {}
         }
         if (!periodTimings || Object.keys(periodTimings).length === 0) {
-            try {
-                const demo = require('../data/demoTimetable');
-                if (demo && demo.meta && demo.meta.periodTimings) {
-                    periodTimings = demo.meta.periodTimings;
-                }
-            } catch (_) {}
+            periodTimings = AUTHORITATIVE_PERIOD_TIMINGS;
         }
 
         const days = (result.meta && result.meta.days && result.meta.days.length > 0)
@@ -603,7 +602,7 @@ router.get('/mine', async (req, res) => {
                 days,
                 periods,
                 cells,
-                periodTimings: meta.periodTimings,
+                periodTimings: (meta && meta.periodTimings && Object.keys(meta.periodTimings).length > 0) ? meta.periodTimings : AUTHORITATIVE_PERIOD_TIMINGS,
                 isCustomPersonal: true
             });
         }
@@ -626,7 +625,7 @@ router.get('/mine', async (req, res) => {
             ...grid,
             faculty: sessionFaculty,
             branch: req.session.department,
-            periodTimings: meta.periodTimings,
+            periodTimings: (meta && meta.periodTimings && Object.keys(meta.periodTimings).length > 0) ? meta.periodTimings : AUTHORITATIVE_PERIOD_TIMINGS,
             isCustomPersonal: false
         });
     } catch (err) {

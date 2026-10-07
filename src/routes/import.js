@@ -19,6 +19,7 @@ const db = require('../db/pool');
 const repository = require('../db/repository');
 const { saveUploadRecord, saveStagedData } = require('../data/uploads');
 const { resolveContract } = require('../core/entityResolver');
+const { normalizeDepartmentCode } = require('../data/departments');
 
 const upload = multer({
     storage: multer.memoryStorage(),
@@ -100,16 +101,19 @@ async function resolveClass(requested) {
     };
 }
 
+const delegations = require('../data/delegations');
+
 function handleUpload(action) {
     return async (req, res) => {
+        const isAuthorizedHOS = (config.loadDemoData && !req.session) || (req.session && (
+            req.session.role === 'hos' ||
+            req.session.role === 'coordinator' ||
+            req.session.role === 'admin' ||
+            await delegations.isAuthorizedHOS(req.session)
+        ));
+
         if (action === 'commit') {
-            if (req.session && req.session.role === 'faculty') {
-                return res.status(403).json({
-                    error: 'Forbidden: Only Head of Department (HOD) can import a Master Timetable.',
-                    code: 'FORBIDDEN'
-                });
-            }
-            if (config.authRequired && (!req.session || (req.session.role !== 'hos' && req.session.role !== 'coordinator' && req.session.role !== 'admin'))) {
+            if (!isAuthorizedHOS) {
                 return res.status(403).json({
                     error: 'Forbidden: Only Head of Department (HOD) can import a Master Timetable.',
                     code: 'FORBIDDEN'
@@ -134,7 +138,7 @@ function handleUpload(action) {
             const reqSec = req.body && req.body.section ? String(req.body.section).trim().toUpperCase() : null;
             const reqYear = req.body && req.body.academicYear ? String(req.body.academicYear).trim() : null;
             const reqClass = req.body && (req.body.targetClass || req.body.className || req.body.defaultClass) ? String(req.body.targetClass || req.body.className || req.body.defaultClass).trim() : null;
-            const sessionDept = (req.session && req.session.department) ? String(req.session.department).toUpperCase() : ((req.body && (req.body.departmentCode || req.body.department || req.body.branch)) ? String(req.body.departmentCode || req.body.department || req.body.branch).toUpperCase() : null);
+            const sessionDept = (req.session && req.session.department) ? normalizeDepartmentCode(req.session.department) : ((req.body && (req.body.departmentCode || req.body.department || req.body.branch)) ? normalizeDepartmentCode(req.body.departmentCode || req.body.department || req.body.branch) : null);
 
             const result = await importer[action](req.file.buffer, req.file.originalname, {
                 defaultClass: resolved.code || reqClass,
@@ -143,14 +147,14 @@ function handleUpload(action) {
                 section: reqSec,
                 academicYear: reqYear,
                 departmentCode: sessionDept,
-                uploadType: (req.session && req.session.role === 'faculty') ? 'FACULTY_TIMETABLE' : 'MASTER_TIMETABLE',
+                uploadType: (req.session && req.session.role === 'faculty' && !isAuthorizedHOS) ? 'FACULTY_TIMETABLE' : 'MASTER_TIMETABLE',
                 filename: req.file.originalname,
                 mimeType: req.file.mimetype,
                 session: req.session
             });
 
-            // Enforce upload boundaries: faculty can only upload their own timetable
-            if (req.session && req.session.role === 'faculty' && req.session.facultyName) {
+            // Enforce upload boundaries: faculty can only upload their own timetable when not acting as HOD
+            if (req.session && req.session.role === 'faculty' && !isAuthorizedHOS && req.session.facultyName) {
                 const loggedFaculty = req.session.facultyName.toUpperCase();
                 const fileFaculty = (result.faculty || []).map(f => f.name.toUpperCase());
                 if (fileFaculty.length > 0 && !fileFaculty.includes(loggedFaculty)) {
@@ -162,9 +166,9 @@ function handleUpload(action) {
             }
 
             // HOD can only upload for their own branch
-            if (req.session && req.session.role === 'hos' && req.session.department) {
-                const hosDept = req.session.department.toUpperCase();
-                const otherBranchFaculty = (result.faculty || []).filter(f => f.department && f.department.toUpperCase() !== hosDept);
+            if (isAuthorizedHOS && req.session && req.session.department) {
+                const hosDept = normalizeDepartmentCode(req.session.department);
+                const otherBranchFaculty = (result.faculty || []).filter(f => f.department && normalizeDepartmentCode(f.department) !== hosDept && normalizeDepartmentCode(f.department) !== 'GENERAL');
                 if (otherBranchFaculty.length > 0) {
                     return res.status(403).json({
                         error: `As HOD of ${hosDept}, you can only upload timetables for your own branch.`,
@@ -174,7 +178,7 @@ function handleUpload(action) {
             }
 
             // If staging record was not created by image importer (e.g. spreadsheet), create it for HOS review
-            if (!result.uploadId && req.session && (req.session.role === 'hos' || req.session.role === 'coordinator')) {
+            if (!result.uploadId && isAuthorizedHOS) {
                 try {
                     const uploadRec = await saveUploadRecord({
                         originalFilename: req.file.originalname,

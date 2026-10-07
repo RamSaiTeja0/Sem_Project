@@ -11,6 +11,8 @@ const express = require('express');
 const router = express.Router();
 const attendance = require('../data/attendance');
 
+const delegations = require('../data/delegations');
+
 /**
  * Authentication guard.
  */
@@ -25,9 +27,9 @@ function requireAuth(req, res, next) {
 }
 
 /**
- * Guard for HOS-only attendance management operations.
+ * Guard for HOS attendance management operations (allows permanent HOD or active Acting HOD).
  */
-function requireHOS(req, res, next) {
+async function requireHOS(req, res, next) {
     if (!req.session || !req.session.username) {
         return res.status(401).json({
             error: 'Authentication required. Please sign in.',
@@ -35,21 +37,31 @@ function requireHOS(req, res, next) {
         });
     }
 
+    if (['hos', 'coordinator', 'admin'].includes(req.session.role)) {
+        return next();
+    }
+
     if (req.session.role === 'faculty') {
+        const targetDate = req.query.date || (req.body && (req.body.date || req.body.attendance_date)) || null;
+        try {
+            const activeDelegation = await delegations.getActiveDelegationForFaculty(req.session, targetDate);
+            if (activeDelegation) {
+                req.isActingHOD = true;
+                req.activeDelegation = activeDelegation;
+                return next();
+            }
+        } catch (_) {}
+
         return res.status(403).json({
             error: 'Faculty members cannot manage faculty attendance.',
             code: 'FORBIDDEN'
         });
     }
 
-    if (!['hos', 'coordinator', 'admin'].includes(req.session.role)) {
-        return res.status(403).json({
-            error: 'This action requires Head of Department (HOD) or Administrator role.',
-            code: 'FORBIDDEN'
-        });
-    }
-
-    next();
+    return res.status(403).json({
+        error: 'This action requires Head of Department (HOD) or Administrator role.',
+        code: 'FORBIDDEN'
+    });
 }
 
 /**

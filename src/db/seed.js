@@ -23,9 +23,26 @@ const { normalize } = require('../core/normalizer');
 
 const SCHEMA_PATH = path.join(__dirname, 'schema.sql');
 
+const AUTHORITATIVE_PERIOD_TIMINGS = [
+    { period: 1, start: '08:00', end: '08:45' },
+    { period: 2, start: '08:45', end: '09:30' },
+    { period: 3, start: '09:30', end: '10:15' },
+    { period: 4, start: '10:30', end: '11:15' },
+    { period: 5, start: '11:15', end: '12:00' },
+    { period: 6, start: '12:00', end: '12:45' },
+    { period: 7, start: '12:45', end: '13:30' }
+];
+
 async function migrate() {
     const sql = fs.readFileSync(SCHEMA_PATH, 'utf8');
     await db.query(sql);
+    for (const p of AUTHORITATIVE_PERIOD_TIMINGS) {
+        await db.query(
+            `INSERT INTO periods (period, start_time, end_time) VALUES ($1, $2, $3)
+             ON CONFLICT (period) DO UPDATE SET start_time = EXCLUDED.start_time, end_time = EXCLUDED.end_time`,
+            [p.period, p.start, p.end]
+        );
+    }
     await labelBundledPlaceholders();
 }
 
@@ -90,19 +107,10 @@ async function seed(dataset = demoTimetable, options = {}) {
         // Single-branch clean initialization
         const branch = getBranch();
         await db.withTransaction(async client => {
-            const defaultPeriods = [
-                { period: 1, start: '09:00', end: '09:50' },
-                { period: 2, start: '09:50', end: '10:40' },
-                { period: 3, start: '10:50', end: '11:40' },
-                { period: 4, start: '11:40', end: '12:30' },
-                { period: 5, start: '01:30', end: '02:20' },
-                { period: 6, start: '02:20', end: '03:10' },
-                { period: 7, start: '03:10', end: '04:00' }
-            ];
-            for (const p of defaultPeriods) {
+            for (const p of AUTHORITATIVE_PERIOD_TIMINGS) {
                 await client.query(
                     `INSERT INTO periods (period, start_time, end_time) VALUES ($1, $2, $3)
-                     ON CONFLICT (period) DO NOTHING`,
+                     ON CONFLICT (period) DO UPDATE SET start_time = EXCLUDED.start_time, end_time = EXCLUDED.end_time`,
                     [p.period, p.start, p.end]);
             }
 

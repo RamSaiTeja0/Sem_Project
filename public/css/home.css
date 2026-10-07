@@ -215,6 +215,7 @@
 .site-footer { background: var(--ink-900); color: #cbd5e1; padding: 56px 0 24px; }
 .footer-grid { display: grid; grid-template-columns: 1.6fr 1fr 1fr 1fr; gap: 32px; }
 .site-footer .brand-text { color: #ffffff; }
+.site-footer .brand-subtitle { color: #94a3b8; }
 .site-footer .brand-mark { background: var(--brand-500); }
 .site-footer h4 {
   color: #ffffff; font-size: 0.78rem; font-weight: 650;

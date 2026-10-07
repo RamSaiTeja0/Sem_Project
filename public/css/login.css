@@ -15,6 +15,7 @@
   display: flex; flex-direction: column; justify-content: center; gap: 22px;
 }
 .login-aside .brand-text { color: #ffffff; }
+.login-aside .brand-subtitle { color: #c7d2fe; font-size: 0.72rem; }
 .login-aside .brand-mark { background: rgba(255, 255, 255, 0.16); color: #ffffff; }
 .login-aside h1 {
   color: #ffffff; font-size: clamp(1.7rem, 2.8vw, 2.4rem);

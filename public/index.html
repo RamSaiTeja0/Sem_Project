@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Dashboard — TecSubstitution</title>
+  <title>Dashboard — F.A.S.T.</title>
   <link rel="stylesheet" href="/css/theme.css" />
   <link rel="stylesheet" href="/css/app.css" />
 </head>
@@ -14,8 +14,11 @@
   <aside class="sidebar" id="sidebar">
     <div class="sidebar-head">
       <a class="brand" href="/" title="Back to the home page">
-        <span class="brand-mark">TS</span>
-        <span class="brand-text">TecSubstitution</span>
+        <span class="brand-mark">FAST</span>
+        <span class="brand-content">
+          <span class="brand-text">F.A.S.T.</span>
+          <span class="brand-subtitle">Faculty Alternative Substitution Tracker</span>
+        </span>
       </a>
     </div>
 
@@ -40,7 +43,7 @@
       <div class="nav-label" id="navManageLabel" style="display:none;">Manage</div>
       <button type="button" class="nav-item" data-view="manage" id="navManage" style="display:none;">Add Timetable</button>
       <button type="button" class="nav-item" data-view="import" id="navImport" style="display:none;">Upload Timetable</button>
-      <button type="button" class="nav-item" data-view="about" id="navAbout" style="display:none;">Branch Settings</button>
+      <button type="button" class="nav-item" data-view="delegation" id="navDelegation" style="display:none;">HOD Delegation</button>
     </nav>
 
     <div class="sidebar-foot">
@@ -71,66 +74,221 @@
     </header>
 
     <div class="content">
+      <!-- Acting HOD Active Delegation Alert Banner -->
+      <div id="actingHodBanner" class="notice notice-info" style="display:none; margin-bottom:18px; border-left:4px solid #3b82f6; background: rgba(59, 130, 246, 0.08); padding: 14px 18px; border-radius: 6px;">
+        <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px;">
+          <div>
+            <strong style="color: #1d4ed8; font-size: 1rem;">Acting Head of Department (HOD)</strong>: You currently hold temporary HOD permissions for <span id="actingHodBranchBadge" class="badge badge-primary" style="font-size:0.8rem; font-weight:600;">CME</span> from <strong id="actingHodStartDate"></strong> to <strong id="actingHodEndDate"></strong> (Assigned by <span id="actingHodAssignedBy"></span>).
+          </div>
+          <span class="badge badge-success" style="font-size:0.75rem; text-transform:uppercase; letter-spacing:0.5px;">Active Delegation</span>
+        </div>
+      </div>
 
       <!-- ------------------------- DASHBOARD ------------------------- -->
       <section class="view is-active" id="view-dashboard">
-        <div class="stats" id="dashboardStats"></div>
-
-        <div class="grid-2">
-          <div class="card">
-            <div class="card-head">
+        <!-- HOD Specific Overview Dashboard -->
+        <div id="hodDashboardOverview" style="display:none; flex-direction:column; gap:20px;">
+          <!-- Header Banner with Dynamic Branch & Today's Date -->
+          <div class="card" style="background: linear-gradient(135deg, var(--surface) 0%, var(--brand-050) 100%); border-left: 4px solid var(--brand-600);">
+            <div class="card-body" style="padding: 20px 24px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 14px;">
               <div>
-                <h2>Check a slot</h2>
-                <p>Pick a day and period to see who is free. Nothing is assigned or saved.</p>
+                <div style="font-size: 0.75rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: var(--brand-700); margin-bottom: 4px;">Head of Department Overview</div>
+                <h2 id="hodDashBranchName" style="font-size: 1.35rem; font-weight: 700; color: var(--ink-900); margin: 0;">Academic Branch</h2>
+                <p class="muted" style="font-size: 0.84rem; margin: 4px 0 0 0;">Branch operational summary, timetable metrics, and active requests.</p>
               </div>
-            </div>
-            <div class="card-body">
-              <div class="controls">
-                <label class="field"><span>Day</span><select id="dashDay"></select></label>
-                <label class="field"><span>Period</span><select id="dashPeriod"></select></label>
-                <button type="button" class="btn" id="dashCheck">Check availability</button>
-              </div>
-              <div id="dashResult" class="result-panel">
-                <p class="muted">Choose a day and period, then check availability.</p>
+              <div style="text-align: right; min-width: 140px;">
+                <div style="font-size: 0.72rem; font-weight: 650; text-transform: uppercase; letter-spacing: 0.05em; color: var(--ink-500);">Today's Date</div>
+                <div id="hodDashDate" style="font-size: 0.95rem; font-weight: 700; color: var(--brand-900); margin-top: 2px;">—</div>
               </div>
             </div>
           </div>
 
+          <!-- Section 1 & 2: Faculty Summary & Timetable Summary -->
+          <div class="grid-2">
+            <!-- 1. Faculty Summary Card -->
+            <div class="card">
+              <div class="card-head">
+                <div>
+                  <h2>Faculty Summary</h2>
+                  <p>Faculty strength and daily attendance status</p>
+                </div>
+                <button type="button" class="btn btn-secondary btn-sm" data-nav-target="attendance">Manage Attendance &rarr;</button>
+              </div>
+              <div class="card-body" style="padding: 18px 20px;">
+                <div class="stats" style="grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 12px;">
+                  <div class="stat is-brand" style="padding: 12px 14px; cursor: pointer; min-width: 0;" data-nav-target="faculty" title="View Faculty Management">
+                    <div class="stat-label">Total Faculty</div>
+                    <div class="stat-value" id="hodStatTotalFaculty" style="font-size: 1.5rem;">0</div>
+                    <div class="stat-note">in roster</div>
+                  </div>
+                  <div class="stat is-ok" style="padding: 12px 14px; cursor: pointer; min-width: 0;" data-nav-target="attendance" title="View Faculty Attendance">
+                    <div class="stat-label">Present Today</div>
+                    <div class="stat-value" id="hodStatPresentToday" style="font-size: 1.5rem; color: var(--ok-700);">0</div>
+                    <div class="stat-note">on duty</div>
+                  </div>
+                  <div class="stat is-busy" style="padding: 12px 14px; cursor: pointer; min-width: 0;" data-nav-target="attendance" title="View Absent Faculty">
+                    <div class="stat-label">Absent Today</div>
+                    <div class="stat-value" id="hodStatAbsentToday" style="font-size: 1.5rem; color: var(--danger-700);">0</div>
+                    <div class="stat-note">on leave</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- 2. Timetable Summary Card -->
+            <div class="card">
+              <div class="card-head">
+                <div>
+                  <h2>Timetable Summary</h2>
+                  <p>Branch academic periods and weekly teaching workload</p>
+                </div>
+                <button type="button" class="btn btn-secondary btn-sm" data-nav-target="timetable">Master Timetable &rarr;</button>
+              </div>
+              <div class="card-body" style="padding: 18px 20px;">
+                <div class="stats" style="grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px;">
+                  <div class="stat is-brand" style="padding: 12px 14px; cursor: pointer; min-width: 0;" data-nav-target="timetable" title="View Master Timetable">
+                    <div class="stat-label">Scheduled Periods</div>
+                    <div class="stat-value" id="hodStatScheduledPeriods" style="font-size: 1.5rem;">0</div>
+                    <div class="stat-note">active teaching slots</div>
+                  </div>
+                  <div class="stat is-ok" style="padding: 12px 14px; cursor: pointer; min-width: 0;" data-nav-target="availability" title="Check Availability">
+                    <div class="stat-label">Free Periods</div>
+                    <div class="stat-value" id="hodStatFreePeriods" style="font-size: 1.5rem; color: var(--ok-700);">0</div>
+                    <div class="stat-note">available for substitution</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Section 3: Pending Requests Card -->
           <div class="card">
             <div class="card-head">
               <div>
-                <h2>Recent activity</h2>
-                <p>What this session has looked up. Held in the browser only.</p>
+                <h2>Pending Requests</h2>
+                <p>Awaiting Head of Department review or branch action</p>
               </div>
-              <button type="button" class="btn btn-secondary btn-sm" id="clearActivity">Clear</button>
             </div>
-            <div class="card-body">
-              <ul class="activity" id="activityList">
-                <li class="activity-empty muted">No activity yet in this session.</li>
-              </ul>
+            <div class="card-body" style="padding: 18px 20px;">
+              <div class="stats" style="grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 14px;">
+                <div class="stat" style="padding: 14px 16px; cursor: pointer; min-width: 0;" data-nav-target="requests">
+                  <div class="stat-label">Pending Faculty Registrations</div>
+                  <div class="stat-value" id="hodStatPendingFacRequests" style="font-size: 1.5rem;">0</div>
+                  <div class="stat-note">Faculty account requests</div>
+                </div>
+                <div class="stat" style="padding: 14px 16px; cursor: pointer; min-width: 0;" data-nav-target="hos-substitutions">
+                  <div class="stat-label">Pending Substitution Requests</div>
+                  <div class="stat-value" id="hodStatPendingSubstitutions" style="font-size: 1.5rem;">0</div>
+                  <div class="stat-note">Faculty substitutions</div>
+                </div>
+                <div class="stat" style="padding: 14px 16px; cursor: pointer; min-width: 0;" data-nav-target="invig-requests">
+                  <div class="stat-label">Pending Invigilation Requests</div>
+                  <div class="stat-value" id="hodStatPendingInvigRequests" style="font-size: 1.5rem;">0</div>
+                  <div class="stat-note">Faculty exam requests</div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Section 4: Quick Actions Card -->
+          <div class="card">
+            <div class="card-head">
+              <div>
+                <h2>Quick Actions</h2>
+                <p>Direct shortcuts to core department tools</p>
+              </div>
+            </div>
+            <div class="card-body" style="padding: 18px 20px;">
+              <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px;">
+                <button type="button" class="btn btn-secondary" data-nav-target="import" style="padding: 14px 16px; justify-content: flex-start; text-align: left; height: auto; min-width: 0; width: 100%; white-space: normal; display: flex; align-items: flex-start;">
+                  <div style="min-width: 0; width: 100%;">
+                    <strong style="display: block; font-size: 0.92rem; color: var(--ink-900); line-height: 1.35; margin-bottom: 3px;">Upload Timetable</strong>
+                    <span style="display: block; font-size: 0.78rem; color: var(--ink-500); font-weight: normal; line-height: 1.4; white-space: normal; word-break: normal; overflow-wrap: break-word;">Upload image, PDF, Excel, or CSV</span>
+                  </div>
+                </button>
+                <button type="button" class="btn btn-secondary" data-nav-target="manage" style="padding: 14px 16px; justify-content: flex-start; text-align: left; height: auto; min-width: 0; width: 100%; white-space: normal; display: flex; align-items: flex-start;">
+                  <div style="min-width: 0; width: 100%;">
+                    <strong style="display: block; font-size: 0.92rem; color: var(--ink-900); line-height: 1.35; margin-bottom: 3px;">Add Timetable</strong>
+                    <span style="display: block; font-size: 0.78rem; color: var(--ink-500); font-weight: normal; line-height: 1.4; white-space: normal; word-break: normal; overflow-wrap: break-word;">Manual single slot or matrix entry</span>
+                  </div>
+                </button>
+                <button type="button" class="btn btn-secondary" data-nav-target="timetable" style="padding: 14px 16px; justify-content: flex-start; text-align: left; height: auto; min-width: 0; width: 100%; white-space: normal; display: flex; align-items: flex-start;">
+                  <div style="min-width: 0; width: 100%;">
+                    <strong style="display: block; font-size: 0.92rem; color: var(--ink-900); line-height: 1.35; margin-bottom: 3px;">Master Timetable</strong>
+                    <span style="display: block; font-size: 0.78rem; color: var(--ink-500); font-weight: normal; line-height: 1.4; white-space: normal; word-break: normal; overflow-wrap: break-word;">View & edit official department timetable</span>
+                  </div>
+                </button>
+                <button type="button" class="btn btn-secondary" data-nav-target="availability" style="padding: 14px 16px; justify-content: flex-start; text-align: left; height: auto; min-width: 0; width: 100%; white-space: normal; display: flex; align-items: flex-start;">
+                  <div style="min-width: 0; width: 100%;">
+                    <strong style="display: block; font-size: 0.92rem; color: var(--ink-900); line-height: 1.35; margin-bottom: 3px;">Faculty Availability</strong>
+                    <span style="display: block; font-size: 0.78rem; color: var(--ink-500); font-weight: normal; line-height: 1.4; white-space: normal; word-break: normal; overflow-wrap: break-word;">Search free faculty for any period</span>
+                  </div>
+                </button>
+              </div>
             </div>
           </div>
         </div>
 
-        <div class="grid-2">
-          <div class="card">
-            <div class="card-head">
-              <div>
-                <h2>Faculty workload</h2>
-                <p>Busiest first, from the loaded timetable.</p>
+        <!-- Standard / Guest / Faculty Dashboard View (Untouched) -->
+        <div id="standardDashboardOverview">
+          <div class="stats" id="dashboardStats"></div>
+
+          <div class="grid-2">
+            <div class="card">
+              <div class="card-head">
+                <div>
+                  <h2>Check a slot</h2>
+                  <p>Pick a day and period to see who is free. Nothing is assigned or saved.</p>
+                </div>
+              </div>
+              <div class="card-body">
+                <div class="controls">
+                  <label class="field"><span>Day</span><select id="dashDay"></select></label>
+                  <label class="field"><span>Period</span><select id="dashPeriod"></select></label>
+                  <button type="button" class="btn" id="dashCheck">Check availability</button>
+                </div>
+                <div id="dashResult" class="result-panel">
+                  <p class="muted">Choose a day and period, then check availability.</p>
+                </div>
               </div>
             </div>
-            <div class="card-body" id="workloadCard"></div>
+
+            <div class="card">
+              <div class="card-head">
+                <div>
+                  <h2>Recent activity</h2>
+                  <p>What this session has looked up. Held in the browser only.</p>
+                </div>
+                <button type="button" class="btn btn-secondary btn-sm" id="clearActivity">Clear</button>
+              </div>
+              <div class="card-body">
+                <ul class="activity" id="activityList">
+                  <li class="activity-empty muted">No activity yet in this session.</li>
+                </ul>
+              </div>
+            </div>
           </div>
 
-          <div class="card">
-            <div class="card-head">
-              <div>
-                <h2>Loaded timetable</h2>
-                <p>Where the current data came from, and anything the validator flagged.</p>
+          <div class="grid-2">
+            <div class="card">
+              <div class="card-head">
+                <div>
+                  <h2>Faculty workload</h2>
+                  <p>Busiest first, from the loaded timetable.</p>
+                </div>
               </div>
+              <div class="card-body" id="workloadCard"></div>
             </div>
-            <div class="card-body" id="dashSource"></div>
+
+            <div class="card">
+              <div class="card-head">
+                <div>
+                  <h2>Loaded timetable</h2>
+                  <p>Where the current data came from, and anything the validator flagged.</p>
+                </div>
+              </div>
+              <div class="card-body" id="dashSource"></div>
+            </div>
           </div>
         </div>
       </section>
@@ -457,11 +615,17 @@
             <div class="card-head">
               <div>
                 <h2>Timetable</h2>
-                <p>Click the period the absent faculty was teaching. Every cell is clickable.</p>
+                <p id="availTimetableSubtitle">Click any period to check faculty availability for substitution (Read-Only).</p>
               </div>
-              <label class="field inline"><span>Class</span><select id="availClass"></select></label>
+              <div class="head-actions" style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+                <span class="badge badge-primary" id="availGridBranchBadge">Branch</span>
+                <label class="field inline"><span>Academic Year</span><select id="availAcademicYear"></select></label>
+                <label class="field inline"><span>Semester</span><select id="availSemester"></select></label>
+                <label class="field inline"><span>Section</span><select id="availSection"></select></label>
+              </div>
             </div>
             <div class="card-body">
+              <p class="muted" id="availTimetableMeta" style="margin-bottom:12px; font-size:0.88rem;"></p>
               <div class="table-scroll">
                 <table class="timetable">
                   <thead id="availHead"></thead>
@@ -995,16 +1159,16 @@ Prof. B. Kumar, FREE, FREE, Database Management Systems"></textarea>
         </div>
 
         <!-- Create Account Modal for Faculty Without Account -->
-        <div id="createFacultyAccountModal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(15,23,42,0.6); z-index:1000; align-items:center; justify-content:center; padding:16px;">
-          <div class="card" style="max-width:540px; width:100%; margin:auto; box-shadow:var(--shadow-lg, 0 10px 25px rgba(0,0,0,0.2)); border-radius:var(--radius-md);">
-            <div class="card-head" style="border-bottom:1px solid var(--border); padding-bottom:12px;">
+        <div id="createFacultyAccountModal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(15,23,42,0.6); z-index:1000; align-items:center; justify-content:center; padding:16px; overflow-y:auto;">
+          <div class="card" style="max-width:540px; width:100%; max-height:88vh; display:flex; flex-direction:column; margin:auto; box-shadow:var(--shadow-lg, 0 10px 25px rgba(0,0,0,0.2)); border-radius:var(--radius-md); overflow:hidden;">
+            <div class="card-head" style="border-bottom:1px solid var(--border); padding-bottom:12px; flex-shrink:0;">
               <div>
                 <h3 style="margin:0; font-size:1.15rem;">Create Faculty Account</h3>
                 <p class="muted" style="margin:4px 0 0; font-size:0.84rem;">Provision login credentials linked to this existing faculty record.</p>
               </div>
               <button type="button" class="btn btn-ghost btn-sm" id="btnCreateAccClose" style="font-size:1.1rem; line-height:1; padding:4px 8px;">✕</button>
             </div>
-            <div class="card-body" style="padding-top:16px;">
+            <div class="card-body" style="padding-top:16px; overflow-y:auto; flex:1 1 auto; max-height:calc(88vh - 65px);">
               <form id="createFacultyAccountForm" autocomplete="off">
                 <input type="hidden" id="createAccFacId" />
                 <div class="controls" style="display:flex; flex-direction:column; gap:12px;">
@@ -1033,7 +1197,7 @@ Prof. B. Kumar, FREE, FREE, Database Management Systems"></textarea>
                   <label class="field">
                     <span>Password <em class="req" style="color:var(--danger-500);">*</em></span>
                     <div class="password-input-wrapper">
-                      <input type="password" id="createAccPassword" placeholder="e.g. TecSub_123" required />
+                      <input type="password" id="createAccPassword" placeholder="e.g. FastPass_123" required />
                       <button type="button" class="btn-toggle-pw" id="toggleCreateAccPassword" aria-label="Show password" title="Show password">
                         <svg class="eye-icon" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                           <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
@@ -1069,7 +1233,7 @@ Prof. B. Kumar, FREE, FREE, Database Management Systems"></textarea>
                     <input type="text" id="createAccSubjects" placeholder="e.g. Data Structures, Algorithms" required />
                   </label>
 
-                  <div id="createAccNote" style="display:none; margin-top:6px;"></div>
+                  <div id="createAccNote" class="notice notice-danger" style="display:none; margin-top:8px; font-weight:600; font-size:0.9rem; word-break:break-word;"></div>
 
                   <div style="display:flex; gap:10px; justify-content:flex-end; margin-top:14px; padding-top:12px; border-top:1px solid var(--border);">
                     <button type="button" class="btn btn-secondary" id="btnCreateAccCancel">Cancel</button>
@@ -1082,16 +1246,16 @@ Prof. B. Kumar, FREE, FREE, Database Management Systems"></textarea>
         </div>
 
         <!-- Edit Faculty Modal (Phase B6.1) -->
-        <div id="editFacultyModal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(15,23,42,0.6); z-index:1000; align-items:center; justify-content:center; padding:16px;">
-          <div class="card" style="max-width:540px; width:100%; margin:auto; box-shadow:var(--shadow-lg, 0 10px 25px rgba(0,0,0,0.2)); border-radius:var(--radius-md);">
-            <div class="card-head" style="border-bottom:1px solid var(--border); padding-bottom:12px;">
+        <div id="editFacultyModal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(15,23,42,0.6); z-index:1000; align-items:center; justify-content:center; padding:16px; overflow-y:auto;">
+          <div class="card" style="max-width:540px; width:100%; max-height:88vh; display:flex; flex-direction:column; margin:auto; box-shadow:var(--shadow-lg, 0 10px 25px rgba(0,0,0,0.2)); border-radius:var(--radius-md); overflow:hidden;">
+            <div class="card-head" style="border-bottom:1px solid var(--border); padding-bottom:12px; flex-shrink:0;">
               <div>
                 <h3 style="margin:0; font-size:1.15rem;">Edit Faculty Details</h3>
                 <p class="muted" style="margin:4px 0 0; font-size:0.84rem;">Update name, phone, designation, and subject expertise.</p>
               </div>
               <button type="button" class="btn btn-ghost btn-sm" id="btnEditFacClose" style="font-size:1.1rem; line-height:1; padding:4px 8px;">✕</button>
             </div>
-            <div class="card-body" style="padding-top:16px;">
+            <div class="card-body" style="padding-top:16px; overflow-y:auto; flex:1 1 auto; max-height:calc(88vh - 65px);">
               <form id="editFacultyForm" autocomplete="off">
                 <input type="hidden" id="editFacId" />
                 <div class="controls" style="display:flex; flex-direction:column; gap:12px;">
@@ -1130,7 +1294,7 @@ Prof. B. Kumar, FREE, FREE, Database Management Systems"></textarea>
                     <input type="text" id="editFacSubjects" placeholder="e.g. Data Structures, DBMS" required />
                   </label>
 
-                  <div id="editFacNote" style="display:none; margin-top:6px;"></div>
+                  <div id="editFacNote" class="notice notice-danger" style="display:none; margin-top:8px; font-weight:600; font-size:0.9rem; word-break:break-word;"></div>
 
                   <div style="display:flex; gap:10px; justify-content:flex-end; margin-top:14px; padding-top:12px; border-top:1px solid var(--border);">
                     <button type="button" class="btn btn-secondary" id="btnEditFacCancel">Cancel</button>
@@ -1844,77 +2008,84 @@ Prof. B. Kumar, FREE, FREE, Database Management Systems"></textarea>
         </div>
       </section>
 
-      <!-- ------------------------- ABOUT ----------------------------- -->
-      <section class="view" id="view-about">
-
-        <!-- Branch Configuration Card -->
-        <div class="card" id="aboutBranchCard" style="margin-bottom:20px;">
+      <!-- ----------------------- HOD DELEGATION ----------------------- -->
+      <section class="view" id="view-delegation">
+        <!-- Assign Acting HOD Card -->
+        <div class="card" style="margin-bottom: 20px;">
           <div class="card-head">
             <div>
-              <h2>Branch Configuration</h2>
-              <p>Current academic branch instance settings.</p>
+              <h2>Assign Acting HOD</h2>
+              <p>Temporarily delegate Head of Department (HOD) responsibilities to an active faculty member of your branch during leave or absence.</p>
             </div>
-            <span class="badge badge-primary" id="aboutBranchBadge">Branch</span>
+            <span class="badge badge-primary" id="delCurrentBranchBadge">Branch</span>
           </div>
           <div class="card-body">
-            <form id="branchConfigForm" autocomplete="off">
-              <div class="field-grid" style="grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 14px;">
-                <label class="field"><span>Branch Code</span><input type="text" id="cfgBranchCode" readonly /></label>
-                <label class="field"><span>Branch Name</span><input type="text" id="cfgBranchName" /></label>
-                <label class="field"><span>Academic Year</span><input type="text" id="cfgBranchYear" /></label>
-                <label class="field"><span>Semester</span><input type="number" id="cfgBranchSem" min="1" max="8" /></label>
+            <form id="delegationForm" autocomplete="off">
+              <div class="field-grid" style="grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px;">
+                <label class="field">
+                  <span>Current Permanent HOD</span>
+                  <input type="text" id="delCurrentHOD" readonly style="background: rgba(0,0,0,0.03);" />
+                </label>
+                <label class="field">
+                  <span>Acting HOD (Select Faculty) <strong style="color:var(--danger, #ef4444); font-size:0.85em;">*</strong></span>
+                  <select id="delFacultySelect" required>
+                    <option value="">-- Select Active Faculty Member --</option>
+                  </select>
+                </label>
+                <label class="field">
+                  <span>From (Start Date) <strong style="color:var(--danger, #ef4444); font-size:0.85em;">*</strong></span>
+                  <input type="date" id="delStartDate" required />
+                </label>
+                <label class="field">
+                  <span>To (End Date) <strong style="color:var(--danger, #ef4444); font-size:0.85em;">*</strong></span>
+                  <input type="date" id="delEndDate" required />
+                </label>
               </div>
-              <div id="cfgBranchActions" style="margin-top:14px;">
-                <button type="submit" class="btn btn-primary" id="cfgBranchSave">Save Branch Configuration</button>
+              <div style="margin-top: 14px;">
+                <label class="field">
+                  <span>Notes / Reason (Optional)</span>
+                  <input type="text" id="delNotes" placeholder="e.g. Annual leave, duty leave, conference" />
+                </label>
+              </div>
+              <div style="margin-top: 16px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+                <button type="submit" class="btn btn-primary" id="btnAssignDelegation">Assign Acting HOD</button>
+                <button type="button" class="btn btn-secondary" id="btnRefreshDelegations">Refresh History</button>
               </div>
             </form>
-            <div id="cfgBranchNote" style="margin-top:10px;"></div>
+            <div id="delFormMsg" style="margin-top: 14px;"></div>
           </div>
         </div>
 
+        <!-- Delegation History Card -->
         <div class="card">
-          <div class="card-head"><div><h2>Settings / About</h2></div></div>
+          <div class="card-head">
+            <div>
+              <h2>Delegation History & Status</h2>
+              <p>View all active, future, expired, and cancelled delegations for your branch.</p>
+            </div>
+          </div>
           <div class="card-body">
-            <div class="detail-row"><span class="detail-label">Application</span>
-              <span class="detail-value">TecSubstitution — Faculty Substitution / Availability Finder</span></div>
-            <div class="detail-row"><span class="detail-label">Purpose</span>
-              <span class="detail-value">Find which faculty are free during an absent colleague's period.</span></div>
-            <div class="detail-row"><span class="detail-label">Port</span>
-              <span class="detail-value mono" id="aboutPort">—</span></div>
-            <div class="detail-row"><span class="detail-label">Data source</span>
-              <span class="detail-value" id="aboutOrigin">—</span></div>
-            <div class="detail-row"><span class="detail-label">Loaded at</span>
-              <span class="detail-value" id="aboutLoaded">—</span></div>
-            <div class="detail-row"><span class="detail-label">Sign-in</span>
-              <span class="detail-value" id="aboutAuth">—</span></div>
-
-            <div class="section-label">Read-only guarantee</div>
-            <p class="muted" style="margin:0;">
-              Checking availability never assigns a substitute, saves a selection, or modifies any
-              timetable. The only operation that changes data is an explicit timetable import,
-              which you confirm after reviewing a preview.
-            </p>
-
-            <div class="section-label">API endpoints</div>
             <div class="table-scroll">
-              <table class="data">
-                <thead><tr><th>Method</th><th>Endpoint</th><th>Purpose</th></tr></thead>
-                <tbody>
-                  <tr><td class="mono">GET</td><td class="mono">/api/timetable</td><td>Class or faculty grid</td></tr>
-                  <tr><td class="mono">GET</td><td class="mono">/api/timetable/meta</td><td>Days, periods, classes</td></tr>
-                  <tr><td class="mono">GET</td><td class="mono">/api/timetable/records</td><td>Normalized records</td></tr>
-                  <tr><td class="mono">GET</td><td class="mono">/api/faculty</td><td>Roster with load</td></tr>
-                  <tr><td class="mono">GET</td><td class="mono">/api/faculty/departments</td><td>Department list</td></tr>
-                  <tr><td class="mono">POST</td><td class="mono">/api/availability</td><td>Free faculty for a slot</td></tr>
-                  <tr><td class="mono">GET</td><td class="mono">/api/availability/summary</td><td>Dashboard totals</td></tr>
-                  <tr><td class="mono">GET</td><td class="mono">/api/timetable/import/formats</td><td>Accepted upload formats</td></tr>
-                  <tr><td class="mono">POST</td><td class="mono">/api/timetable/import/preview</td><td>Validate an upload</td></tr>
-                  <tr><td class="mono">POST</td><td class="mono">/api/timetable/import</td><td>Load an upload</td></tr>
-                  <tr><td class="mono">GET</td><td class="mono">/api/auth/session</td><td>Who is signed in</td></tr>
-                  <tr><td class="mono">POST</td><td class="mono">/api/auth/login</td><td>Start a session</td></tr>
-                  <tr><td class="mono">POST</td><td class="mono">/api/auth/logout</td><td>End a session</td></tr>
+              <table class="data" id="delegationsTable">
+                <thead>
+                  <tr>
+                    <th>Acting HOD</th>
+                    <th>Designation</th>
+                    <th>From Date</th>
+                    <th>To Date</th>
+                    <th>Status</th>
+                    <th>Assigned By</th>
+                    <th>Created At</th>
+                    <th>Action</th>
+                  </tr>
+                </thead>
+                <tbody id="delegationsTableBody">
+                  <tr><td colspan="8" class="muted" style="text-align:center; padding:16px;">Loading delegations...</td></tr>
                 </tbody>
               </table>
+            </div>
+            <div id="delEmptyNotice" class="notice notice-info" style="display:none; margin-top:12px;">
+              No delegations recorded for your branch.
             </div>
           </div>
         </div>

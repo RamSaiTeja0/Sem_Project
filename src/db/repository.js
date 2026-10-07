@@ -86,7 +86,8 @@ async function counts() {
             (SELECT COUNT(*)::int FROM faculty_attendance) AS faculty_attendance,
             (SELECT COUNT(*)::int FROM exam_invigilation)  AS exam_invigilation,
             (SELECT COUNT(*)::int FROM faculty_substitutions) AS faculty_substitutions,
-            (SELECT COUNT(*)::int FROM faculty_registration_requests) AS faculty_registration_requests
+            (SELECT COUNT(*)::int FROM faculty_registration_requests) AS faculty_registration_requests,
+            (SELECT COUNT(*)::int FROM hod_delegations) AS hod_delegations
     `);
     return rows[0];
 }
@@ -245,19 +246,31 @@ async function loadSource(meta) {
 
 // --------------------------------------------------------------- lookups
 
-async function lookupId(client, table, column, value) {
+async function lookupId(client, table, column, value, departmentId = null) {
+    if (departmentId !== null && (table === 'classes' || table === 'subjects' || table === 'faculty')) {
+        const { rows } = await client.query(
+            `SELECT id FROM ${table} WHERE UPPER(${column}) = UPPER($1) AND (department_id = $2 OR department_id IS NULL) ORDER BY (department_id = $2) DESC LIMIT 1`,
+            [value, departmentId]
+        );
+        if (rows.length) return rows[0].id;
+    }
     const { rows } = await client.query(
         `SELECT id FROM ${table} WHERE UPPER(${column}) = UPPER($1) LIMIT 1`, [value]);
     return rows.length ? rows[0].id : null;
 }
 
 /** Resolve the names an entry refers to into row ids, reporting what is missing. */
-async function resolveRefs(client, entry) {
+async function resolveRefs(client, entry, departmentId = null) {
     // Sequential, not Promise.all: a single pg client runs one query at a time.
     const className = entry.className || entry.class;
-    const classId = await lookupId(client, 'classes', 'code', className);
-    const subjectId = await lookupId(client, 'subjects', 'name', entry.subject);
-    const facultyId = entry.faculty ? await lookupId(client, 'faculty', 'name', entry.faculty) : null;
+    let deptId = departmentId;
+    if (!deptId && className) {
+        const { rows: clsRows } = await client.query('SELECT department_id FROM classes WHERE UPPER(code) = UPPER($1) LIMIT 1', [className]);
+        if (clsRows.length) deptId = clsRows[0].department_id;
+    }
+    const classId = await lookupId(client, 'classes', 'code', className, deptId);
+    const subjectId = await lookupId(client, 'subjects', 'name', entry.subject, deptId);
+    const facultyId = entry.faculty ? await lookupId(client, 'faculty', 'name', entry.faculty, deptId) : null;
     const roomId = entry.room ? await lookupId(client, 'rooms', 'code', entry.room) : null;
 
     const missing = [];
@@ -387,9 +400,15 @@ async function addEntry(entry) {
  */
 async function replaceFacultyEntries(facultyName, entries, options = {}) {
     const mode = options.mode === 'replace' ? 'replace' : 'merge';
+    const deptCode = options.department || options.departmentCode;
 
     return db.withTransaction(async client => {
-        const facultyId = await lookupId(client, 'faculty', 'name', facultyName);
+        let deptId = options.departmentId || null;
+        if (!deptId && deptCode) {
+            const { rows: dRows } = await client.query('SELECT id FROM departments WHERE UPPER(code) = UPPER($1)', [deptCode]);
+            if (dRows.length) deptId = dRows[0].id;
+        }
+        const facultyId = await lookupId(client, 'faculty', 'name', facultyName, deptId);
         if (!facultyId) {
             throw badRequest(`Unknown faculty "${facultyName}"`, 'UNKNOWN_REFERENCE',
                 [`faculty "${facultyName}"`]);
@@ -404,7 +423,7 @@ async function replaceFacultyEntries(facultyName, entries, options = {}) {
 
         const written = [];
         for (const entry of entries) {
-            const refs = await resolveRefs(client, { ...entry, faculty: facultyName });
+            const refs = await resolveRefs(client, { ...entry, faculty: facultyName }, deptId);
             if (refs.missing.length) {
                 throw badRequest(
                     `${entry.day} P${entry.period}: unknown ${refs.missing.join(', ')}`,
@@ -476,6 +495,8 @@ async function saveSlotEntry({ className, day, period, subject, faculty, room, t
         if (!classId) {
             throw badRequest(`Unknown class "${className}"`, 'UNKNOWN_REFERENCE', [`class "${className}"`]);
         }
+        const { rows: clsRows } = await client.query('SELECT department_id FROM classes WHERE id = $1', [classId]);
+        const deptId = clsRows.length > 0 ? clsRows[0].department_id : null;
 
         await client.query(
             `DELETE FROM timetable WHERE (class_id = $1 OR class_id IN (SELECT id FROM classes WHERE UPPER(code) = UPPER($2))) AND day_of_week = $3 AND period = $4`,
@@ -487,10 +508,8 @@ async function saveSlotEntry({ className, day, period, subject, faculty, room, t
         }
 
         // Ensure subject exists in catalog
-        let subjectId = await lookupId(client, 'subjects', 'name', subject.trim());
+        let subjectId = await lookupId(client, 'subjects', 'name', subject.trim(), deptId);
         if (!subjectId) {
-            const { rows: clsRows } = await client.query('SELECT department_id FROM classes WHERE id = $1', [classId]);
-            const deptId = clsRows.length > 0 ? clsRows[0].department_id : null;
             const subType = /lab|practical/i.test(subject) ? 'lab' : (type || 'theory');
             const subCode = subject.trim().replace(/[^A-Za-z0-9]/g, '').slice(0, 10).toUpperCase() || 'SUB';
             const { rows: subIns } = await client.query(
@@ -506,13 +525,12 @@ async function saveSlotEntry({ className, day, period, subject, faculty, room, t
         // Ensure faculty exists in catalog if provided
         let facultyId = null;
         if (faculty && faculty.trim()) {
-            facultyId = await lookupId(client, 'faculty', 'name', faculty.trim());
+            facultyId = await lookupId(client, 'faculty', 'name', faculty.trim(), deptId);
             if (!facultyId) {
-                const { rows: clsRows } = await client.query('SELECT department_id FROM classes WHERE id = $1', [classId]);
-                const deptId = clsRows.length > 0 ? clsRows[0].department_id : null;
+                const facCode = (faculty.trim().replace(/[^A-Za-z0-9]/g, '').slice(0, 15).toUpperCase() || 'FAC') + '_' + Date.now().toString().slice(-4);
                 const { rows: facIns } = await client.query(
-                    `INSERT INTO faculty (name, department_id) VALUES ($1, $2) RETURNING id`,
-                    [faculty.trim(), deptId]
+                    `INSERT INTO faculty (code, name, department_id) VALUES ($1, $2, $3) RETURNING id`,
+                    [facCode, faculty.trim(), deptId]
                 );
                 facultyId = facIns[0].id;
             }
@@ -1134,21 +1152,26 @@ async function addFaculty(member) {
     return db.withTransaction(async client => {
         const problems = [];
 
-        const byCode = await client.query('SELECT 1 FROM faculty WHERE UPPER(code) = UPPER($1)', [member.id]);
-        if (byCode.rows.length) problems.push(`Faculty ID "${member.id}" is already in use`);
+        const byCode = await client.query('SELECT 1 FROM faculty WHERE UPPER(code) = UPPER($1)', [member.id || member.code]);
+        if (byCode.rows.length) problems.push(`Faculty ID "${member.id || member.code}" is already in use`);
 
-        const byName = await client.query('SELECT 1 FROM faculty WHERE UPPER(name) = UPPER($1)', [member.name]);
-        if (byName.rows.length) problems.push(`A faculty member named "${member.name}" already exists`);
+        const dept = await client.query('SELECT id FROM departments WHERE UPPER(code) = UPPER($1)',
+            [member.department]);
+        if (!dept.rows.length) {
+            problems.push(`Unknown department "${member.department}"`);
+        } else {
+            const byName = await client.query(
+                'SELECT 1 FROM faculty WHERE UPPER(TRIM(name)) = UPPER(TRIM($1)) AND department_id = $2',
+                [member.name, dept.rows[0].id]
+            );
+            if (byName.rows.length) problems.push(`A faculty member named "${member.name}" already exists`);
+        }
 
         if (member.email) {
             const byEmail = await client.query(
                 'SELECT 1 FROM faculty WHERE LOWER(email) = LOWER($1)', [member.email]);
             if (byEmail.rows.length) problems.push(`Email "${member.email}" is already in use`);
         }
-
-        const dept = await client.query('SELECT id FROM departments WHERE UPPER(code) = UPPER($1)',
-            [member.department]);
-        if (!dept.rows.length) problems.push(`Unknown department "${member.department}"`);
 
         if (problems.length) {
             const error = new Error(problems.join('; '));
@@ -1164,7 +1187,7 @@ async function addFaculty(member) {
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
             RETURNING id`,
             [member.id || member.code, member.name, dept.rows[0].id, member.designation, member.email,
-             member.phone, member.maxWeeklyPeriods, member.status]);
+             member.phone, member.maxWeeklyPeriods || 28, member.status || 'active']);
 
         // A sign-in account, matching how the demo directory derives one per
         // faculty member, so a new arrival can sign in like everybody else.
@@ -1194,7 +1217,10 @@ async function getFaculty(id, client) {
                f.max_weekly_periods AS "maxWeeklyPeriods", f.status,
                COALESCE((SELECT array_agg(subject) FROM faculty_subjects WHERE faculty_id = f.id), ARRAY[]::text[]) AS subjects
           FROM faculty f LEFT JOIN departments d ON d.id = f.department_id
-         WHERE f.id::text = $1::text OR UPPER(f.code) = UPPER($1::text) OR UPPER(f.name) = UPPER($1::text)`, [String(id)]);
+         WHERE f.id::text = $1::text OR UPPER(f.code) = UPPER($1::text) OR UPPER(f.name) = UPPER($1::text)
+            OR f.id IN (SELECT faculty_id FROM users WHERE id::text = $1::text OR UPPER(username) = UPPER($1::text))
+         ORDER BY (f.id::text = $1::text) DESC, (UPPER(f.code) = UPPER($1::text)) DESC, f.id DESC
+         LIMIT 1`, [String(id)]);
     return rows[0] || null;
 }
 
@@ -1204,6 +1230,7 @@ async function updateFaculty(id, branchCode, updates) {
             SELECT f.id, f.code, f.name, f.status, COALESCE(d.code, 'General') AS department
               FROM faculty f LEFT JOIN departments d ON d.id = f.department_id
              WHERE f.id::text = $1::text OR UPPER(f.code) = UPPER($1::text) OR UPPER(f.name) = UPPER($1::text)
+                OR f.id IN (SELECT faculty_id FROM users WHERE id::text = $1::text OR UPPER(username) = UPPER($1::text))
         `, [String(id)]);
 
         if (!found.rows.length) {
@@ -1270,6 +1297,7 @@ async function deactivateFaculty(id, branchCode) {
             SELECT f.id, f.code, f.name, f.status, COALESCE(d.code, 'General') AS department
               FROM faculty f LEFT JOIN departments d ON d.id = f.department_id
              WHERE f.id::text = $1::text OR UPPER(f.code) = UPPER($1::text) OR UPPER(f.name) = UPPER($1::text)
+                OR f.id IN (SELECT faculty_id FROM users WHERE id::text = $1::text OR UPPER(username) = UPPER($1::text))
         `, [String(id)]);
 
         if (!found.rows.length) {
@@ -1300,6 +1328,7 @@ async function activateFaculty(id, branchCode) {
             SELECT f.id, f.code, f.name, f.status, COALESCE(d.code, 'General') AS department
               FROM faculty f LEFT JOIN departments d ON d.id = f.department_id
              WHERE f.id::text = $1::text OR UPPER(f.code) = UPPER($1::text) OR UPPER(f.name) = UPPER($1::text)
+                OR f.id IN (SELECT faculty_id FROM users WHERE id::text = $1::text OR UPPER(username) = UPPER($1::text))
         `, [String(id)]);
 
         if (!found.rows.length) {
@@ -2230,9 +2259,19 @@ async function deleteActiveInvigilation(id, branchCode) {
  * Faculty Substitutions (Phase B7.5) & User Persistence
  * ====================================================================== */
 
-async function resolveFacultyDbId(clientOrDb, identifier, name = null) {
+async function resolveFacultyDbId(clientOrDb, identifier, name = null, department = null) {
     if (!identifier && !name) return null;
     const runner = clientOrDb || db;
+
+    let deptId = null;
+    if (department) {
+        if (typeof department === 'number' || /^\d+$/.test(String(department).trim())) {
+            deptId = parseInt(department, 10);
+        } else {
+            const dRes = await runner.query('SELECT id FROM departments WHERE UPPER(code) = UPPER($1)', [String(department).trim()]);
+            if (dRes.rows.length) deptId = dRes.rows[0].id;
+        }
+    }
 
     // 1. If numeric integer, check direct faculty.id
     if (typeof identifier === 'number' || (identifier && /^\d+$/.test(String(identifier).trim()))) {
@@ -2244,42 +2283,74 @@ async function resolveFacultyDbId(clientOrDb, identifier, name = null) {
     const lookupStr = String(identifier || name || '').trim();
     if (lookupStr && lookupStr !== '[object Object]') {
         // 2. Check faculty by code or name
-        const { rows } = await runner.query(
-            'SELECT id FROM faculty WHERE UPPER(code) = UPPER($1) OR UPPER(name) = UPPER($1) LIMIT 1',
-            [lookupStr]
-        );
-        if (rows.length) return rows[0].id;
+        if (deptId !== null) {
+            const { rows } = await runner.query(
+                'SELECT id FROM faculty WHERE (UPPER(code) = UPPER($1) OR UPPER(name) = UPPER($1)) AND (department_id = $2 OR department_id IS NULL) ORDER BY (department_id = $2) DESC LIMIT 1',
+                [lookupStr, deptId]
+            );
+            if (rows.length) return rows[0].id;
+        } else {
+            const { rows } = await runner.query(
+                'SELECT id FROM faculty WHERE UPPER(code) = UPPER($1) OR UPPER(name) = UPPER($1) LIMIT 1',
+                [lookupStr]
+            );
+            if (rows.length) return rows[0].id;
+        }
 
         // 3. Check users by username or name to find mapped faculty_id
-        const userRes = await runner.query(
-            'SELECT faculty_id FROM users WHERE (UPPER(username) = UPPER($1) OR UPPER(name) = UPPER($1)) AND faculty_id IS NOT NULL LIMIT 1',
-            [lookupStr]
-        );
-        if (userRes.rows.length && userRes.rows[0].faculty_id) return userRes.rows[0].faculty_id;
+        if (deptId !== null) {
+            const userRes = await runner.query(
+                'SELECT faculty_id FROM users WHERE (UPPER(username) = UPPER($1) OR UPPER(name) = UPPER($1)) AND (department_id = $2 OR department_id IS NULL) AND faculty_id IS NOT NULL ORDER BY (department_id = $2) DESC LIMIT 1',
+                [lookupStr, deptId]
+            );
+            if (userRes.rows.length && userRes.rows[0].faculty_id) return userRes.rows[0].faculty_id;
+        } else {
+            const userRes = await runner.query(
+                'SELECT faculty_id FROM users WHERE (UPPER(username) = UPPER($1) OR UPPER(name) = UPPER($1)) AND faculty_id IS NOT NULL LIMIT 1',
+                [lookupStr]
+            );
+            if (userRes.rows.length && userRes.rows[0].faculty_id) return userRes.rows[0].faculty_id;
+        }
     }
 
     if (name && String(name).trim() !== lookupStr && String(name).trim() !== '[object Object]') {
         const nStr = String(name).trim();
-        const { rows } = await runner.query(
-            'SELECT id FROM faculty WHERE UPPER(name) = UPPER($1) LIMIT 1',
-            [nStr]
-        );
-        if (rows.length) return rows[0].id;
+        if (deptId !== null) {
+            const { rows } = await runner.query(
+                'SELECT id FROM faculty WHERE UPPER(name) = UPPER($1) AND (department_id = $2 OR department_id IS NULL) ORDER BY (department_id = $2) DESC LIMIT 1',
+                [nStr, deptId]
+            );
+            if (rows.length) return rows[0].id;
 
-        const uRes = await runner.query(
-            'SELECT faculty_id FROM users WHERE (UPPER(username) = UPPER($1) OR UPPER(name) = UPPER($1)) AND faculty_id IS NOT NULL LIMIT 1',
-            [nStr]
-        );
-        if (uRes.rows.length && uRes.rows[0].faculty_id) return uRes.rows[0].faculty_id;
+            const uRes = await runner.query(
+                'SELECT faculty_id FROM users WHERE (UPPER(username) = UPPER($1) OR UPPER(name) = UPPER($1)) AND (department_id = $2 OR department_id IS NULL) AND faculty_id IS NOT NULL ORDER BY (department_id = $2) DESC LIMIT 1',
+                [nStr, deptId]
+            );
+            if (uRes.rows.length && uRes.rows[0].faculty_id) return uRes.rows[0].faculty_id;
+        } else {
+            const { rows } = await runner.query(
+                'SELECT id FROM faculty WHERE UPPER(name) = UPPER($1) LIMIT 1',
+                [nStr]
+            );
+            if (rows.length) return rows[0].id;
+
+            const uRes = await runner.query(
+                'SELECT faculty_id FROM users WHERE (UPPER(username) = UPPER($1) OR UPPER(name) = UPPER($1)) AND faculty_id IS NOT NULL LIMIT 1',
+                [nStr]
+            );
+            if (uRes.rows.length && uRes.rows[0].faculty_id) return uRes.rows[0].faculty_id;
+        }
     }
 
-    // 4. Try normalized name tokens against all faculty in db
+    // 4. Try normalized name tokens against faculty in db (scoped to department if known)
     try {
-        const allFac = await runner.query('SELECT id, name, code FROM faculty');
+        const facQuery = deptId !== null
+            ? await runner.query('SELECT id, name, code FROM faculty WHERE department_id = $1 OR department_id IS NULL', [deptId])
+            : await runner.query('SELECT id, name, code FROM faculty');
         const { nameTokensMatch } = require('../core/entityResolver');
         const target = lookupStr || String(name || '').trim();
         if (target && target !== '[object Object]') {
-            const matched = allFac.rows.find(f => (f.name && f.name !== '[object Object]' && nameTokensMatch(f.name, target)) || (f.code && nameTokensMatch(String(f.code), target)));
+            const matched = facQuery.rows.find(f => (f.name && f.name !== '[object Object]' && nameTokensMatch(f.name, target)) || (f.code && nameTokensMatch(String(f.code), target)));
             if (matched) return matched.id;
         }
     } catch (_) {}
@@ -2310,7 +2381,7 @@ async function ensureFacultyDbRecord(clientOrDb, identifierOrObj, maybeDept) {
         name = null;
     }
 
-    const existingId = await resolveFacultyDbId(runner, id || name, name);
+    const existingId = await resolveFacultyDbId(runner, id || name, name, department);
     if (existingId) return existingId;
 
     let deptId = null;
@@ -2332,6 +2403,10 @@ async function ensureFacultyDbRecord(clientOrDb, identifierOrObj, maybeDept) {
     let facCode = id ? String(id).trim() : null;
     if (!facCode || /^\d+$/.test(facCode)) {
         facCode = (deptCode + '_' + cleanName.replace(/[^A-Z0-9]/gi, '_').toUpperCase()).slice(0, 30);
+    }
+    const codeConflict = await runner.query('SELECT id FROM faculty WHERE UPPER(TRIM(code)) = UPPER(TRIM($1))', [facCode]);
+    if (codeConflict.rows.length > 0) {
+        facCode = `${facCode.slice(0, 24)}_${Date.now().toString().slice(-4)}`;
     }
 
     const ins = await runner.query(`
@@ -2538,7 +2613,7 @@ async function saveUser({ username, name, phone, role, departmentCode, passwordH
 
         let facId = null;
         if (facultyId) {
-            facId = await resolveFacultyDbId(client, facultyId, name);
+            facId = await resolveFacultyDbId(client, facultyId, name, departmentCode);
             if (!facId) {
                 facId = await ensureFacultyDbRecord(client, {
                     id: facultyId,
@@ -2675,12 +2750,14 @@ async function loadAllUsers() {
     const { rows } = await db.query(`
         SELECT u.id, u.username, u.name, u.phone, u.role, u.status, u.password_hash AS "passwordHash",
                u.created_at AS "createdAt",
-               d.code AS department, d.name AS "branchName",
+               COALESCE(d.code, d_fac.code, '') AS department,
+               COALESCE(d.name, d_fac.name, d.code, d_fac.code, '') AS "branchName",
                f.id AS "facultyId", f.name AS "facultyName", f.code AS "facultyCode",
                COALESCE((SELECT array_agg(subject) FROM faculty_subjects WHERE faculty_id = f.id), ARRAY[]::text[]) AS subjects
           FROM users u
           LEFT JOIN departments d ON d.id = u.department_id
           LEFT JOIN faculty f ON f.id = u.faculty_id
+          LEFT JOIN departments d_fac ON d_fac.id = f.department_id
          ORDER BY u.id ASC
     `);
     return rows;
@@ -2821,6 +2898,139 @@ async function saveFacultyPersonalSlot(facultyId, { day, period, subject, classN
     };
 }
 
+async function createHODDelegation({
+    hodUserId,
+    departmentId,
+    branchCode,
+    actingFacultyId,
+    actingUserId,
+    startDate,
+    endDate,
+    notes
+}) {
+    const { rows } = await db.query(`
+        INSERT INTO hod_delegations (
+            hod_user_id, department_id, branch_code, acting_faculty_id, acting_user_id, start_date, end_date, status, notes
+        )
+        VALUES ($1, $2, $3, $4, $5, $6::date, $7::date, 'ACTIVE', $8)
+        RETURNING id, hod_user_id AS "hodUserId", department_id AS "departmentId", branch_code AS "branchCode",
+                  acting_faculty_id AS "actingFacultyId", acting_user_id AS "actingUserId",
+                  start_date::text AS "startDate", end_date::text AS "endDate", status, notes,
+                  created_at AS "createdAt", updated_at AS "updatedAt"
+    `, [
+        hodUserId || null,
+        departmentId || null,
+        String(branchCode).trim().toUpperCase(),
+        actingFacultyId,
+        actingUserId || null,
+        startDate,
+        endDate,
+        notes || null
+    ]);
+    return rows[0];
+}
+
+async function listHODDelegations(branchCode) {
+    const normBranch = branchCode ? String(branchCode).trim().toUpperCase() : null;
+    let query = `
+        SELECT hd.id, hd.hod_user_id AS "hodUserId", hd.branch_code AS "branchCode",
+               hd.acting_faculty_id AS "actingFacultyId", hd.acting_user_id AS "actingUserId",
+               hd.start_date::text AS "startDate", hd.end_date::text AS "endDate", hd.status, hd.notes,
+               hd.created_at AS "createdAt", hd.updated_at AS "updatedAt",
+               f.name AS "actingFacultyName", f.code AS "actingFacultyCode", f.designation AS "actingFacultyDesignation",
+               u_hod.name AS "hodName", u_hod.username AS "hodUsername",
+               u_act.username AS "actingUsername"
+          FROM hod_delegations hd
+          JOIN faculty f ON f.id = hd.acting_faculty_id
+          LEFT JOIN users u_hod ON u_hod.id = hd.hod_user_id
+          LEFT JOIN users u_act ON u_act.id = hd.acting_user_id
+    `;
+    const params = [];
+    if (normBranch) {
+        query += ` WHERE UPPER(hd.branch_code) = $1`;
+        params.push(normBranch);
+    }
+    query += ` ORDER BY hd.created_at DESC, hd.id DESC`;
+    const { rows } = await db.query(query, params);
+    return rows;
+}
+
+async function getOverlappingHODDelegations(branchCode, startDate, endDate, excludeId = null) {
+    const normBranch = String(branchCode).trim().toUpperCase();
+    let query = `
+        SELECT hd.id, hd.branch_code AS "branchCode", hd.acting_faculty_id AS "actingFacultyId",
+               hd.start_date::text AS "startDate", hd.end_date::text AS "endDate", hd.status,
+               f.name AS "actingFacultyName"
+          FROM hod_delegations hd
+          JOIN faculty f ON f.id = hd.acting_faculty_id
+         WHERE UPPER(hd.branch_code) = $1
+           AND hd.status = 'ACTIVE'
+           AND hd.start_date <= $3::date
+           AND hd.end_date >= $2::date
+    `;
+    const params = [normBranch, startDate, endDate];
+    if (excludeId != null) {
+        query += ` AND hd.id != $4`;
+        params.push(excludeId);
+    }
+    const { rows } = await db.query(query, params);
+    return rows;
+}
+
+async function getActiveHODDelegations(branchCode, targetDate) {
+    const normBranch = String(branchCode).trim().toUpperCase();
+    const { rows } = await db.query(`
+        SELECT hd.id, hd.hod_user_id AS "hodUserId", hd.branch_code AS "branchCode",
+               hd.acting_faculty_id AS "actingFacultyId", hd.acting_user_id AS "actingUserId",
+               hd.start_date::text AS "startDate", hd.end_date::text AS "endDate", hd.status, hd.notes,
+               f.name AS "actingFacultyName", f.code AS "actingFacultyCode",
+               u_hod.name AS "hodName", u_hod.username AS "hodUsername",
+               u_act.username AS "actingUsername"
+          FROM hod_delegations hd
+          JOIN faculty f ON f.id = hd.acting_faculty_id
+          LEFT JOIN users u_hod ON u_hod.id = hd.hod_user_id
+          LEFT JOIN users u_act ON u_act.id = hd.acting_user_id
+         WHERE UPPER(hd.branch_code) = $1
+           AND hd.status = 'ACTIVE'
+           AND hd.start_date <= $2::date
+           AND hd.end_date >= $2::date
+    `, [normBranch, targetDate]);
+    return rows;
+}
+
+async function cancelHODDelegation(id, branchCode) {
+    const normBranch = branchCode ? String(branchCode).trim().toUpperCase() : null;
+    let query = `
+        UPDATE hod_delegations
+           SET status = 'CANCELLED', updated_at = now()
+         WHERE id = $1
+    `;
+    const params = [id];
+    if (normBranch) {
+        query += ` AND UPPER(branch_code) = $2`;
+        params.push(normBranch);
+    }
+    query += ` RETURNING id, branch_code AS "branchCode", status, updated_at AS "updatedAt"`;
+    const { rows } = await db.query(query, params);
+    return rows[0] || null;
+}
+
+async function getHODDelegationById(id) {
+    const { rows } = await db.query(`
+        SELECT hd.id, hd.hod_user_id AS "hodUserId", hd.branch_code AS "branchCode",
+               hd.acting_faculty_id AS "actingFacultyId", hd.acting_user_id AS "actingUserId",
+               hd.start_date::text AS "startDate", hd.end_date::text AS "endDate", hd.status, hd.notes,
+               hd.created_at AS "createdAt", hd.updated_at AS "updatedAt",
+               f.name AS "actingFacultyName", f.code AS "actingFacultyCode",
+               u_hod.name AS "hodName", u_hod.username AS "hodUsername"
+          FROM hod_delegations hd
+          JOIN faculty f ON f.id = hd.acting_faculty_id
+          LEFT JOIN users u_hod ON u_hod.id = hd.hod_user_id
+         WHERE hd.id = $1
+    `, [id]);
+    return rows[0] || null;
+}
+
 module.exports = {
     isEmpty, counts, loadSource,
     listEntries, getEntry, addEntry, updateEntry, deleteEntry, saveSlotEntry, replaceFacultyEntries,
@@ -2838,6 +3048,8 @@ module.exports = {
     createActiveInvigilation, listActiveInvigilation, deleteActiveInvigilation,
     createFacultySubstitution, getFacultySubstitutionById, updateFacultySubstitutionStatus,
     listFacultySubstitutions, hasAcceptedFacultySubstitution,
+    createHODDelegation, listHODDelegations, getOverlappingHODDelegations, getActiveHODDelegations,
+    cancelHODDelegation, getHODDelegationById,
     saveUser, updateUserProfile, loadAllUsers, loadAllDepartments,
     resolveFacultyDbId, ensureFacultyDbRecord,
     DAY_ORDER

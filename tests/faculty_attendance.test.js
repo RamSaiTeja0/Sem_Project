@@ -18,7 +18,11 @@
  * 14. Same-branch-first / other-branch-second availability ordering remains intact.
  * 15. Existing B6 functionality remains intact.
  * 16. Existing B7.1 registration workflow remains intact.
+ *
+ * DATABASE ISOLATION: This test is in-memory only.
  */
+process.env.DATABASE_URL = '';
+process.env.TEST_DATABASE_URL = '';
 const assert = require('assert');
 const http = require('http');
 const { app } = require('../server');

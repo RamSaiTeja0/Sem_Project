@@ -17,37 +17,116 @@ const db = require('../db/pool');
 const repository = require('../db/repository');
 const users = require('../data/users');
 const { getBranch, getRegisteredBranchCodes } = require('../data/departments');
+const delegations = require('../data/delegations');
 const facultyRequestsRouter = require('./facultyRequests');
 
 router.use('/faculty-requests', facultyRequestsRouter);
 
+async function buildPublicUser(session) {
+    if (!session) return null;
+    let dept = session.department || '';
+    let branchName = session.branchName || dept || '';
+    if (!dept && session.username) {
+        try {
+            const userInDb = await users.findByUsernameAsync(session.username);
+            if (userInDb && userInDb.department) {
+                dept = userInDb.department;
+                branchName = userInDb.branchName || dept;
+            }
+        } catch (_) {}
+    }
+    if (!dept && (session.role === 'hos' || session.role === 'coordinator' || session.role === 'admin')) {
+        try {
+            const br = getBranch();
+            if (br && br.code) {
+                dept = br.code;
+                branchName = br.name || dept;
+            }
+        } catch (_) {}
+    }
+    const base = {
+        id: session.id,
+        username: session.username,
+        name: session.name,
+        phone: session.phone || null,
+        role: session.role,
+        department: dept,
+        branchName: branchName,
+        subjects: Array.isArray(session.subjects) ? session.subjects : [],
+        facultyName: session.facultyName || (session.role === 'faculty' ? session.name : null),
+        facultyId: session.facultyId || null,
+        isActingHOD: false,
+        actingHOD: null
+    };
+
+    if (session.role === 'faculty') {
+        try {
+            const active = await delegations.getActiveDelegationForFaculty(session);
+            if (active) {
+                base.isActingHOD = true;
+                base.actingHOD = {
+                    delegationId: active.id,
+                    branch: active.branchCode,
+                    startDate: active.startDate,
+                    endDate: active.endDate,
+                    hodName: active.hodName,
+                    hodUsername: active.hodUsername
+                };
+            }
+        } catch (_) {}
+    }
+
+    return base;
+}
+
 function publicUser(session) {
     if (!session) return null;
+    let dept = session.department || '';
+    let branchName = session.branchName || dept || '';
+    if (!dept && (session.role === 'hos' || session.role === 'coordinator' || session.role === 'admin')) {
+        try {
+            const br = getBranch();
+            if (br && br.code) {
+                dept = br.code;
+                branchName = br.name || dept;
+            }
+        } catch (_) {}
+    }
     return {
         id: session.id,
         username: session.username,
         name: session.name,
         phone: session.phone || null,
         role: session.role,
-        department: session.department || '',
-        branchName: session.branchName || session.department || '',
+        department: dept,
+        branchName: branchName,
         subjects: Array.isArray(session.subjects) ? session.subjects : [],
         facultyName: session.facultyName || (session.role === 'faculty' ? session.name : null),
-        facultyId: session.facultyId || null
+        facultyId: session.facultyId || null,
+        isActingHOD: Boolean(session.isActingHOD),
+        actingHOD: session.actingHOD || null
     };
 }
 
-router.get('/session', (req, res) => {
+router.get('/session', async (req, res) => {
+    const user = await buildPublicUser(req.session);
     res.json({
         authenticated: Boolean(req.session),
         authRequired: config.authRequired,
-        user: publicUser(req.session)
+        user
     });
 });
 
-router.get('/status', (req, res) => {
+router.get('/status', async (req, res) => {
     const isAuth = Boolean(req.session);
     const isHosSession = isAuth && (req.session.role === 'hos' || req.session.role === 'coordinator');
+    let isActingHOD = false;
+    if (isAuth && req.session.role === 'faculty') {
+        try {
+            const active = await delegations.getActiveDelegationForFaculty(req.session);
+            isActingHOD = Boolean(active);
+        } catch (_) {}
+    }
     const branchCode = isAuth ? req.session.department : null;
     const branch = branchCode ? getBranch(branchCode) : (isAuth ? getBranch() : null);
 
@@ -55,7 +134,8 @@ router.get('/status', (req, res) => {
     // For unauthenticated public visitors, branch is empty so registration fields are never prefilled.
     res.json({
         authenticated: isAuth,
-        isHOS: isHosSession,
+        isHOS: isHosSession || isActingHOD,
+        isActingHOD,
         hasHOS: users.hasHOS(),
         allowHOSCreation: !isHosSession,
         branch: (branch && branch.configured) ? {
@@ -120,14 +200,15 @@ router.get('/accounts', async (req, res) => {
 router.post('/register', async (req, res) => {
     try {
         const user = await users.register(req.body || {}, req.session);
-        // If an already authenticated HOS is creating a faculty account, do not overwrite their session
-        const isHosCreating = req.session && (req.session.role === 'hos' || req.session.role === 'coordinator');
+        // If an already authenticated HOS or Acting HOD is creating a faculty account, do not overwrite their session
+        const isHosCreating = req.session && (req.session.role === 'hos' || req.session.role === 'coordinator' || await delegations.isAuthorizedHOS(req.session));
         if (!isHosCreating) {
             res.startSession(user);
         }
+        const pub = await buildPublicUser(user);
         res.status(201).json({
             authenticated: true,
-            user: publicUser(user)
+            user: pub
         });
     } catch (err) {
         res.status(err.status || 400).json({
@@ -158,7 +239,8 @@ router.post('/login', async (req, res) => {
 
         console.log(`[AUTH-DIAGNOSTIC] PID:${process.pid} POST /api/auth/login: user="${normUser}", role="${user.role}", dept="${user.department}", authResult=SUCCESS, status=200`);
         res.startSession(user);
-        res.json({ authenticated: true, user: publicUser(user) });
+        const pub = await buildPublicUser(user);
+        res.json({ authenticated: true, user: pub });
     } catch (err) {
         console.log(`[AUTH-DIAGNOSTIC] PID:${process.pid} POST /api/auth/login: user="${String(username).trim().toLowerCase()}", authResult=ERROR: ${err.message}, status=${err.status || 401}`);
         return res.status(err.status || 401).json({
@@ -173,7 +255,8 @@ router.get('/profile', async (req, res) => {
         return res.status(401).json({ error: 'Sign in to access your profile.', code: 'UNAUTHENTICATED' });
     }
     const profile = await users.findByUsernameAsync(req.session.username);
-    res.json({ profile: publicUser(profile || req.session) });
+    const pub = await buildPublicUser(profile || req.session);
+    res.json({ profile: pub });
 });
 
 router.put('/profile', async (req, res) => {

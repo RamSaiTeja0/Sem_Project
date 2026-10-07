@@ -11,7 +11,11 @@
  *  7. SECURITY: Unauthenticated requests to /api/faculty/timetable/slot are rejected (401).
  *  8. SECURITY: Faculty cannot spoof faculty_id in body/query to modify another faculty's timetable.
  *  9. SECURITY: Non-faculty / unauthenticated users cannot modify personal slots without valid session.
+ *
+ * DATABASE ISOLATION: This test is in-memory only.
  */
+process.env.DATABASE_URL = '';
+process.env.TEST_DATABASE_URL = '';
 const assert = require('assert');
 const path = require('path');
 const http = require('http');

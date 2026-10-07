@@ -29,7 +29,7 @@ CREATE TABLE IF NOT EXISTS rooms (
 CREATE TABLE IF NOT EXISTS faculty (
     id            SERIAL PRIMARY KEY,
     code          TEXT NOT NULL UNIQUE,
-    name          TEXT NOT NULL UNIQUE,
+    name          TEXT NOT NULL,
     department_id INTEGER REFERENCES departments(id) ON DELETE SET NULL,
     email         TEXT
 );
@@ -49,6 +49,29 @@ BEGIN
     IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'faculty_status_check') THEN
         ALTER TABLE faculty ADD CONSTRAINT faculty_status_check
             CHECK (status IN ('active', 'on_leave', 'inactive'));
+    END IF;
+END $$;
+
+-- Faculty name uniqueness is scoped to department/branch.
+-- Dropping the global faculty_name_key allows separate branches to have faculty with the same name.
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'faculty_name_key') THEN
+        ALTER TABLE faculty DROP CONSTRAINT faculty_name_key;
+    END IF;
+    IF EXISTS (SELECT 1 FROM pg_indexes WHERE indexname = 'faculty_name_key') THEN
+        DROP INDEX faculty_name_key;
+    END IF;
+END $$;
+
+CREATE UNIQUE INDEX IF NOT EXISTS faculty_dept_name_unique
+    ON faculty (department_id, LOWER(TRIM(name)))
+    WHERE department_id IS NOT NULL;
+
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_indexes WHERE indexname = 'faculty_null_dept_name_unique') THEN
+        DROP INDEX faculty_null_dept_name_unique;
     END IF;
 END $$;
 
@@ -514,4 +537,26 @@ CREATE TABLE IF NOT EXISTS faculty_personal_timetable (
 );
 
 CREATE INDEX IF NOT EXISTS faculty_personal_tt_fac_idx ON faculty_personal_timetable (faculty_id);
+
+-- Phase B9: HOD Delegations / Acting HOD (Temporary Date-Bounded Delegation)
+CREATE TABLE IF NOT EXISTS hod_delegations (
+    id                  SERIAL PRIMARY KEY,
+    hod_user_id         INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    department_id       INTEGER REFERENCES departments(id) ON DELETE CASCADE,
+    branch_code         TEXT NOT NULL,
+    acting_faculty_id   INTEGER NOT NULL REFERENCES faculty(id) ON DELETE CASCADE,
+    acting_user_id      INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    start_date          DATE NOT NULL,
+    end_date            DATE NOT NULL,
+    status              TEXT NOT NULL DEFAULT 'ACTIVE'
+                        CHECK (status IN ('ACTIVE', 'CANCELLED', 'EXPIRED')),
+    notes               TEXT,
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at          TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS hod_delegations_branch_idx ON hod_delegations (branch_code);
+CREATE INDEX IF NOT EXISTS hod_delegations_fac_idx ON hod_delegations (acting_faculty_id);
+CREATE INDEX IF NOT EXISTS hod_delegations_dates_idx ON hod_delegations (start_date, end_date);
+CREATE INDEX IF NOT EXISTS hod_delegations_status_idx ON hod_delegations (status);
 

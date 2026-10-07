@@ -15,7 +15,8 @@ const router = express.Router();
 const store = require('../data/store');
 const db = require('../db/pool');
 const repository = require('../db/repository');
-const { getBranch, getBranchSemesters } = require('../data/departments');
+const { getBranch, getBranchSemesters, normalizeDepartmentCode } = require('../data/departments');
+const { AUTHORITATIVE_PERIOD_TIMINGS } = require('../core/normalizer');
 
 async function getClassesList() {
     if (db.isConfigured() && store.usingDatabase) {
@@ -54,15 +55,18 @@ router.get('/meta', (req, res) => {
     });
 });
 
+const delegations = require('../data/delegations');
+
 router.get('/scopes', async (req, res) => {
     try {
-        const isHOS = req.session && (req.session.role === 'hos' || req.session.role === 'coordinator');
-        const sessionDept = req.session && req.session.department ? String(req.session.department).trim().toUpperCase() : null;
-        const queryDept = req.query.branch ? String(req.query.branch).trim().toUpperCase() : null;
+        const rawSessionDept = req.session && req.session.department ? String(req.session.department).trim() : null;
+        const sessionDept = rawSessionDept ? normalizeDepartmentCode(rawSessionDept) : null;
+        const rawQueryDept = req.query.branch ? String(req.query.branch).trim() : null;
+        const queryDept = rawQueryDept ? normalizeDepartmentCode(rawQueryDept) : null;
 
-        if (isHOS && queryDept && sessionDept && queryDept !== sessionDept) {
+        if (sessionDept && queryDept && queryDept !== sessionDept) {
             return res.status(403).json({
-                error: `Cross-branch timetable queries are not allowed. Current branch is ${sessionDept}.`,
+                error: `Cross-branch timetable queries are not allowed. Current branch is ${rawSessionDept || sessionDept}.`,
                 code: 'FORBIDDEN'
             });
         }
@@ -74,7 +78,7 @@ router.get('/scopes', async (req, res) => {
 
         const allClasses = await getClassesList();
         const branchClasses = allClasses.filter(c => {
-            const dept = String(c.department || c.branch || '').toUpperCase();
+            const dept = normalizeDepartmentCode(String(c.department || c.branch || ''));
             return !effectiveBranch || dept === effectiveBranch;
         });
 
@@ -250,15 +254,9 @@ router.get('/mine', async (req, res) => {
             });
         });
 
-        let personalTimings = meta.periodTimings;
-        if (!personalTimings || Object.keys(personalTimings).length === 0) {
-            try {
-                const demo = require('../data/demoTimetable');
-                if (demo && demo.meta && demo.meta.periodTimings) {
-                    personalTimings = demo.meta.periodTimings;
-                }
-            } catch (_) {}
-        }
+        let personalTimings = (meta && meta.periodTimings && Object.keys(meta.periodTimings).length > 0)
+            ? meta.periodTimings
+            : AUTHORITATIVE_PERIOD_TIMINGS;
 
         return res.json({
             view: 'faculty',
@@ -268,7 +266,7 @@ router.get('/mine', async (req, res) => {
             days,
             periods,
             cells,
-            periodTimings: personalTimings || {},
+            periodTimings: personalTimings,
             isCustomPersonal: true
         });
     }
@@ -285,20 +283,14 @@ router.get('/mine', async (req, res) => {
         }));
         grid = { view: 'faculty', name: facultyName, days, periods, cells };
     }
-    let personalTimings = meta.periodTimings;
-    if (!personalTimings || Object.keys(personalTimings).length === 0) {
-        try {
-            const demo = require('../data/demoTimetable');
-            if (demo && demo.meta && demo.meta.periodTimings) {
-                personalTimings = demo.meta.periodTimings;
-            }
-        } catch (_) {}
-    }
+    let personalTimings = (meta && meta.periodTimings && Object.keys(meta.periodTimings).length > 0)
+        ? meta.periodTimings
+        : AUTHORITATIVE_PERIOD_TIMINGS;
     res.json({
         ...grid,
         faculty: facultyName,
         branch: req.session.department,
-        periodTimings: personalTimings || {},
+        periodTimings: personalTimings,
         isCustomPersonal: false
     });
 });
@@ -413,8 +405,9 @@ router.get('/', async (req, res) => {
         }
     }
 
+    const allClasses = await getClassesList();
     if (!targetClassName && !requestedSemester && !requestedSection) {
-        const branchClasses = ((store.source && store.source.classes) || []).filter(c => {
+        const branchClasses = allClasses.filter(c => {
             const dept = String(c.department || c.branch || '').toUpperCase();
             return !effectiveBranch || dept === effectiveBranch;
         }).map(c => c.code || c.class);
@@ -422,7 +415,7 @@ router.get('/', async (req, res) => {
         const activeClass = branchClasses.find(c => {
             const g = engine.getClassGrid(c);
             return g && Array.isArray(g.cells) && g.cells.some(cell => cell.status !== 'free' && (cell.subject || cell.faculty));
-        });
+        }) || branchClasses[0];
         if (activeClass) {
             targetClassName = activeClass;
         }
@@ -430,33 +423,58 @@ router.get('/', async (req, res) => {
 
     if (targetClassName) {
         const grid = engine.getClassGrid(targetClassName);
+        const targetClassObj = allClasses.find(c => (c.code || c.class || '').toUpperCase() === targetClassName.toUpperCase());
+        const classTimings = (grid && grid.periodTimings && Object.keys(grid.periodTimings).length > 0)
+            ? grid.periodTimings
+            : ((meta && meta.periodTimings && Object.keys(meta.periodTimings).length > 0)
+                ? meta.periodTimings
+                : AUTHORITATIVE_PERIOD_TIMINGS);
+
         return res.json({
             ...grid,
-            periodTimings: meta.periodTimings,
+            periodTimings: classTimings,
             classes: meta.classes,
             primaryClass: targetClassName,
             scope: {
                 branch: effectiveBranch,
-                academicYear: requestedYear,
-                semester: requestedSemester,
-                section: requestedSection,
-                classCode: targetClassName
+                academicYear: requestedYear || (targetClassObj && targetClassObj.academicYear) || (store.source && store.source.academicYear) || getBranch(effectiveBranch).academicYear || '2026-27',
+                semester: requestedSemester || (targetClassObj && targetClassObj.semester) || null,
+                section: requestedSection || (targetClassObj && targetClassObj.section) || null,
+                classCode: targetClassName,
+                className: (targetClassObj && targetClassObj.name) || targetClassName
             }
         });
     }
 
     // Default: primary class
+    const targetClassObj = allClasses.find(c => (c.code || c.class || '').toUpperCase() === (meta.primaryClass || '').toUpperCase());
+    const defaultTimings = (meta && meta.periodTimings && Object.keys(meta.periodTimings).length > 0)
+        ? meta.periodTimings
+        : AUTHORITATIVE_PERIOD_TIMINGS;
     res.json({
         ...engine.getClassGrid(),
-        periodTimings: meta.periodTimings,
+        periodTimings: defaultTimings,
         classes: meta.classes,
-        primaryClass: meta.primaryClass
+        primaryClass: meta.primaryClass,
+        scope: {
+            branch: effectiveBranch,
+            academicYear: (targetClassObj && targetClassObj.academicYear) || (store.source && store.source.academicYear) || getBranch(effectiveBranch).academicYear || '2026-27',
+            semester: (targetClassObj && targetClassObj.semester) || null,
+            section: (targetClassObj && targetClassObj.section) || null,
+            classCode: meta.primaryClass,
+            className: (targetClassObj && targetClassObj.name) || meta.primaryClass
+        }
     });
 });
 
 router.post('/clear', async (req, res) => {
     try {
-        if (!req.session || (req.session.role !== 'hos' && req.session.role !== 'coordinator')) {
+        const isAuthorizedHOS = req.session && (
+            req.session.role === 'hos' ||
+            req.session.role === 'coordinator' ||
+            await delegations.isAuthorizedHOS(req.session)
+        );
+        if (!isAuthorizedHOS) {
             return res.status(403).json({
                 error: 'Only Head of Department (HOD) can clear timetable entries.',
                 code: 'FORBIDDEN'

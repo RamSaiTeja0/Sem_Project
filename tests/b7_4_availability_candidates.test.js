@@ -118,15 +118,17 @@ async function run() {
         facultyRequests.resetForTesting();
 
         console.log('[Setup] Registering HOS and Faculty accounts for CME, EEE, and testing branches');
+        const tag = Date.now();
+        const pfx = String(tag).slice(-6);
 
         // Register CME HOS
         const hosCmeRes = await call('POST', '/api/auth/register', {
             role: 'hos',
             name: 'CME Head',
-            phone: '9876543210',
+            phone: `987${pfx}0`,
             branchName: 'Computer Engineering',
             branchCode: 'CME',
-            username: 'cme_hos_b74',
+            username: `cme_hos_${tag}`,
             password: 'TecSub_123'
         });
         assert.strictEqual(hosCmeRes.status, 201, 'CME HOS registration must succeed');
@@ -136,10 +138,10 @@ async function run() {
         const hosEeeRes = await call('POST', '/api/auth/register', {
             role: 'hos',
             name: 'EEE Head',
-            phone: '9876543211',
+            phone: `987${pfx}1`,
             branchName: 'Electrical Engineering',
             branchCode: 'EEE',
-            username: 'eee_hos_b74',
+            username: `eee_hos_${tag}`,
             password: 'TecSub_123'
         });
         assert.strictEqual(hosEeeRes.status, 201, 'EEE HOS registration must succeed');
@@ -148,8 +150,8 @@ async function run() {
         // Create Faculty in CME: Ravi, Kumar, Suresh, Ramesh, Ghost
         const cmeFac1 = await call('POST', '/api/auth/register', {
             name: 'Dr. Ravi CME',
-            phone: '9123456780',
-            username: 'ravi.cme',
+            phone: `912${pfx}0`,
+            username: `ravi_cme_${tag}`,
             password: 'TecSub_123',
             role: 'faculty',
             designation: 'Professor',
@@ -160,8 +162,8 @@ async function run() {
 
         const cmeFac2 = await call('POST', '/api/auth/register', {
             name: 'Prof. Kumar CME',
-            phone: '9123456781',
-            username: 'kumar.cme',
+            phone: `912${pfx}1`,
+            username: `kumar_cme_${tag}`,
             password: 'TecSub_123',
             role: 'faculty',
             designation: 'Associate Professor',
@@ -172,8 +174,8 @@ async function run() {
 
         const cmeFac3 = await call('POST', '/api/auth/register', {
             name: 'Sri Suresh CME',
-            phone: '9123456782',
-            username: 'suresh.cme',
+            phone: `912${pfx}2`,
+            username: `suresh_cme_${tag}`,
             password: 'TecSub_123',
             role: 'faculty',
             designation: 'Assistant Professor',
@@ -184,8 +186,8 @@ async function run() {
 
         const cmeFac4 = await call('POST', '/api/auth/register', {
             name: 'Ramesh CME',
-            phone: '9123456784',
-            username: 'ramesh.cme',
+            phone: `912${pfx}3`,
+            username: `ramesh_cme_${tag}`,
             password: 'TecSub_123',
             role: 'faculty',
             designation: 'Lecturer',
@@ -196,8 +198,8 @@ async function run() {
 
         const cmeFacGhost = await call('POST', '/api/auth/register', {
             name: 'Ghost CME',
-            phone: '9123456789',
-            username: 'ghost.cme',
+            phone: `912${pfx}4`,
+            username: `ghost_cme_${tag}`,
             password: 'TecSub_123',
             role: 'faculty',
             designation: 'Adhoc',
@@ -213,8 +215,8 @@ async function run() {
         // Create Faculty in EEE: Anil
         const eeeFac1 = await call('POST', '/api/auth/register', {
             name: 'Anil EEE',
-            phone: '9123456783',
-            username: 'anil.eee',
+            phone: `912${pfx}5`,
+            username: `anil_eee_${tag}`,
             password: 'TecSub_123',
             role: 'faculty',
             designation: 'Professor',
@@ -225,7 +227,7 @@ async function run() {
 
         // Sign in Ravi (Faculty role) to test security
         const raviLogin = await call('POST', '/api/auth/login', {
-            username: 'ravi.cme',
+            username: `ravi_cme_${tag}`,
             password: 'TecSub_123'
         });
         assert.strictEqual(raviLogin.status, 200);

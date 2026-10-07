@@ -145,6 +145,17 @@ async function runRegressionTests() {
         const classNameA = `${branchA}-4-A`;
         const facNameA = `Dr. Professor A ${rand}`;
 
+        // Create faculty account for facNameA so it has an active login account
+        await call('POST', '/api/auth/register', {
+            role: 'faculty',
+            name: facNameA,
+            username: `fac_a_${rand}`,
+            password: 'TecSub_123',
+            phone: '9123456782',
+            designation: 'Professor',
+            subjects: ['Advanced OS']
+        }, cookieA);
+
         const subj1Name = `Advanced OS ${rand}`;
         const subj2Name = `Cloud Infra ${rand}`;
         const subj3Name = `OS Lab ${rand}`;

@@ -40,6 +40,9 @@ const B2_1_SAMPLE_SCHEMA = {
             short_name: "ABBREVIATION_OR_NULL"
         }
     ], // dynamically extracted from subject/course legend table if visible; otherwise []
+    faculty_subject_mapping: {
+        "Subject Name": "Faculty Name or Code"
+    }, // dynamically extracted if a subject-to-faculty mapping table is visible; otherwise null or {}
     entries: [
         {
             day: "Monday",
@@ -97,19 +100,24 @@ CRITICAL RULES & GENERAL EXTRACTION INSTRUCTIONS:
    - PERIODS: Inspect the column/period headers and extract ONLY the period numbers actually present (e.g. [1..6], [1..7], [1..8], etc.). Do NOT assume a fixed period count.
    - PERIOD TIMINGS: If period headers contain visible clock times (e.g. '08:00 - 08:45', '10:30-11:15'), map period strings to objects with "start" and "end" in "HH:MM" 24h format. If no clock times are visible, set "period_timings": null.
 
-3. DYNAMIC FACULTY & SUBJECT LEGENDS:
+3. DYNAMIC FACULTY & SUBJECT LEGENDS & MAPPINGS:
    - If the document contains a faculty/staff legend or list (mapping initials/codes to full names/designations):
      * Extract every entry into the "faculty_legend" array: [{ "code": "...", "name": "...", "designation": "..." or null, "department": "..." or null }].
      * If no faculty legend is present, return "faculty_legend": [].
    - If the document contains a subject/course legend or list (mapping short names/codes to full subject titles):
      * Extract every entry into the "subject_legend" array: [{ "code": "..." or null, "name": "...", "short_name": "..." or null }].
      * If no subject legend is present, return "subject_legend": [].
+   - If the document contains a Subject-to-Faculty mapping table (mapping subject name/code to instructor/faculty name/code):
+     * Extract into "faculty_subject_mapping": { "Subject Name": "Faculty Code/Name" }.
+     * Ensure "faculty_legend" contains the mapped faculty entries.
 
 4. GRID CELL & LEGEND CROSS-REFERENCING:
-   - Timetable grid cells often use abbreviations or short codes.
-   - When abbreviations are used in grid cells:
+   - When timetable cells contain both a subject and an assigned faculty (e.g. "Engineering Mathematics-I\\nEEE-F1" or "Engineering Mathematics-I EEE-F1" or "Physics Lab EEE-F4"):
+     * Extract the subject title into "subject_name" (e.g. "Engineering Mathematics-I").
+     * Extract the faculty name/code into "faculty_name" (e.g. "EEE-F1").
+   - Timetable grid cells often use abbreviations or short codes:
      * Cross-reference with the extracted "subject_legend" to resolve the full "subject_name" and "subject_code".
-     * Cross-reference with the extracted "faculty_legend" to resolve the full "faculty_name" and "faculty_code".
+     * Cross-reference with the extracted "faculty_legend" or "faculty_subject_mapping" to resolve the full "faculty_name" and "faculty_code".
    - In "raw_cell_text", ALWAYS preserve the exact verbatim text as printed inside the timetable grid cell.
    - If an abbreviation is not found in any legend, do NOT invent a name; record the visible cell text verbatim.
 
@@ -206,12 +214,16 @@ CRITICAL VERIFICATION & STRUCTURE PRESERVATION INSTRUCTIONS:
    - "periods": Must contain ONLY the period numbers actually present in the source timetable.
    - "period_timings": Map period numbers to visible clock times ("start", "end" in 24h "HH:MM") if printed in the timetable headers; otherwise set to null.
 
-3. DYNAMIC FACULTY & SUBJECT LEGEND RESOLUTION:
-   - Carefully inspect any staff/faculty legend and subject/course legend visible in the image (at the bottom, side, or top).
+3. DYNAMIC FACULTY & SUBJECT LEGEND & MAPPING RESOLUTION:
+   - Carefully inspect any staff/faculty legend, subject/course legend, and subject-to-faculty mapping table visible in the image (at the bottom, side, or top).
    - Update "faculty_legend" and "subject_legend" arrays with all items visible in the document.
-   - RESOLVE GRID ABBREVIATIONS:
+   - If a subject-to-faculty mapping table is visible, populate "faculty_subject_mapping": { "Subject Name": "Faculty Code/Name" }.
+   - RESOLVE GRID ABBREVIATIONS & COMBINED CELLS:
+     * When timetable cells contain both a subject and an assigned faculty (e.g. "Engineering Mathematics-I\nEEE-F1" or "Engineering Mathematics-I EEE-F1" or "Physics Lab EEE-F4"):
+       - Resolve "subject_name" to the subject title (e.g. "Engineering Mathematics-I").
+       - Resolve "faculty_name" to the assigned faculty name/code (e.g. "EEE-F1").
      * If a timetable cell contains a subject abbreviation (e.g. "PE", "EM-II", "GME", "ED", "EI&E", "PS-I", "CS LAB") and the image contains a subject legend mapping it to a full title, resolve "subject_name" to the full title and "subject_code" to the official course code.
-     * If a timetable cell has a missing or abbreviated faculty name (e.g. cell has only subject "PE" or abbreviation "DSK"), cross-reference the subject or initials with the visible faculty/staff legend to resolve the full "faculty_name" and "faculty_code".
+     * If a timetable cell has a missing or abbreviated faculty name (e.g. cell has only subject "PE" or abbreviation "DSK"), cross-reference the subject or initials with the visible faculty/staff legend or subject-faculty mapping to resolve the full "faculty_name" and "faculty_code".
      * NEVER hardcode any specific faculty name or subject code; resolve strictly from the visual evidence in the image and legends.
 
 4. MULTI-PERIOD SESSIONS & MERGED CELLS (SPANS):

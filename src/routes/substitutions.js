@@ -59,10 +59,12 @@ function requireFaculty(req, res, next) {
     next();
 }
 
+const delegations = require('../data/delegations');
+
 /**
- * HOS-only authorization guard (read-only branch view).
+ * HOS / Acting HOD authorization guard (read-only branch view).
  */
-function requireHOS(req, res, next) {
+async function requireHOS(req, res, next) {
     if (!req.session || !req.session.username) {
         return res.status(401).json({
             error: 'Authentication required. Please sign in.',
@@ -70,21 +72,30 @@ function requireHOS(req, res, next) {
         });
     }
 
+    if (['hos', 'coordinator', 'admin'].includes(req.session.role)) {
+        return next();
+    }
+
     if (req.session.role === 'faculty') {
+        try {
+            const activeDelegation = await delegations.getActiveDelegationForFaculty(req.session, req.query.date || null);
+            if (activeDelegation) {
+                req.isActingHOD = true;
+                req.activeDelegation = activeDelegation;
+                return next();
+            }
+        } catch (_) {}
+
         return res.status(403).json({
             error: 'Faculty members cannot access the HOD substitution overview. Use /api/substitutions/my or /incoming.',
             code: 'FORBIDDEN'
         });
     }
 
-    if (!['hos', 'coordinator', 'admin'].includes(req.session.role)) {
-        return res.status(403).json({
-            error: 'This action requires Head of Department (HOD) or Administrator role.',
-            code: 'FORBIDDEN'
-        });
-    }
-
-    next();
+    return res.status(403).json({
+        error: 'This action requires Head of Department (HOD) or Administrator role.',
+        code: 'FORBIDDEN'
+    });
 }
 
 /**

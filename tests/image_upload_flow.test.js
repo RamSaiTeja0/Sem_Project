@@ -358,7 +358,8 @@ async function runAllTests() {
 
         const mock = createMockTransport(dynamic5Day4PeriodContract);
         const result = await importer.preview(Buffer.from('\xFF\xD8 fake'), '5day_4period.jpeg', {
-            geminiTransport: mock
+            geminiTransport: mock,
+            departmentCode: 'CIVIL'
         });
 
         assert.deepStrictEqual(result.meta.days, ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]);

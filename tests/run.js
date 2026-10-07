@@ -24,8 +24,13 @@ const suites = [
     'faculty_my_timetable_upload.test.js',
     'faculty_my_timetable_edit.test.js',
     'faculty_management.test.js',
+    'faculty_branch_scoped_uniqueness.test.js',
+    'master_timetable_faculty_resolution_and_stuck_state.test.js',
+    'real_pipeline_subject_faculty_resolution.test.js',
     'dynamic_timetable.test.js',
     'cross_branch_availability.test.js',
+    'faculty_availability_branch_timetable.test.js',
+    'faculty_availability_scope_ui.test.js',
     'faculty_registration_requests.test.js',
     'faculty_attendance.test.js',
     'invigilation.test.js',
@@ -62,12 +67,19 @@ const suites = [
     'hod_invigilation_dropdown.test.js',
     'branch_isolation_invigilation.test.js',
     'hod_branch_authorization_regression.test.js',
+    'hod_delegation.test.js',
+    'unresolved_subject_registration_flow.test.js',
+    'empty_faculty_startup_regression.test.js',
+    'branch_alias_normalization.test.js',
+    'fast_branding_ui.test.js',
+    'swipe_gesture_navigation.test.js',
     'live_verification.js'
 ];
 let failures = 0;
 const failedSuites = [];
 
 const dbSuites = new Set([
+    'branch_alias_normalization.test.js',
     'hod_branch_authorization_regression.test.js',
     'auth_full_lifecycle_regression.test.js',
     'faculty_account_management.test.js',
@@ -82,7 +94,9 @@ const dbSuites = new Set([
     'hod_only_master_timetable_rbac.test.js',
     'timetable_workflow_complete.test.js',
     'hod_master_timetable_upload_flow.test.js',
-    'faculty_timetable_extraction.test.js'
+    'faculty_timetable_extraction.test.js',
+    'unresolved_subject_registration_flow.test.js',
+    'empty_faculty_startup_regression.test.js'
 ]);
 
 async function main() {

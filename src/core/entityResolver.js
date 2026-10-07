@@ -16,6 +16,7 @@
 
 const db = require('../db/pool');
 const store = require('../data/store');
+const { normalizeDepartmentCode } = require('../data/departments');
 
 const STANDARD_ACTIVITIES = new Set([
     'TPC', 'LIBRARY', 'SPORTS', 'GAMES', 'MENTORING', 'PLACEMENT', 'TRAINING',
@@ -133,28 +134,32 @@ function normalizeClass(str) {
  * Retrieve current branch catalog records from PostgreSQL or in-memory store.
  */
 async function fetchBranchCatalog(departmentCode, options = {}) {
-    const dept = String(departmentCode || '').toUpperCase();
+    const dept = normalizeDepartmentCode(departmentCode);
 
-    if (db.isConfigured() && (store.usingDatabase || options.useDatabase)) {
+    if (db.isConfigured() && (options.useDatabase || (store.usingDatabase && options.useDatabase !== false))) {
         try {
             // Find department ID
-            const deptRes = await db.query('SELECT id, code, name FROM departments WHERE UPPER(code) = $1', [dept]);
+            const deptRes = dept ? await db.query('SELECT id, code, name FROM departments WHERE UPPER(code) = $1', [dept]) : { rows: [] };
             const deptId = deptRes.rows.length > 0 ? deptRes.rows[0].id : null;
+            const filterDeptId = dept ? (deptId !== null ? deptId : -1) : null;
 
             const [classRows, subjectRows, facultyRows, roomRows] = await Promise.all([
                 db.query(`SELECT id, code, semester, section, academic_year AS "academicYear", department_id
                             FROM classes
-                           WHERE department_id = $1 OR department_id IS NULL OR $1 IS NULL`, [deptId]),
+                           WHERE ($1::int IS NULL) OR (department_id = $1 OR department_id IS NULL)
+                           ORDER BY (department_id = $1) DESC, id ASC`, [filterDeptId]),
                 db.query(`SELECT id, code, name, subject_type AS "type", department_id
                             FROM subjects
-                           WHERE department_id = $1 OR department_id IS NULL OR $1 IS NULL
-                           ORDER BY (department_id = $1) DESC, id ASC`, [deptId]),
+                           WHERE ($1::int IS NULL) OR (department_id = $1 OR department_id IS NULL)
+                           ORDER BY (department_id = $1) DESC, id ASC`, [filterDeptId]),
                 db.query(`SELECT f.id, f.code, f.name, f.designation, f.status, f.department_id,
+                                 COALESCE((SELECT array_agg(subject) FROM faculty_subjects WHERE faculty_id = f.id), ARRAY[]::text[]) AS subjects,
                                  (u.id IS NOT NULL) AS "hasUserAccount"
                             FROM faculty f
                             LEFT JOIN users u ON (u.faculty_id = f.id OR UPPER(u.username) = UPPER(f.code) OR UPPER(u.name) = UPPER(f.name))
-                           WHERE f.status <> 'inactive' AND (f.department_id = $1 OR f.department_id IS NULL OR $1 IS NULL)
-                           ORDER BY (f.department_id = $1) DESC, f.id ASC`, [deptId]),
+                           WHERE f.status <> 'inactive' 
+                             AND (($1::int IS NULL) OR (f.department_id = $1 OR f.department_id IS NULL))
+                           ORDER BY (f.department_id = $1) DESC, f.id ASC`, [filterDeptId]),
                 db.query(`SELECT id, code, name, room_type AS "type" FROM rooms`)
             ]);
 
@@ -173,7 +178,7 @@ async function fetchBranchCatalog(departmentCode, options = {}) {
     const source = store.source || {};
     const users = source.users || [];
     const classes = (source.classes || [])
-        .filter(c => !c.department || c.department.toUpperCase() === dept)
+        .filter(c => !dept || !c.department || c.department.toUpperCase() === dept)
         .map((c, idx) => ({
             id: idx + 1,
             code: c.class || c.code || c.name,
@@ -182,6 +187,7 @@ async function fetchBranchCatalog(departmentCode, options = {}) {
         }));
 
     const subjects = (source.subjects || [])
+        .filter(s => !dept || !s.department || s.department.toUpperCase() === dept)
         .map((s, idx) => ({
             id: idx + 1,
             code: s.code || null,
@@ -190,10 +196,12 @@ async function fetchBranchCatalog(departmentCode, options = {}) {
         }));
 
     const faculty = (source.faculty || [])
+        .filter(f => !dept || !f.department || f.department.toUpperCase() === dept)
         .map((f, idx) => ({
             id: f.id || (idx + 1),
-            code: f.id || f.code,
+            code: f.code || f.id || f.name,
             name: f.name,
+            subjects: Array.isArray(f.subjects) ? f.subjects : [],
             status: f.status || 'active',
             hasUserAccount: users.some(u => u.faculty_id === f.id || (u.name && u.name.toUpperCase() === f.name.toUpperCase()) || (u.username && u.username.toUpperCase() === String(f.code || f.name).toUpperCase()))
         }));
@@ -212,11 +220,11 @@ async function fetchBranchCatalog(departmentCode, options = {}) {
  * as a catalog reference (WITHOUT creating any user login accounts or credentials).
  */
 async function registerFacultyCatalogReference(facultyText, departmentCode, catalog, options = {}) {
-    const dept = String(departmentCode || 'General').toUpperCase();
+    const dept = normalizeDepartmentCode(departmentCode) || 'General';
     const cleanName = String(facultyText).trim();
     if (!cleanName) return null;
 
-    if (db.isConfigured() && (store.usingDatabase || options.useDatabase)) {
+    if (db.isConfigured() && (options.useDatabase || (store.usingDatabase && options.useDatabase !== false))) {
         let deptRes = await db.query('SELECT id FROM departments WHERE UPPER(code) = UPPER($1)', [dept]);
         let deptId = deptRes.rows.length > 0 ? deptRes.rows[0].id : null;
         if (!deptId) {
@@ -228,8 +236,8 @@ async function registerFacultyCatalogReference(facultyText, departmentCode, cata
 
         const code = (dept + '_' + cleanName.replace(/[^A-Z0-9]/gi, '_').toUpperCase()).slice(0, 30);
         const existing = await db.query(
-            'SELECT id, code, name, designation, status, department_id, false AS "hasUserAccount" FROM faculty WHERE UPPER(name) = UPPER($1) OR UPPER(code) = UPPER($2) LIMIT 1',
-            [cleanName, code]
+            'SELECT id, code, name, designation, status, department_id, false AS "hasUserAccount" FROM faculty WHERE (UPPER(name) = UPPER($1) OR UPPER(code) = UPPER($2)) AND (department_id = $3 OR department_id IS NULL) ORDER BY (department_id = $3) DESC LIMIT 1',
+            [cleanName, code, deptId]
         );
         if (existing.rows.length > 0) {
             if (catalog && Array.isArray(catalog.faculty) && !catalog.faculty.some(f => f.id === existing.rows[0].id)) {
@@ -238,12 +246,18 @@ async function registerFacultyCatalogReference(facultyText, departmentCode, cata
             return existing.rows[0];
         }
 
+        let finalCode = code;
+        const codeConflict = await db.query('SELECT id FROM faculty WHERE UPPER(TRIM(code)) = UPPER(TRIM($1))', [finalCode]);
+        if (codeConflict.rows.length > 0) {
+            finalCode = `${finalCode.slice(0, 24)}_${Date.now().toString().slice(-4)}`;
+        }
+
         const res = await db.query(
             `INSERT INTO faculty (code, name, department_id, designation, status, max_weekly_periods)
              VALUES ($1, $2, $3, 'Faculty', 'active', 28)
              ON CONFLICT (code) DO UPDATE SET name = EXCLUDED.name, department_id = COALESCE(faculty.department_id, EXCLUDED.department_id)
              RETURNING id, code, name, designation, status, department_id, false AS "hasUserAccount"`,
-            [code, cleanName, deptId]
+            [finalCode, cleanName, deptId]
         );
         const newRecord = res.rows[0];
         if (catalog && Array.isArray(catalog.faculty)) {
@@ -255,7 +269,7 @@ async function registerFacultyCatalogReference(facultyText, departmentCode, cata
     // In-memory catalog
     const source = store.source || {};
     if (!source.faculty) source.faculty = [];
-    let existingMem = source.faculty.find(f => f.name && f.name.toUpperCase() === cleanName.toUpperCase());
+    let existingMem = source.faculty.find(f => f.name && f.name.toUpperCase() === cleanName.toUpperCase() && (!f.department || f.department.toUpperCase() === dept));
     if (existingMem) {
         return existingMem;
     }
@@ -476,7 +490,115 @@ async function resolveContract(contract, departmentCode, mappings = {}, options 
         }
 
         // --- Faculty Resolution ---
-        const facultyText = (entry.faculty_name || '').trim();
+        let facultyText = (entry.faculty_name || entry.faculty || entry.faculty_code || '').trim();
+
+        // If faculty is missing for a non-activity subject, check deterministic mappings within this branch
+        if (!facultyText && !isActivity && subjectText) {
+            // 1. Check contract-level mapping table
+            const contractMap = contract.faculty_subject_mapping || contract.subject_faculty_mapping || contract.faculty_subjects;
+            if (contractMap && typeof contractMap === 'object') {
+                const mapped = contractMap[subjectText] || (subjectCode && contractMap[subjectCode]);
+                if (mapped && typeof mapped === 'string') facultyText = mapped.trim();
+                if (!facultyText) {
+                    for (const [sKey, fVal] of Object.entries(contractMap)) {
+                        if (subjectTokensMatch(sKey, subjectText) && typeof fVal === 'string') {
+                            facultyText = fVal.trim();
+                            break;
+                        }
+                    }
+                }
+            }
+
+            // 2. Check contract subject_legend
+            if (!facultyText && subjectLegends.length > 0) {
+                const sLeg = subjectLegends.find(l =>
+                    (l.name && (l.name.toUpperCase() === subjectText.toUpperCase() || subjectTokensMatch(l.name, subjectText))) ||
+                    (l.short_name && (l.short_name.toUpperCase() === subjectText.toUpperCase() || subjectTokensMatch(l.short_name, subjectText))) ||
+                    (subjectCode && l.code && l.code.toUpperCase() === subjectCode.toUpperCase())
+                );
+                if (sLeg) {
+                    if (sLeg.faculty_name || sLeg.faculty || sLeg.faculty_code || sLeg.faculty_incharge || sLeg.instructor || sLeg.staff) {
+                        facultyText = String(sLeg.faculty_name || sLeg.faculty || sLeg.faculty_code || sLeg.faculty_incharge || sLeg.instructor || sLeg.staff).trim();
+                    } else if (sLeg.short_name) {
+                        const sn = String(sLeg.short_name).trim();
+                        if (
+                            /^[A-Z]{2,5}[-_][A-Z0-9]+$/i.test(sn) ||
+                            /^F\d+$/i.test(sn) ||
+                            /^(DR|PROF|SRI|MR|MRS|MS)\b/i.test(sn) ||
+                            (catalog && Array.isArray(catalog.faculty) && catalog.faculty.some(f => (f.code && f.code.toUpperCase() === sn.toUpperCase()) || (f.name && f.name.toUpperCase() === sn.toUpperCase()))) ||
+                            (entry.raw_cell_text && entry.raw_cell_text.toUpperCase().includes(sn.toUpperCase())) ||
+                            (sLeg.code === null && sLeg.name && sLeg.name.toUpperCase() !== sn.toUpperCase())
+                        ) {
+                            facultyText = sn;
+                        }
+                    }
+                }
+            }
+
+            // 3. Check entry raw_cell_text
+            if (!facultyText && entry.raw_cell_text) {
+                const raw = String(entry.raw_cell_text).trim();
+                const lines = raw.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+                if (lines.length >= 2) {
+                    facultyText = lines[lines.length - 1];
+                } else if (subjectText && raw.toUpperCase().startsWith(subjectText.toUpperCase())) {
+                    const remainder = raw.slice(subjectText.length).trim();
+                    if (remainder) {
+                        facultyText = remainder;
+                    }
+                } else if (subjectCode && raw.toUpperCase().startsWith(subjectCode.toUpperCase())) {
+                    const remainder = raw.slice(subjectCode.length).trim();
+                    if (remainder) {
+                        facultyText = remainder;
+                    }
+                }
+            }
+
+            // 4. Check contract faculty_legend
+            if (!facultyText && facultyLegends.length > 0) {
+                const fLeg = facultyLegends.find(l =>
+                    Array.isArray(l.subjects) && l.subjects.some(s =>
+                        String(s).toUpperCase() === subjectText.toUpperCase() || subjectTokensMatch(String(s), subjectText)
+                    )
+                );
+                if (fLeg && (fLeg.name || fLeg.code)) {
+                    facultyText = String(fLeg.name || fLeg.code).trim();
+                }
+            }
+
+            // 5. Check other entries in the same contract
+            if (!facultyText && Array.isArray(contract.entries)) {
+                const sameSubjEntries = contract.entries.filter(e =>
+                    !e.is_free &&
+                    (e.subject_name === subjectText || (subjectCode && e.subject_code === subjectCode) || (e.subject_name && subjectTokensMatch(e.subject_name, subjectText))) &&
+                    (e.faculty_name || e.faculty || e.faculty_code)
+                );
+                if (sameSubjEntries.length > 0) {
+                    const firstFac = (sameSubjEntries[0].faculty_name || sameSubjEntries[0].faculty || sameSubjEntries[0].faculty_code).trim();
+                    const allSame = sameSubjEntries.every(e =>
+                        (e.faculty_name || e.faculty || e.faculty_code || '').trim() === firstFac
+                    );
+                    if (allSame) facultyText = firstFac;
+                }
+            }
+
+            // 6. Check branch catalog faculty expertise (strictly scoped to this branch)
+            if (!facultyText && Array.isArray(catalog.faculty)) {
+                const branchSpecialists = catalog.faculty.filter(f =>
+                    Array.isArray(f.subjects) && f.subjects.some(s =>
+                        String(s).toUpperCase() === subjectText.toUpperCase() || subjectTokensMatch(String(s), subjectText)
+                    )
+                );
+                if (branchSpecialists.length === 1) {
+                    facultyText = branchSpecialists[0].name || branchSpecialists[0].code;
+                }
+            }
+
+            if (facultyText) {
+                entry.faculty_name = facultyText;
+            }
+        }
+
         const isActivityWithoutFaculty = isActivity && !facultyText;
 
         if (!isActivityWithoutFaculty && facultyText) {
@@ -622,7 +744,7 @@ async function resolveContract(contract, departmentCode, mappings = {}, options 
                 unresolvedMap.set(key, {
                     entityType: 'faculty',
                     category: 'Faculty',
-                    extractedText: 'Needs review',
+                    extractedText: 'Unassigned Faculty',
                     day: entry.day,
                     period: entry.period,
                     subjectName: subjectText,

@@ -14,6 +14,7 @@ const crypto = require('crypto');
 const db = require('../db/pool');
 const repository = require('../db/repository');
 const store = require('./store');
+const delegations = require('./delegations');
 
 // In-memory attendance records: array of { id, facultyId, facultyName, facultyCode, branchCode, date, status, markedBy, createdAt, updatedAt }
 let inMemoryAttendance = [];
@@ -134,7 +135,8 @@ async function markAttendance({ facultyIdentifier, date, status, sessionUser }) 
         throw err;
     }
 
-    if (sessionUser.role === 'faculty') {
+    const isAuthorized = await delegations.isAuthorizedHOS(sessionUser, date);
+    if (!isAuthorized) {
         const err = new Error('Faculty members cannot mark or modify attendance. This action requires Head of Department (HOD) role.');
         err.status = 403; err.code = 'FORBIDDEN';
         throw err;
@@ -175,7 +177,7 @@ async function markAttendance({ facultyIdentifier, date, status, sessionUser }) 
         throw err;
     }
 
-    const markedBy = sessionUser.username || sessionUser.name || 'HOS';
+    const markedBy = sessionUser.name || sessionUser.username || 'HOS';
     const dateStr = parsedDate.dateStr;
 
     // Database mode
@@ -256,7 +258,8 @@ async function deleteAttendance(id, sessionUser) {
         throw err;
     }
 
-    if (sessionUser.role === 'faculty') {
+    const isAuthorized = await delegations.isAuthorizedHOS(sessionUser);
+    if (!isAuthorized) {
         const err = new Error('Faculty members cannot modify attendance.');
         err.status = 403; err.code = 'FORBIDDEN';
         throw err;

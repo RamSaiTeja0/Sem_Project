@@ -22,6 +22,7 @@ const http = require('http');
 const { app } = require('../server');
 const users = require('../src/data/users');
 const store = require('../src/data/store');
+const facultyRequests = require('../src/data/facultyRequests');
 const { resetBranchForTesting, registerBranch, getRegisteredBranchCodes } = require('../src/data/departments');
 
 let server;
@@ -102,6 +103,7 @@ async function run() {
         users.resetForTesting();
         resetBranchForTesting();
         store.resetForEmptyInstance();
+        facultyRequests.resetForTesting();
 
         console.log('[Setup] Registering HOS and Faculty accounts for CME and EEE');
 

@@ -7,6 +7,8 @@
  *
  * The availability path is read-only: clicking a timetable cell never assigns
  * a substitute, saves a selection, or modifies any timetable.
+ *
+ * Live instance with clean database faculty accounts.
  */
 const express = require('express');
 const path = require('path');
@@ -29,6 +31,7 @@ const attendanceRoutes = require('./src/routes/attendance');
 const invigilationRoutes = require('./src/routes/invigilation');
 const substitutionRoutes = require('./src/routes/substitutions');
 const facultyTimetableRoutes = require('./src/routes/facultyTimetable');
+const delegationRoutes = require('./src/routes/delegations');
 
 const app = express();
 
@@ -139,6 +142,7 @@ app.use('/api/availability', requireAuth, availabilityRoutes);
 app.use('/api/attendance', requireAuth, attendanceRoutes);
 app.use('/api/invigilation', requireAuth, invigilationRoutes);
 app.use('/api/substitutions', requireAuth, substitutionRoutes);
+app.use('/api/delegations', requireAuth, delegationRoutes);
 app.use('/api/uploads', requireAuth, uploadRoutes);
 app.use('/api/staging', requireAuth, stagingRoutes);
 // Branch / subject / class management. Reads work without a database; writes

@@ -25,9 +25,9 @@ async function runTests() {
     const appJs = fs.readFileSync(path.join(__dirname, '../public/js/app.js'), 'utf8');
     const indexHtml = fs.readFileSync(path.join(__dirname, '../public/index.html'), 'utf8');
 
-    // 1. My Timetable visible for both HOD and Faculty
-    assert(appJs.includes("if (el('navSchedule')) el('navSchedule').style.display = (isFaculty || isHOS) ? '' : 'none';"),
-        'navSchedule should be visible for both isFaculty and isHOS');
+    // 1. My Timetable visible for Faculty, hidden for HOD
+    assert(appJs.includes("if (el('navSchedule')) el('navSchedule').style.display = isFaculty ? '' : 'none';"),
+        'navSchedule should be visible only for isFaculty');
 
     // 2. schedule removed from FACULTY_ONLY_VIEWS so HOD is not redirected to dashboard
     assert(!appJs.includes("FACULTY_ONLY_VIEWS = ['my-attendance', 'my-invigilation', 'request-invigilation', 'faculty-substitutions', 'schedule']"),

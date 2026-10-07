@@ -800,6 +800,64 @@ async function getMyVacantPeriods({ date, sessionUser }) {
     };
 }
 
+async function getActiveFacultyWithAccounts() {
+    if (db.isConfigured() && store.usingDatabase) {
+        try {
+            const { rows } = await db.query(`
+                SELECT f.id, f.code, f.name, f.department_id, d.code AS branch,
+                       u.id AS user_id, u.username, u.role, u.status AS user_status, u.active AS user_active,
+                       f.designation, f.phone
+                  FROM faculty f
+                 INNER JOIN users u ON u.faculty_id = f.id
+                  LEFT JOIN departments d ON d.id = f.department_id
+                 WHERE u.role = 'faculty'
+                   AND (u.active IS TRUE OR u.active IS NULL)
+                   AND (u.status = 'active' OR u.status IS NULL)
+                   AND (f.status = 'active' OR f.status IS NULL)
+                 ORDER BY f.name
+            `);
+            return rows;
+        } catch (err) {
+            return [];
+        }
+    }
+
+    const usersModule = require('./users');
+    const memUsers = (typeof usersModule.list === 'function' ? usersModule.list() : []) || [];
+    const validMemUsers = memUsers.filter(u =>
+        u.role === 'faculty' &&
+        (u.active === true || u.active === undefined) &&
+        (u.status === 'active' || u.status === undefined) &&
+        u.facultyId != null
+    );
+
+    const roster = store.engine ? store.engine.getFaculty() : [];
+    const matched = [];
+    for (const u of validMemUsers) {
+        const fac = roster.find(f =>
+            (f.id != null && String(f.id) === String(u.facultyId)) ||
+            (f.code != null && String(f.code).toUpperCase() === String(u.facultyId).toUpperCase())
+        );
+        if (fac && fac.status !== 'inactive') {
+            matched.push({
+                id: fac.id,
+                code: fac.code,
+                name: fac.name,
+                branch: fac.department || u.department,
+                department_id: fac.department_id,
+                user_id: u.id,
+                username: u.username,
+                role: 'faculty',
+                user_status: 'active',
+                user_active: true,
+                designation: fac.designation,
+                phone: fac.phone || u.phone
+            });
+        }
+    }
+    return matched;
+}
+
 /**
  * Returns available FREE candidates for Faculty A to request for a slot.
  * Reuses B7.4 availability calculation with same-branch first ranking.
@@ -850,13 +908,26 @@ async function getCandidates({ date, period, className, sessionUser }) {
 
     const priorityBranch = facultyA.department || sessionUser.department || 'CME';
 
+    const validFacultyList = await getActiveFacultyWithAccounts();
+    const validFacultyIds = new Set(validFacultyList.map(f => String(f.id)));
+    const validFacultyNames = new Set(validFacultyList.map(f => (f.name || '').toUpperCase()));
+
+    const isAllowed = r => {
+        if (!r) return false;
+        const idStr = r.facultyId != null ? String(r.facultyId) : (r.id != null ? String(r.id) : null);
+        if (idStr && validFacultyIds.has(idStr)) return true;
+        const nameUpper = (r.faculty || r.name || r.facultyName || '').toUpperCase();
+        if (nameUpper && validFacultyNames.has(nameUpper)) return true;
+        return false;
+    };
+
     const result = store.engine.getAvailability(parsedDate.dayOfWeek, normPeriod, {
         excludedFaculty: absentNames,
         invigilationFaculty: invigRecords,
         priorityBranch: priorityBranch
     });
 
-    const candidates = (result.available || []).map(r => ({
+    const candidates = (result.available || []).filter(isAllowed).map(r => ({
         facultyId: r.facultyId || r.id,
         id: r.facultyId || r.id,
         facultyName: r.faculty,
@@ -869,7 +940,7 @@ async function getCandidates({ date, period, className, sessionUser }) {
         isSameBranch: r.isSameBranch
     }));
 
-    const sameBranch = (result.sameBranch ? result.sameBranch.available : []).map(r => ({
+    const sameBranch = ((result.sameBranch ? result.sameBranch.available : []) || []).filter(isAllowed).map(r => ({
         facultyId: r.facultyId || r.id,
         id: r.facultyId || r.id,
         facultyName: r.faculty,
@@ -882,7 +953,7 @@ async function getCandidates({ date, period, className, sessionUser }) {
         isSameBranch: true
     }));
 
-    const otherBranches = (result.otherBranches ? result.otherBranches.available : []).map(r => ({
+    const otherBranches = ((result.otherBranches ? result.otherBranches.available : []) || []).filter(isAllowed).map(r => ({
         facultyId: r.facultyId || r.id,
         id: r.facultyId || r.id,
         facultyName: r.faculty,
