@@ -224,8 +224,8 @@
         substitute: 'Adjust / Substitute',
         schedule: 'My Timetable',
         timetable: 'Master Timetable',
-        faculty: 'Faculty Directory',
-        requests: 'Faculty Registration Requests',
+        faculty: 'Faculty Management',
+        requests: 'Faculty Requests',
         attendance: 'Faculty Attendance',
         'my-attendance': 'My Attendance',
         invigilation: 'Exam Invigilation',
@@ -240,6 +240,15 @@
     };
 
     var VIEW_NAMES = Object.keys(TITLES);
+
+    function updateHeaderTitle(name) {
+        var title = TITLES[name] || 'Dashboard';
+        var titleEl = el('viewTitle');
+        if (titleEl) {
+            titleEl.textContent = title;
+        }
+        document.title = title + ' — F.A.S.T.';
+    }
 
     /** Open the view named in the URL hash, so the home page can link into it. */
     function viewFromHash() {
@@ -277,6 +286,7 @@
         Array.prototype.forEach.call(document.querySelectorAll('.nav-item[data-view]'), function (button) {
             button.classList.toggle('is-active', button.dataset.view === name);
         });
+        updateHeaderTitle(name);
         if (name === 'dashboard') {
             if (isHOS) {
                 if (el('hodDashboardOverview')) el('hodDashboardOverview').style.display = 'flex';
@@ -315,6 +325,8 @@
             }
         }
     }
+
+    var switchView = showView;
 
     // ---------------------------------------------------------- session
     function renderUser(session) {
@@ -818,6 +830,21 @@
     }
 
     // ---------------------------------------------------- availability
+    function formatFacultyPhoneHtml(phone) {
+        if (phone && String(phone).trim()) {
+            var clean = String(phone).trim();
+            var tel = clean.replace(/[^\d+]/g, '');
+            return '<div class="faculty-phone">' +
+                '<a href="tel:' + esc(tel) + '" class="phone-link" title="Call ' + esc(clean) + '">' +
+                    '<span class="phone-icon">📞</span> ' + esc(clean) +
+                '</a>' +
+            '</div>';
+        }
+        return '<div class="faculty-phone muted" style="font-size:0.78rem; color:var(--ink-400, #94a3b8); font-style:italic;">' +
+            '<span class="phone-icon" style="opacity:0.6;">📞</span> Phone number not available' +
+        '</div>';
+    }
+
     function renderAvailability(containerId, cell, result) {
         var container = el(containerId);
         if (!container) return;
@@ -841,9 +868,7 @@
             if (sameList.length > 0) {
                 sameSection = '<div style="font-weight:650; font-size:0.86rem; color:var(--ink-800); margin:8px 0 6px 0;">Same Branch — ' + esc(sameBranchCode) + ' (' + sameList.length + ')</div>' +
                     '<ul class="faculty-list">' + sameList.map(function (f) {
-                        var phoneHtml = f.phone
-                            ? '<div class="faculty-phone"><span class="phone-icon">📞</span> ' + esc(f.phone) + '</div>'
-                            : '';
+                        var phoneHtml = formatFacultyPhoneHtml(f.phone);
                         return '<li><span class="tick">✓</span>' +
                             '<div class="faculty-main">' +
                                 '<div class="faculty-name">' + esc(f.faculty || f.name) + '</div>' +
@@ -860,9 +885,7 @@
             if (otherList.length > 0) {
                 otherSection = '<div style="font-weight:650; font-size:0.86rem; color:var(--ink-800); margin:14px 0 6px 0;">Other Branches (' + otherList.length + ')</div>' +
                     '<ul class="faculty-list">' + otherList.map(function (f) {
-                        var phoneHtml = f.phone
-                            ? '<div class="faculty-phone"><span class="phone-icon">📞</span> ' + esc(f.phone) + '</div>'
-                            : '';
+                        var phoneHtml = formatFacultyPhoneHtml(f.phone);
                         var deptPrefix = f.department ? '<strong style="color:var(--brand-700); margin-right:6px;">' + esc(f.department) + ' —</strong> ' : '';
                         return '<li><span class="tick">✓</span>' +
                             '<div class="faculty-main">' +
@@ -876,9 +899,7 @@
             freeHtml = sameSection + otherSection;
         } else {
             freeHtml = '<ul class="faculty-list">' + freeList.map(function (f) {
-                var phoneHtml = f.phone
-                    ? '<div class="faculty-phone"><span class="phone-icon">📞</span> ' + esc(f.phone) + '</div>'
-                    : '';
+                var phoneHtml = formatFacultyPhoneHtml(f.phone);
                 return '<li><span class="tick">✓</span>' +
                     '<div class="faculty-main">' +
                         '<div class="faculty-name">' + esc(f.faculty || f.name) + '</div>' +
@@ -893,9 +914,7 @@
         var busyHtml = result.busy.length
             ? '<ul class="faculty-list busy-list">' + result.busy.map(function (f) {
                 var reason = [f.subject, f.className].filter(Boolean).join(' — ');
-                var phoneHtml = f.phone
-                    ? '<div class="faculty-phone"><span class="phone-icon">📞</span> ' + esc(f.phone) + '</div>'
-                    : '';
+                var phoneHtml = formatFacultyPhoneHtml(f.phone);
                 return '<li><span class="cross">✗</span>' +
                     '<div class="faculty-main">' +
                         '<div class="faculty-name">' + esc(f.faculty) + '</div>' +
@@ -1036,7 +1055,7 @@
             el('hodDashDate').textContent = formattedDate;
         }
 
-        var query = branchCode ? '?branch=' + encodeURIComponent(branchCode) : '';
+        var query = branchCode ? '?branch=' + encodeURIComponent(branchCode) + '&department=' + encodeURIComponent(branchCode) : '';
 
         Promise.all([
             getJson(API.summary + query).catch(function () { return null; }),
@@ -1055,18 +1074,20 @@
 
             // 1. Faculty Summary
             var facultyList = (attendanceData && attendanceData.faculty) || (facultyData && facultyData.faculty) || [];
-            var totalFaculty = (summary && summary.totalFaculty != null) ? summary.totalFaculty : facultyList.length;
+            var totalFaculty = facultyList.length;
             var presentToday = 0;
             var absentToday = 0;
 
             if (attendanceData && Array.isArray(attendanceData.faculty) && attendanceData.faculty.length > 0) {
                 absentToday = attendanceData.faculty.filter(function (f) { return f.status === 'ABSENT'; }).length;
                 presentToday = attendanceData.faculty.filter(function (f) { return f.status === 'PRESENT'; }).length;
-                if (totalFaculty === 0) totalFaculty = attendanceData.faculty.length;
+                totalFaculty = attendanceData.faculty.length;
             } else if (facultyData && Array.isArray(facultyData.faculty)) {
                 totalFaculty = facultyData.faculty.length;
                 presentToday = totalFaculty;
                 absentToday = 0;
+            } else if (summary && summary.totalFaculty != null) {
+                totalFaculty = summary.totalFaculty;
             }
 
             if (el('hodStatTotalFaculty')) el('hodStatTotalFaculty').textContent = totalFaculty;
@@ -1076,12 +1097,12 @@
             // 2. Timetable Summary
             var scheduledPeriods = 0;
             var freePeriods = 0;
-            if (summary && Array.isArray(summary.slots)) {
-                scheduledPeriods = summary.slots.reduce(function (sum, s) { return sum + (s.busy || 0); }, 0);
-                freePeriods = summary.slots.reduce(function (sum, s) { return sum + (s.available || 0); }, 0);
-            } else if (facultyData && Array.isArray(facultyData.faculty)) {
+            if (facultyData && Array.isArray(facultyData.faculty) && facultyData.faculty.length > 0) {
                 scheduledPeriods = facultyData.faculty.reduce(function (sum, f) { return sum + (f.busyPeriods || 0); }, 0);
                 freePeriods = facultyData.faculty.reduce(function (sum, f) { return sum + (f.freePeriods || 0); }, 0);
+            } else if (summary && Array.isArray(summary.slots)) {
+                scheduledPeriods = summary.slots.reduce(function (sum, s) { return sum + (s.busy || 0); }, 0);
+                freePeriods = summary.slots.reduce(function (sum, s) { return sum + (s.available || 0); }, 0);
             }
 
             if (el('hodStatScheduledPeriods')) el('hodStatScheduledPeriods').textContent = scheduledPeriods;
@@ -1640,8 +1661,11 @@
         candidatesHtml += '<div style="font-weight:650; font-size:0.88rem; color:var(--ink-800); margin:8px 0 6px 0;">Same Branch' + (sameBranchCode ? ' — ' + esc(sameBranchCode) : '') + ' (' + sameCandidates.length + ')</div>';
         if (sameCandidates.length > 0) {
             candidatesHtml += '<ol style="margin:0 0 12px 18px; padding:0;">' + sameCandidates.map(function (c) {
-                return '<li style="margin-bottom:4px; font-size:0.9rem;"><strong>' + esc(c.facultyName || c.name || c.faculty) + '</strong>' +
-                    (c.phone ? ' <span class="muted" style="font-size:0.82rem;">📞 ' + esc(c.phone) + '</span>' : '') +
+                var phoneHtml = c.phone
+                    ? '<a href="tel:' + esc(String(c.phone).replace(/[^\d+]/g, '')) + '" class="phone-link" style="margin-left:6px;"><span class="phone-icon">📞</span> ' + esc(c.phone) + '</a>'
+                    : '<span class="muted font-sm" style="font-size:0.8rem; margin-left:6px; font-style:italic;">📞 Phone number not available</span>';
+                return '<li style="margin-bottom:6px; font-size:0.9rem;"><strong>' + esc(c.facultyName || c.name || c.faculty) + '</strong>' +
+                    phoneHtml +
                     ' <span class="badge badge-free" style="margin-left:6px;">FREE</span></li>';
             }).join('') + '</ol>';
         } else {
@@ -1655,9 +1679,12 @@
         if (otherCandidates.length > 0) {
             candidatesHtml += '<ol style="margin:0 0 6px 18px; padding:0;">' + otherCandidates.map(function (c) {
                 var dept = c.branch || c.department || '';
-                return '<li style="margin-bottom:4px; font-size:0.9rem;"><strong>' + esc(c.facultyName || c.name || c.faculty) + '</strong>' +
+                var phoneHtml = c.phone
+                    ? '<a href="tel:' + esc(String(c.phone).replace(/[^\d+]/g, '')) + '" class="phone-link" style="margin-left:6px;"><span class="phone-icon">📞</span> ' + esc(c.phone) + '</a>'
+                    : '<span class="muted font-sm" style="font-size:0.8rem; margin-left:6px; font-style:italic;">📞 Phone number not available</span>';
+                return '<li style="margin-bottom:6px; font-size:0.9rem;"><strong>' + esc(c.facultyName || c.name || c.faculty) + '</strong>' +
                     (dept ? ' <span class="muted" style="font-size:0.82rem;">(' + esc(dept) + ')</span>' : '') +
-                    (c.phone ? ' <span class="muted" style="font-size:0.82rem;">📞 ' + esc(c.phone) + '</span>' : '') +
+                    phoneHtml +
                     ' <span class="badge badge-free" style="margin-left:6px;">FREE</span></li>';
             }).join('') + '</ol>';
         } else {
@@ -1698,9 +1725,12 @@
 
                 var reason = f.reason || '—';
                 var dept = f.branch || f.department || '—';
+                var phoneSnippet = f.phone
+                    ? '<div style="margin-top:2px;"><a href="tel:' + esc(String(f.phone).replace(/[^\d+]/g, '')) + '" class="phone-link" style="font-size:0.8rem;"><span class="phone-icon">📞</span> ' + esc(f.phone) + '</a></div>'
+                    : '<div class="muted font-sm" style="margin-top:2px; font-size:0.78rem; font-style:italic;">Phone number not available</div>';
 
                 tableHtml += '<tr style="border-bottom:1px solid var(--border-color, #f1f5f9);">' +
-                    '<td style="padding:8px 10px; font-weight:550;">' + esc(f.facultyName || f.name || f.faculty) + '</td>' +
+                    '<td style="padding:8px 10px; font-weight:550;">' + esc(f.facultyName || f.name || f.faculty) + phoneSnippet + '</td>' +
                     '<td style="padding:8px 10px;"><span class="badge ' + badgeClass + '" style="' + badgeStyle + '">' + esc(status) + '</span></td>' +
                     '<td style="padding:8px 10px; color:var(--ink-700);">' + esc(reason) + '</td>' +
                     '<td style="padding:8px 10px; color:var(--ink-600);">' + esc(dept) + '</td>' +
@@ -1782,11 +1812,13 @@
                 }
 
                 var phoneCell = f.phone
-                    ? '<a href="tel:' + esc(f.phone.replace(/\s+/g, '')) + '" class="phone-link"><span class="phone-icon">📞</span> ' + esc(f.phone) + '</a>'
-                    : '<span class="muted">—</span>';
+                    ? '<a href="tel:' + esc(f.phone.replace(/[^\d+]/g, '')) + '" class="phone-link"><span class="phone-icon">📞</span> ' + esc(f.phone) + '</a>'
+                    : '<span class="muted font-sm" style="font-size:0.8rem; font-style:italic;">Phone number not available</span>';
 
                 var statusBadge = '<span class="badge ' + (f.status === 'active' ? 'badge-free' : 'badge-busy') + '">' +
                     esc(statusLabel(f.status)) + '</span>';
+
+                var hasAccount = Boolean(f.hasAccount || isWithAccountSection);
 
                 var actionsHtml = '<span class="muted">—</span>';
                 if (!isFacultyUser) {
@@ -1799,7 +1831,7 @@
                         'data-subjects="' + esc((f.subjects || []).join(', ')) + '" ' +
                         'style="padding: 3px 8px; font-size: 0.8rem;">Edit</button>';
 
-                    if (isWithAccountSection) {
+                    if (hasAccount) {
                         var statusBtn = f.status === 'inactive'
                             ? '<button type="button" class="btn btn-primary btn-sm btn-fac-activate" ' +
                                 'data-id="' + esc(f.id) + '" ' +
@@ -1808,7 +1840,9 @@
                             : '<button type="button" class="btn btn-danger btn-sm btn-fac-deactivate" ' +
                                 'data-id="' + esc(f.id) + '" ' +
                                 'data-name="' + esc(f.name) + '" ' +
-                                'style="padding: 3px 8px; font-size: 0.8rem;">Deactivate</button>';
+                                'data-branch="' + esc(f.department || '') + '" ' +
+                                'data-status="' + esc(f.status || 'active') + '" ' +
+                                'style="padding: 3px 8px; font-size: 0.8rem;">Deactivate / Leaving</button>';
 
                         actionsHtml = '<div style="display:flex; gap:6px; align-items:center;">' + editBtn + statusBtn + '</div>';
                     } else {
@@ -1818,6 +1852,7 @@
                             'data-branch="' + esc(f.department) + '" ' +
                             'data-phone="' + esc(f.phone || '') + '" ' +
                             'data-subjects="' + esc((f.subjects || []).join(', ')) + '" ' +
+                            'data-has-account="' + Boolean(f.hasAccount) + '" ' +
                             'style="padding: 3px 10px; font-size: 0.82rem; font-weight:600;">Create Account</button>';
 
                         actionsHtml = '<div style="display:flex; gap:6px; align-items:center;">' + createAccBtn + editBtn + '</div>';
@@ -2310,11 +2345,14 @@
                 if (presentEmptyNotice) presentEmptyNotice.style.display = 'none';
                 presentTbody.innerHTML = presentList.map(function (f) {
                     var facId = f.id || f.facultyId;
+                    var phoneText = f.phone
+                        ? '<a href="tel:' + esc(String(f.phone).replace(/[^\d+]/g, '')) + '" class="phone-link"><span class="phone-icon">📞</span> ' + esc(f.phone) + '</a>'
+                        : '<span class="muted font-sm" style="font-size:0.8rem; font-style:italic;">Phone number not available</span>';
                     return '<tr>' +
                         '<td><strong>' + esc(f.name) + '</strong></td>' +
                         '<td>' + esc(f.designation || 'Faculty') + '</td>' +
                         '<td>' + esc(f.department || '') + '</td>' +
-                        '<td>' + esc(f.phone || '—') + '</td>' +
+                        '<td>' + phoneText + '</td>' +
                         '<td><span class="badge badge-success">PRESENT</span></td>' +
                         '<td><button type="button" class="btn btn-danger btn-sm btn-mark-absent" data-id="' + esc(facId) + '" data-name="' + esc(f.name) + '">Mark Absent</button></td>' +
                     '</tr>';
@@ -2332,11 +2370,14 @@
                 absentTbody.innerHTML = absentList.map(function (f) {
                     var facId = f.id || f.facultyId;
                     var attId = f.attendanceId || '';
+                    var phoneText = f.phone
+                        ? '<a href="tel:' + esc(String(f.phone).replace(/[^\d+]/g, '')) + '" class="phone-link"><span class="phone-icon">📞</span> ' + esc(f.phone) + '</a>'
+                        : '<span class="muted font-sm" style="font-size:0.8rem; font-style:italic;">Phone number not available</span>';
                     return '<tr>' +
                         '<td><strong>' + esc(f.name) + '</strong></td>' +
                         '<td>' + esc(f.designation || 'Faculty') + '</td>' +
                         '<td>' + esc(f.department || '') + '</td>' +
-                        '<td>' + esc(f.phone || '—') + '</td>' +
+                        '<td>' + phoneText + '</td>' +
                         '<td><span class="badge badge-danger">ABSENT</span></td>' +
                         '<td><button type="button" class="btn btn-secondary btn-sm btn-mark-present" data-id="' + esc(facId) + '" data-name="' + esc(f.name) + '" data-att-id="' + esc(attId) + '">Mark Present</button></td>' +
                     '</tr>';
@@ -2354,11 +2395,14 @@
                 var actionBtn = isAbsent
                     ? '<button type="button" class="btn btn-secondary btn-sm btn-mark-present" data-id="' + esc(f.id || f.facultyId) + '" data-name="' + esc(f.name) + '" data-att-id="' + esc(f.attendanceId || '') + '">Mark Present</button>'
                     : '<button type="button" class="btn btn-danger btn-sm btn-mark-absent" data-id="' + esc(f.id || f.facultyId) + '" data-name="' + esc(f.name) + '">Mark Absent</button>';
+                var phoneText = f.phone
+                    ? '<a href="tel:' + esc(String(f.phone).replace(/[^\d+]/g, '')) + '" class="phone-link"><span class="phone-icon">📞</span> ' + esc(f.phone) + '</a>'
+                    : '<span class="muted font-sm" style="font-size:0.8rem; font-style:italic;">Phone number not available</span>';
                 return '<tr>' +
                     '<td><strong>' + esc(f.name) + '</strong></td>' +
                     '<td>' + esc(f.designation || 'Faculty') + '</td>' +
                     '<td>' + esc(f.department || '') + '</td>' +
-                    '<td>' + esc(f.phone || '—') + '</td>' +
+                    '<td>' + phoneText + '</td>' +
                     '<td>' + statusBadge + '</td>' +
                     '<td>' + actionBtn + '</td>' +
                 '</tr>';
@@ -3150,8 +3194,12 @@
                     ? '<span class="badge badge-primary">Same Branch (' + esc(c.branch || c.department) + ')</span>'
                     : '<span class="badge badge-neutral">Other Branch (' + esc(c.branch || c.department) + ')</span>';
 
+                var phoneSnippet = c.phone
+                    ? '<div style="margin-top:2px;"><a href="tel:' + esc(String(c.phone).replace(/[^\d+]/g, '')) + '" class="phone-link" style="font-size:0.8rem;"><span class="phone-icon">📞</span> ' + esc(c.phone) + '</a></div>'
+                    : '<div class="muted font-sm" style="margin-top:2px; font-size:0.78rem; font-style:italic;">Phone number not available</div>';
+
                 return '<tr>' +
-                    '<td><strong>' + esc(c.name || c.facultyName) + '</strong></td>' +
+                    '<td><strong>' + esc(c.name || c.facultyName) + '</strong>' + phoneSnippet + '</td>' +
                     '<td>' + esc(c.branch || c.department || '—') + '</td>' +
                     '<td>' + priorityBadge + '</td>' +
                     '<td><span class="badge badge-success">FREE</span></td>' +
@@ -3811,7 +3859,7 @@
     function renderUnresolvedCategoriesHtml(unresolved, uploadId) {
         if (!unresolved || unresolved.length === 0) return '';
         var categories = [
-            { key: 'faculty', label: 'Faculty', icon: '👤' },
+            { key: 'faculty', label: 'Unregistered Faculty', icon: '👤' },
             { key: 'subject', label: 'Subject', icon: '📚' },
             { key: 'class', label: 'Class', icon: '🏫' },
             { key: 'room', label: 'Room', icon: '🚪' }
@@ -3824,23 +3872,30 @@
             else grouped.other.push(item);
         });
 
-        var html = '<div class="unresolved-banner-box" style="background:#fffdf5; border:1px solid #f6c000; border-radius:var(--radius-sm); padding:16px; margin:14px 0;">';
+        var html = '<div class="unresolved-banner-box" id="unresolvedBannerBox" style="background:#fffdf5; border:1px solid #f6c000; border-radius:var(--radius-sm); padding:16px; margin:14px 0;">';
         html += '<div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:12px;">';
         html += '<div><strong style="color:#8c6200; font-size:0.95rem;">⚠️ Action Required: ' + unresolved.length + ' Unresolved Reference(s)</strong>';
         html += '<p style="margin:2px 0 0; font-size:0.84rem; color:#5c4100;">These extracted names/codes are not yet registered in your branch catalog. Map them to existing records or click Register below to unblock approval.</p></div>';
         if (uploadId) {
-            html += '<button type="button" class="btn btn-sm btn-primary btn-register-all-unresolved" data-upload="' + esc(uploadId) + '" style="background:#0284c7; border:none; color:#fff; font-weight:600; padding:6px 14px;">⚡ Register All Unresolved to Catalog</button>';
+            html += '<div style="display:flex; gap:8px; align-items:center;">';
+            html += '<button type="button" class="btn btn-sm btn-primary btn-register-all-unresolved" id="btnRegisterAllUnresolved" data-upload="' + esc(uploadId) + '" style="background:#0284c7; border:none; color:#fff; font-weight:600; padding:6px 14px;">⚡ Register All</button>';
+            html += '</div>';
         }
         html += '</div>';
 
         categories.concat([{ key: 'other', label: 'Other References', icon: '📌' }]).forEach(function (cat) {
             var items = grouped[cat.key] || [];
             if (items.length === 0) return;
-            html += '<div style="margin-top:10px; padding:10px 12px; background:#ffffff; border:1px solid #fae69e; border-radius:var(--radius-sm);">';
-            html += '<div style="font-weight:600; font-size:0.86rem; color:#8c6200; margin-bottom:8px; display:flex; align-items:center; gap:6px;">' + cat.icon + ' ' + cat.label + ' (' + items.length + ')</div>';
-            html += '<div style="display:flex; flex-direction:column; gap:6px;">';
+            html += '<div class="unresolved-category-card" data-category="' + esc(cat.key) + '" style="margin-top:10px; padding:10px 12px; background:#ffffff; border:1px solid #fae69e; border-radius:var(--radius-sm);">';
+            html += '<div style="font-weight:600; font-size:0.86rem; color:#8c6200; margin-bottom:8px; display:flex; justify-content:space-between; align-items:center;">';
+            html += '<div style="display:flex; align-items:center; gap:6px;">' + cat.icon + ' ' + cat.label + ' (' + items.length + ')</div>';
+            if (uploadId && cat.key === 'faculty' && items.length > 0) {
+                html += '<button type="button" class="btn btn-sm btn-outline-primary btn-register-all-faculty" id="btnRegisterAllFaculty" data-upload="' + esc(uploadId) + '" style="font-size:0.78rem; padding:3px 10px;">⚡ Register All Faculty</button>';
+            }
+            html += '</div>';
+            html += '<div class="unresolved-items-list" style="display:flex; flex-direction:column; gap:6px;">';
             items.forEach(function (item) {
-                html += '<div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; padding:6px 10px; background:var(--surface-subtle); border-radius:4px; font-size:0.83rem;">';
+                html += '<div class="unresolved-item-row" data-type="' + esc(item.entityType) + '" data-text="' + esc(item.extractedText) + '" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; padding:6px 10px; background:var(--surface-subtle); border-radius:4px; font-size:0.83rem;">';
                 html += '<div><strong>' + esc(item.extractedText) + '</strong>' +
                     (item.code ? ' <span class="mono text-muted">[' + esc(item.code) + ']</span>' : '') +
                     '<div class="muted" style="font-size:0.77rem;">' + esc(item.reason || 'Not found in branch catalog') + '</div></div>';
@@ -3862,62 +3917,73 @@
     function bindUnresolvedActionHandlers(container, uploadId, onRefresh) {
         if (!container || !uploadId) return;
 
+        function triggerRegisterAll(btn) {
+            var origText = btn.textContent || '⚡ Register All';
+            btn.disabled = true;
+            btn.textContent = 'Registering…';
+
+            fetch('/api/staging/' + encodeURIComponent(uploadId) + '/register-all-unresolved', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' }
+            }).then(function (r) {
+                return r.json().catch(function () {
+                    return { error: 'Server returned non-JSON response (' + r.status + ')' };
+                }).then(function (data) {
+                    return { ok: r.ok, status: r.status, body: data };
+                });
+            }).then(function (res) {
+                if (res.ok && res.body && res.body.success) {
+                    if (onRefresh) {
+                        try {
+                            var p = onRefresh();
+                            if (p && typeof p.then === 'function') {
+                                p.then(function () {
+                                    btn.disabled = false;
+                                    btn.textContent = origText;
+                                }).catch(function (e) {
+                                    console.error('onRefresh error:', e);
+                                    btn.disabled = false;
+                                    btn.textContent = origText;
+                                });
+                            } else {
+                                btn.disabled = false;
+                                btn.textContent = origText;
+                            }
+                        } catch (e) {
+                            console.error('onRefresh error:', e);
+                            btn.disabled = false;
+                            btn.textContent = origText;
+                        }
+                    } else {
+                        btn.disabled = false;
+                        btn.textContent = origText;
+                    }
+                } else {
+                    var errMsg = (res.body && res.body.error) || ('Failed to register entities (HTTP ' + res.status + ')');
+                    alert(errMsg);
+                    btn.disabled = false;
+                    btn.textContent = origText;
+                }
+            }).catch(function (err) {
+                alert('Network error: ' + (err.message || err));
+                btn.disabled = false;
+                btn.textContent = origText;
+            });
+        }
+
         var regAllBtn = container.querySelector('.btn-register-all-unresolved');
         if (regAllBtn) {
             regAllBtn.addEventListener('click', function () {
-                var origText = regAllBtn.textContent || '⚡ Register All Unresolved to Catalog';
-                regAllBtn.disabled = true;
-                regAllBtn.textContent = 'Registering…';
-
-                fetch('/api/staging/' + encodeURIComponent(uploadId) + '/register-all-unresolved', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' }
-                }).then(function (r) {
-                    return r.json().catch(function () {
-                        return { error: 'Server returned non-JSON response (' + r.status + ')' };
-                    }).then(function (data) {
-                        return { ok: r.ok, status: r.status, body: data };
-                    });
-                }).then(function (res) {
-                    if (res.ok && res.body && res.body.success) {
-                        if (onRefresh) {
-                            try {
-                                var p = onRefresh();
-                                if (p && typeof p.then === 'function') {
-                                    p.then(function () {
-                                        regAllBtn.disabled = false;
-                                        regAllBtn.textContent = origText;
-                                    }).catch(function (e) {
-                                        console.error('onRefresh error:', e);
-                                        regAllBtn.disabled = false;
-                                        regAllBtn.textContent = origText;
-                                    });
-                                } else {
-                                    regAllBtn.disabled = false;
-                                    regAllBtn.textContent = origText;
-                                }
-                            } catch (e) {
-                                console.error('onRefresh error:', e);
-                                regAllBtn.disabled = false;
-                                regAllBtn.textContent = origText;
-                            }
-                        } else {
-                            regAllBtn.disabled = false;
-                            regAllBtn.textContent = origText;
-                        }
-                    } else {
-                        var errMsg = (res.body && res.body.error) || ('Failed to register entities (HTTP ' + res.status + ')');
-                        alert(errMsg);
-                        regAllBtn.disabled = false;
-                        regAllBtn.textContent = origText;
-                    }
-                }).catch(function (err) {
-                    alert('Network error: ' + (err.message || err));
-                    regAllBtn.disabled = false;
-                    regAllBtn.textContent = origText;
-                });
+                triggerRegisterAll(regAllBtn);
             });
         }
+
+        var regFacultyBtns = container.querySelectorAll('.btn-register-all-faculty');
+        regFacultyBtns.forEach(function (btn) {
+            btn.addEventListener('click', function () {
+                triggerRegisterAll(btn);
+            });
+        });
 
         container.querySelectorAll('.btn-register-entity').forEach(function (btn) {
             btn.addEventListener('click', function () {
@@ -5003,6 +5069,11 @@
             // Create Account button on unlinked faculty
             var createAccBtn = target.closest('.btn-fac-create-account');
             if (createAccBtn) {
+                var alreadyHasAccount = createAccBtn.getAttribute('data-has-account') === 'true';
+                if (alreadyHasAccount) {
+                    if (typeof toast === 'function') toast('This faculty member already has an account.', 'info');
+                    return;
+                }
                 var id = createAccBtn.getAttribute('data-id');
                 var name = createAccBtn.getAttribute('data-name') || '';
                 var branch = createAccBtn.getAttribute('data-branch') || (state.user ? state.user.department : '');
@@ -5047,30 +5118,30 @@
                 return;
             }
 
-            // Deactivate button
+            // Deactivate / Leaving College button
             var deactBtn = target.closest('.btn-fac-deactivate');
             if (deactBtn) {
                 var dId = deactBtn.getAttribute('data-id');
                 var dName = deactBtn.getAttribute('data-name') || dId;
-                if (!confirm('Are you sure you want to deactivate ' + dName + '?\n\nThis will prevent them from logging in and exclude them from substitution availability. All existing timetable entries are preserved.')) {
-                    return;
+                var dBranch = deactBtn.getAttribute('data-branch') || (state.user ? state.user.department : 'Branch');
+                var dStatus = deactBtn.getAttribute('data-status') || 'Active';
+
+                if (el('deactivateFacId')) el('deactivateFacId').value = dId;
+                if (el('deactivateFacIdDisplay')) el('deactivateFacIdDisplay').textContent = dId;
+                if (el('deactivateFacNameDisplay')) el('deactivateFacNameDisplay').textContent = dName;
+                if (el('deactivateFacBranchDisplay')) el('deactivateFacBranchDisplay').textContent = dBranch;
+                if (el('deactivateFacStatusDisplay')) {
+                    el('deactivateFacStatusDisplay').textContent = dStatus === 'active' ? 'Active' : dStatus;
+                    el('deactivateFacStatusDisplay').className = dStatus === 'active' ? 'badge badge-success' : 'badge badge-neutral';
                 }
-                fetch('/api/faculty/' + encodeURIComponent(dId) + '/deactivate', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' }
-                })
-                .then(function (res) {
-                    return res.json().then(function (data) {
-                        if (!res.ok) throw new Error(data.error || 'Failed to deactivate faculty.');
-                        return data;
-                    });
-                })
-                .then(function () {
-                    loadFacultyTable();
-                })
-                .catch(function (err) {
-                    alert(err.message || 'Failed to deactivate faculty.');
-                });
+                if (el('deactivateEffectiveDate')) {
+                    el('deactivateEffectiveDate').value = new Date().toISOString().slice(0, 10);
+                }
+                if (el('deactivateReason')) el('deactivateReason').value = '';
+                if (el('deactivateFacNote')) el('deactivateFacNote').style.display = 'none';
+
+                var deactModal = el('deactivateFacultyModal');
+                if (deactModal) deactModal.style.display = 'flex';
                 return;
             }
 
@@ -5096,6 +5167,92 @@
                 });
                 return;
             }
+        }
+
+        // Close Deactivate Modal
+        if (el('btnDeactivateFacClose') && !el('btnDeactivateFacClose').__bound) {
+            el('btnDeactivateFacClose').__bound = true;
+            el('btnDeactivateFacClose').addEventListener('click', function () {
+                if (el('deactivateFacultyModal')) el('deactivateFacultyModal').style.display = 'none';
+            });
+        }
+        if (el('btnDeactivateFacCancel') && !el('btnDeactivateFacCancel').__bound) {
+            el('btnDeactivateFacCancel').__bound = true;
+            el('btnDeactivateFacCancel').addEventListener('click', function () {
+                if (el('deactivateFacultyModal')) el('deactivateFacultyModal').style.display = 'none';
+            });
+        }
+
+        // Submit Deactivate Faculty Form
+        if (el('deactivateFacultyForm') && !el('deactivateFacultyForm').__bound) {
+            el('deactivateFacultyForm').__bound = true;
+            el('deactivateFacultyForm').addEventListener('submit', function (e) {
+                e.preventDefault();
+                var id = el('deactivateFacId') ? el('deactivateFacId').value : '';
+                var effectiveDate = el('deactivateEffectiveDate') ? el('deactivateEffectiveDate').value : '';
+                var reason = el('deactivateReason') ? el('deactivateReason').value.trim() : '';
+                var noteBox = el('deactivateFacNote');
+                var confirmBtn = el('btnConfirmDeactivateFaculty');
+
+                if (!id) return;
+                if (!effectiveDate) {
+                    if (noteBox) {
+                        noteBox.className = 'notice notice-danger';
+                        noteBox.textContent = 'Please select an effective leaving date.';
+                        noteBox.style.display = 'block';
+                    }
+                    return;
+                }
+
+                if (confirmBtn) {
+                    confirmBtn.disabled = true;
+                    confirmBtn.textContent = 'Deactivating…';
+                }
+
+                fetch('/api/faculty/' + encodeURIComponent(id) + '/deactivate', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        effectiveDate: effectiveDate,
+                        reason: reason
+                    })
+                })
+                .then(function (res) {
+                    return res.json().then(function (data) {
+                        if (!res.ok) {
+                            var err = new Error(data.error || 'Failed to deactivate faculty.');
+                            err.code = data.code;
+                            throw err;
+                        }
+                        return data;
+                    });
+                })
+                .then(function (data) {
+                    if (confirmBtn) {
+                        confirmBtn.disabled = false;
+                        confirmBtn.textContent = 'Confirm Deactivation';
+                    }
+                    if (el('deactivateFacultyModal')) el('deactivateFacultyModal').style.display = 'none';
+                    facultyNote('Faculty <strong>' + esc(data.name || id) + '</strong> has been safely deactivated.', 'ok');
+                    loadFacultyTable();
+                    loadHOSInvigFacultyDropdown();
+                })
+                .catch(function (err) {
+                    if (confirmBtn) {
+                        confirmBtn.disabled = false;
+                        confirmBtn.textContent = 'Confirm Deactivation';
+                    }
+                    if (noteBox) {
+                        noteBox.className = 'notice notice-danger';
+                        if (err.code === 'HOD_DEACTIVATION_REQUIRES_HANDOVER') {
+                            noteBox.innerHTML = '<strong>HOD Handover Required:</strong> ' + esc(err.message) + '<br/><span style="font-size:0.85em; opacity:0.9;">Please use the <strong>HOD Leaving College</strong> workflow in HOD Management to appoint a successor before deactivating this account.</span>';
+                        } else {
+                            noteBox.textContent = err.message || 'Failed to deactivate faculty.';
+                        }
+                        noteBox.style.display = 'block';
+                    }
+                });
+            });
         }
 
         ['facBody', 'facWithAccountBody', 'facWithoutAccountBody'].forEach(function (bodyId) {
@@ -6064,6 +6221,10 @@
 
     // ------------------------------------------------------------ wiring
     document.addEventListener('DOMContentLoaded', function () {
+        var initialView = viewFromHash();
+        if (initialView) {
+            updateHeaderTitle(initialView);
+        }
         renderPresets();
         renderActivity();
 
@@ -6139,7 +6300,7 @@
         // --- master timetable
         if (el('ttManageBtn')) {
             el('ttManageBtn').addEventListener('click', function () {
-                switchView('manage');
+                showView('manage');
             });
         }
         if (el('ttDept')) el('ttDept').addEventListener('change', applyTimetableDepartment);
@@ -7153,9 +7314,16 @@
 
                         var spanTo = entry.span_to;
                         var colspan = 1;
+                        var coveredConflicts = [];
                         if (spanTo && spanTo > p) {
                             colspan = (spanTo - p) + 1;
                             coveredUntil = spanTo;
+                            for (var sp = pNum + 1; sp <= spanTo; sp++) {
+                                var cov = slotMap[dKey + '|' + sp];
+                                if (cov && !cov.is_free) {
+                                    coveredConflicts.push({ period: sp, entry: cov });
+                                }
+                            }
                         }
 
                         var typeBadge = '';
@@ -7177,6 +7345,19 @@
 
                         var roomText = entry.room_code ? ('<div style="font-size:0.75rem; color:var(--ink-600); margin-top:2px;">Room: ' + esc(entry.room_code) + '</div>') : '';
 
+                        var conflictHtml = '';
+                        if (coveredConflicts.length > 0) {
+                            conflictHtml = '<div style="margin-top:6px; padding:6px 8px; background:#fef2f2; border:1px solid #f87171; border-radius:4px; font-size:0.75rem; color:#991b1b;">' +
+                                '<div style="font-weight:600; margin-bottom:4px;">⚠️ Overlap Conflict:</div>' +
+                                coveredConflicts.map(function (c) {
+                                    return '<div style="margin-top:3px; display:flex; justify-content:space-between; align-items:center; gap:6px;">' +
+                                        '<span>P' + c.period + ': ' + esc(c.entry.subject_name || c.entry.subject_code || 'Occupied') + '</span>' +
+                                        '<button type="button" class="btn btn-sm btn-danger btn-stg-clear-overlap" data-day="' + esc(day) + '" data-period="' + c.period + '" style="padding:2px 6px; font-size:0.7rem; line-height:1.2;">Clear P' + c.period + '</button>' +
+                                        '</div>';
+                                }).join('') +
+                                '</div>';
+                        }
+
                         bodyHtml += '<td class="staging-cell-clickable" data-day="' + esc(day) + '" data-period="' + p + '" ' + (colspan > 1 ? ('colspan="' + colspan + '"') : '') + ' style="background:var(--surface); padding:8px 10px; vertical-align:top; border-left: 3px solid var(--brand-500); cursor:pointer;" title="Click to edit slot">' +
                             '<div style="display:flex; justify-content:space-between; align-items:center; gap:4px; flex-wrap:wrap;">' +
                             typeBadge + (spanBadge ? (' ' + spanBadge) : '') +
@@ -7187,6 +7368,7 @@
                             '</div>' +
                             facultyText +
                             roomText +
+                            conflictHtml +
                             '</td>';
                     });
                     bodyHtml += '</tr>';
@@ -7197,6 +7379,26 @@
                 if (stagingTable && !stagingTable._clickBound) {
                     stagingTable._clickBound = true;
                     stagingTable.addEventListener('click', function (e) {
+                        var clearBtn = e.target.closest('.btn-stg-clear-overlap');
+                        if (clearBtn) {
+                            e.stopPropagation();
+                            var cDay = clearBtn.getAttribute('data-day');
+                            var cPeriod = parseInt(clearBtn.getAttribute('data-period'), 10);
+                            if (!cDay || isNaN(cPeriod) || !currentStagingUploadId) return;
+                            clearBtn.disabled = true;
+                            clearBtn.textContent = 'Clearing…';
+                            fetch('/api/staging/' + encodeURIComponent(currentStagingUploadId) + '/entry', {
+                                method: 'PUT',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ day: cDay, period: cPeriod, is_free: true })
+                            }).then(function () {
+                                loadStagedTimetable(currentStagingUploadId);
+                            }).catch(function (err) {
+                                alert('Failed to clear slot: ' + err.message);
+                            });
+                            return;
+                        }
+
                         var cell = e.target.closest('.staging-cell-clickable');
                         if (!cell) return;
                         var day = cell.getAttribute('data-day');
@@ -7282,18 +7484,20 @@
                     if (alertBox) {
                         var alertHtml = '';
                         var valErrors = s.validationErrors || [];
-                        var branchErr = valErrors.find(function (e) { return e.code === 'BRANCH_MISMATCH' || e.code === 'UNRESOLVED_BRANCH'; });
+                        var conflicts = s.conflicts || [];
+                        var allValErrors = valErrors.concat(conflicts);
+                        var branchErr = allValErrors.find(function (e) { return e && (e.code === 'BRANCH_MISMATCH' || e.code === 'UNRESOLVED_BRANCH'); });
                         if (branchErr) {
                             alertHtml += '<div class="notice notice-danger" style="margin-bottom:12px;">' +
-                                '<strong>Branch Mismatch:</strong> ' + esc(branchErr.message) +
+                                '<strong>Branch Mismatch:</strong> ' + esc(branchErr.message || branchErr) +
                                 (branchErr.details && branchErr.details.detectedBranch ? '<br/><strong>Detected branch:</strong> ' + esc(branchErr.details.detectedBranch) : '') +
                                 (branchErr.details && branchErr.details.expectedBranch ? '<br/><strong>Your branch:</strong> ' + esc(branchErr.details.expectedBranch) : '') +
                                 '</div>';
-                        } else if (valErrors.length > 0) {
-                            alertHtml += '<div class="notice notice-danger" style="margin-bottom:12px;"><strong>Validation Errors:</strong><br/>' +
-                                valErrors.map(function (e) { return '• ' + esc(e.message || e); }).join('<br/>') + '</div>';
+                        } else if (allValErrors.length > 0) {
+                            alertHtml += '<div class="notice notice-danger" style="margin-bottom:12px;"><strong>Validation Errors &amp; Slot Conflicts:</strong><br/>' +
+                                allValErrors.map(function (e) { return '• ' + esc(e.message || e); }).join('<br/>') + '</div>';
                         }
-                        var warnings = s.warnings || [];
+                        var warnings = (s.resolution && s.resolution.warnings) || s.warnings || [];
                         if (warnings.length > 0) {
                             alertHtml += '<div class="notice notice-warning" style="margin-bottom:12px;">' +
                                 warnings.map(function (w) { return 'ℹ️ ' + esc(w.message || w); }).join('<br/>') + '</div>';
@@ -7345,6 +7549,7 @@
                             btnApprove.disabled = true;
                             btnApprove.textContent = 'Cannot Approve (Invalid)';
                             btnApprove.className = 'btn btn-secondary';
+                            btnApprove.title = 'Resolve validation errors / conflicts displayed above to enable approval';
                         } else if (unresolved.length > 0) {
                             btnApprove.disabled = true;
                             btnApprove.textContent = 'Resolve References to Enable Approval';
@@ -7708,7 +7913,7 @@
             });
         }
 
-        // HOD Delegation listeners
+        // HOD Delegation & Role Management listeners
         var delegationForm = el('delegationForm');
         if (delegationForm) {
             delegationForm.addEventListener('submit', handleAssignDelegation);
@@ -7722,23 +7927,129 @@
             });
         }
 
+        // Sub-tabs listeners
+        setupDelegationTabs();
+
+        // Permanent Role Transfer listeners
+        var formPermanentTransfer = el('formPermanentTransfer');
+        if (formPermanentTransfer) {
+            formPermanentTransfer.addEventListener('submit', handleOpenTransferModal);
+        }
+        var btnCloseTransferModal = el('btnCloseTransferModal');
+        if (btnCloseTransferModal) {
+            btnCloseTransferModal.addEventListener('click', function () {
+                if (el('modalConfirmTransfer')) el('modalConfirmTransfer').style.display = 'none';
+            });
+        }
+        var btnCancelTransferModal = el('btnCancelTransferModal');
+        if (btnCancelTransferModal) {
+            btnCancelTransferModal.addEventListener('click', function () {
+                if (el('modalConfirmTransfer')) el('modalConfirmTransfer').style.display = 'none';
+            });
+        }
+        var btnConfirmTransferSubmit = el('btnConfirmTransferSubmit');
+        if (btnConfirmTransferSubmit) {
+            btnConfirmTransferSubmit.addEventListener('click', handleConfirmRoleTransfer);
+        }
+
+        // HOD Leaving College listeners
+        var formLeavingCollege = el('formLeavingCollege');
+        if (formLeavingCollege) {
+            formLeavingCollege.addEventListener('submit', handleOpenLeavingModal);
+        }
+        var btnCloseLeavingModal = el('btnCloseLeavingModal');
+        if (btnCloseLeavingModal) {
+            btnCloseLeavingModal.addEventListener('click', function () {
+                if (el('modalConfirmLeaving')) el('modalConfirmLeaving').style.display = 'none';
+            });
+        }
+        var btnCancelLeavingModal = el('btnCancelLeavingModal');
+        if (btnCancelLeavingModal) {
+            btnCancelLeavingModal.addEventListener('click', function () {
+                if (el('modalConfirmLeaving')) el('modalConfirmLeaving').style.display = 'none';
+            });
+        }
+        var btnConfirmLeavingSubmit = el('btnConfirmLeavingSubmit');
+        if (btnConfirmLeavingSubmit) {
+            btnConfirmLeavingSubmit.addEventListener('click', handleConfirmHODLeaving);
+        }
+
+        // Refresh Transfer Audit History
+        var btnRefreshTransferHistory = el('btnRefreshTransferHistory');
+        if (btnRefreshTransferHistory) {
+            btnRefreshTransferHistory.addEventListener('click', function () {
+                loadTransfersTable();
+            });
+        }
+
         setupTimetableUploads();
 
         loadSession().then(function () {
             var initial = viewFromHash();
-            if (initial) showView(initial, false);
+            if (initial) {
+                showView(initial, false);
+            } else {
+                updateHeaderTitle('dashboard');
+            }
             return bootstrap();
         });
     });
 
-    // -------------------------------------------------------- HOD Delegation
+    // -------------------------------------------------------- HOD Delegation & Management
+    function setupDelegationTabs() {
+        var tabButtons = [
+            { btn: el('tabBtnActingDelegation'), pane: 'pane-acting-delegation' },
+            { btn: el('tabBtnPermanentTransfer'), pane: 'pane-permanent-transfer' },
+            { btn: el('tabBtnLeavingCollege'), pane: 'pane-leaving-college' },
+            { btn: el('tabBtnTransferHistory'), pane: 'pane-transfer-history' }
+        ];
+
+        tabButtons.forEach(function (item) {
+            if (!item.btn) return;
+            item.btn.addEventListener('click', function () {
+                // Update button styles
+                tabButtons.forEach(function (t) {
+                    if (!t.btn) return;
+                    if (t.btn === item.btn) {
+                        t.btn.className = 'btn btn-sm btn-primary active-del-tab';
+                    } else {
+                        t.btn.className = 'btn btn-sm btn-secondary';
+                    }
+                });
+
+                // Show active pane
+                var panes = document.querySelectorAll('.del-tab-pane');
+                Array.prototype.forEach.call(panes, function (p) {
+                    p.style.display = p.id === item.pane ? 'block' : 'none';
+                });
+
+                // Trigger pane specific loads
+                if (item.pane === 'pane-acting-delegation') {
+                    loadDelegationFacultyList();
+                    loadDelegationsTable();
+                } else if (item.pane === 'pane-permanent-transfer' || item.pane === 'pane-leaving-college') {
+                    loadDelegationFacultyList();
+                } else if (item.pane === 'pane-transfer-history') {
+                    loadTransfersTable();
+                }
+            });
+        });
+    }
+
     function loadDelegationView() {
         if (!state.user) return;
-        var hodNameEl = el('delCurrentHOD');
-        if (hodNameEl) hodNameEl.value = (state.user.name || '') + ' (' + (state.user.username || '') + ')';
+        var hodDisplay = (state.user.name || '') + ' (' + (state.user.username || '') + ')';
+        var branchDisplay = state.user.department || 'Branch';
 
-        var badgeEl = el('delCurrentBranchBadge');
-        if (badgeEl) badgeEl.textContent = state.user.department || 'Branch';
+        // Set HOD displays across all panes
+        if (el('delCurrentHOD')) el('delCurrentHOD').value = hodDisplay;
+        if (el('transferCurrentHOD')) el('transferCurrentHOD').value = hodDisplay;
+        if (el('leavingCurrentHOD')) el('leavingCurrentHOD').value = hodDisplay;
+
+        // Set branch badges
+        if (el('delCurrentBranchBadge')) el('delCurrentBranchBadge').textContent = branchDisplay;
+        if (el('transferBranchBadge')) el('transferBranchBadge').textContent = branchDisplay;
+        if (el('leavingBranchBadge')) el('leavingBranchBadge').textContent = branchDisplay + ' Departure';
 
         var today = new Date().toISOString().slice(0, 10);
         var startInput = el('delStartDate');
@@ -7753,34 +8064,48 @@
             endInput.value = futureDate.toISOString().slice(0, 10);
         }
 
+        var leavingEffInput = el('leavingEffectiveDate');
+        if (leavingEffInput && !leavingEffInput.value) {
+            leavingEffInput.value = today;
+        }
+
         loadDelegationFacultyList();
         loadDelegationsTable();
+        loadTransfersTable();
     }
 
     function loadDelegationFacultyList() {
-        var select = el('delFacultySelect');
-        if (!select || !state.user) return;
-        select.innerHTML = '<option value="">-- Loading eligible faculty... --</option>';
+        if (!state.user) return;
+        var selects = [el('delFacultySelect'), el('transferFacultySelect'), el('leavingFacultySelect')].filter(Boolean);
+        if (selects.length === 0) return;
+
+        selects.forEach(function (s) {
+            s.innerHTML = '<option value="">-- Loading eligible faculty... --</option>';
+        });
 
         fetch('/api/delegations/candidates')
             .then(function (res) { return res.json(); })
             .then(function (data) {
                 var options = data.candidates || [];
 
-                if (options.length === 0) {
-                    select.innerHTML = '<option value="">-- No eligible faculty with active login account in branch --</option>';
-                    return;
-                }
+                selects.forEach(function (select) {
+                    if (options.length === 0) {
+                        select.innerHTML = '<option value="">-- No eligible faculty with active login account in branch --</option>';
+                        return;
+                    }
 
-                select.innerHTML = '<option value="">-- Select Active Faculty Member (' + options.length + ' available) --</option>' +
-                    options.map(function (f) {
-                        var desig = f.designation ? ' (' + f.designation + ')' : '';
-                        var userSuffix = f.username ? ' [@' + f.username + ']' : '';
-                        return '<option value="' + esc(f.id || f.facultyId || f.name) + '">' + esc(f.name) + desig + esc(userSuffix) + '</option>';
-                    }).join('');
+                    select.innerHTML = '<option value="">-- Select Active Faculty Member (' + options.length + ' available) --</option>' +
+                        options.map(function (f) {
+                            var desig = f.designation ? ' (' + f.designation + ')' : '';
+                            var userSuffix = f.username ? ' [@' + f.username + ']' : '';
+                            return '<option value="' + esc(f.id || f.facultyId || f.name) + '" data-name="' + esc(f.name) + '" data-username="' + esc(f.username || '') + '">' + esc(f.name) + desig + esc(userSuffix) + '</option>';
+                        }).join('');
+                });
             })
             .catch(function (err) {
-                select.innerHTML = '<option value="">Error loading faculty list: ' + esc(err.message) + '</option>';
+                selects.forEach(function (select) {
+                    select.innerHTML = '<option value="">Error loading faculty list: ' + esc(err.message) + '</option>';
+                });
             });
     }
 
@@ -7930,4 +8255,225 @@
                 if (msgEl) msgEl.innerHTML = '<div class="notice notice-danger">' + esc(err.message) + '</div>';
             });
     }
+
+    // --- Permanent HOD Role Transfer Handlers ---
+    function handleOpenTransferModal(e) {
+        if (e) e.preventDefault();
+        var select = el('transferFacultySelect');
+        var msgEl = el('transferFormMsg');
+
+        if (!select || !select.value) {
+            if (msgEl) msgEl.innerHTML = '<div class="notice notice-danger">Please select an active replacement faculty member.</div>';
+            return;
+        }
+
+        var selectedOpt = select.options[select.selectedIndex];
+        var replacementName = (selectedOpt && selectedOpt.dataset.name) || selectedOpt.text;
+        var replacementUser = (selectedOpt && selectedOpt.dataset.username) || '';
+        var notes = el('transferNotes') ? el('transferNotes').value.trim() : '';
+
+        if (el('modalTransferNewName')) el('modalTransferNewName').textContent = replacementName;
+        if (el('modalTransferOutName')) el('modalTransferOutName').textContent = (state.user && state.user.name) || 'Current HOD';
+        if (el('modalTransferBranch')) el('modalTransferBranch').textContent = (state.user && state.user.department) || 'Branch';
+        if (el('modalTransferPrevHod')) el('modalTransferPrevHod').textContent = ((state.user && state.user.name) || '') + ' → will become Faculty';
+        if (el('modalTransferNewHod')) el('modalTransferNewHod').textContent = replacementName + (replacementUser ? ' (@' + replacementUser + ')' : '') + ' → will become HOD';
+        if (el('modalTransferNotes')) el('modalTransferNotes').textContent = notes || 'None';
+
+        var modal = el('modalConfirmTransfer');
+        if (modal) modal.style.display = 'flex';
+    }
+
+    function handleConfirmRoleTransfer() {
+        var modal = el('modalConfirmTransfer');
+        var select = el('transferFacultySelect');
+        var notes = el('transferNotes') ? el('transferNotes').value.trim() : '';
+        var msgEl = el('transferFormMsg');
+        var btn = el('btnConfirmTransferSubmit');
+
+        if (!select || !select.value) return;
+        var replacementFacultyId = select.value;
+
+        if (btn) btn.disabled = true;
+
+        fetch('/api/delegations/transfer-role', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                replacementFacultyId: replacementFacultyId,
+                notes: notes,
+                confirm: true
+            })
+        })
+            .then(function (res) {
+                return res.json().then(function (data) {
+                    return { ok: res.ok, status: res.status, data: data };
+                });
+            })
+            .then(function (result) {
+                if (btn) btn.disabled = false;
+                if (modal) modal.style.display = 'none';
+
+                if (!result.ok) {
+                    var errMsg = (result.data && result.data.error) || 'Failed to transfer HOD role.';
+                    if (msgEl) msgEl.innerHTML = '<div class="notice notice-danger">' + esc(errMsg) + '</div>';
+                    return;
+                }
+
+                if (msgEl) {
+                    msgEl.innerHTML = '<div class="notice notice-success" style="padding:14px; font-size:1rem;"><strong>Success!</strong> ' + esc(result.data.message || 'HOD role transferred successfully.') + '</div>';
+                }
+
+                // Refresh user session & reload UI permissions
+                loadSession().then(function () {
+                    loadDelegationFacultyList();
+                    loadDelegationsTable();
+                    loadTransfersTable();
+                    showView('timetable');
+                });
+            })
+            .catch(function (err) {
+                if (btn) btn.disabled = false;
+                if (modal) modal.style.display = 'none';
+                if (msgEl) msgEl.innerHTML = '<div class="notice notice-danger">' + esc(err.message) + '</div>';
+            });
+    }
+
+    // --- HOD Leaving College Handlers ---
+    function handleOpenLeavingModal(e) {
+        if (e) e.preventDefault();
+        var select = el('leavingFacultySelect');
+        var effDateInput = el('leavingEffectiveDate');
+        var msgEl = el('leavingFormMsg');
+
+        if (!select || !select.value) {
+            if (msgEl) msgEl.innerHTML = '<div class="notice notice-danger">Please select an active successor faculty member.</div>';
+            return;
+        }
+
+        var effectiveDate = effDateInput ? effDateInput.value : '';
+        if (!effectiveDate) {
+            if (msgEl) msgEl.innerHTML = '<div class="notice notice-danger">Please select an effective date.</div>';
+            return;
+        }
+
+        var selectedOpt = select.options[select.selectedIndex];
+        var successorName = (selectedOpt && selectedOpt.dataset.name) || selectedOpt.text;
+        var successorUser = (selectedOpt && selectedOpt.dataset.username) || '';
+        var notes = el('leavingNotes') ? el('leavingNotes').value.trim() : '';
+
+        if (el('modalLeavingNewName')) el('modalLeavingNewName').textContent = successorName;
+        if (el('modalLeavingBranch')) el('modalLeavingBranch').textContent = (state.user && state.user.department) || 'Branch';
+        if (el('modalLeavingPrevHod')) el('modalLeavingPrevHod').textContent = ((state.user && state.user.name) || '') + ' → Account Deactivated (Access Revoked)';
+        if (el('modalLeavingNewHod')) el('modalLeavingNewHod').textContent = successorName + (successorUser ? ' (@' + successorUser + ')' : '') + ' → Promoted to HOD';
+        if (el('modalLeavingEffectiveDate')) el('modalLeavingEffectiveDate').textContent = effectiveDate;
+        if (el('modalLeavingNotes')) el('modalLeavingNotes').textContent = notes || 'None';
+
+        var modal = el('modalConfirmLeaving');
+        if (modal) modal.style.display = 'flex';
+    }
+
+    function handleConfirmHODLeaving() {
+        var modal = el('modalConfirmLeaving');
+        var select = el('leavingFacultySelect');
+        var effDateInput = el('leavingEffectiveDate');
+        var notes = el('leavingNotes') ? el('leavingNotes').value.trim() : '';
+        var msgEl = el('leavingFormMsg');
+        var btn = el('btnConfirmLeavingSubmit');
+
+        if (!select || !select.value) return;
+        var replacementFacultyId = select.value;
+        var effectiveDate = effDateInput ? effDateInput.value : '';
+
+        if (btn) btn.disabled = true;
+
+        fetch('/api/delegations/leave-college', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                replacementFacultyId: replacementFacultyId,
+                effectiveDate: effectiveDate,
+                notes: notes,
+                confirm: true
+            })
+        })
+            .then(function (res) {
+                return res.json().then(function (data) {
+                    return { ok: res.ok, status: res.status, data: data };
+                });
+            })
+            .then(function (result) {
+                if (btn) btn.disabled = false;
+                if (modal) modal.style.display = 'none';
+
+                if (!result.ok) {
+                    var errMsg = (result.data && result.data.error) || 'Failed to process HOD departure.';
+                    if (msgEl) msgEl.innerHTML = '<div class="notice notice-danger">' + esc(errMsg) + '</div>';
+                    return;
+                }
+
+                if (msgEl) {
+                    msgEl.innerHTML = '<div class="notice notice-success" style="padding:16px; font-size:1.05rem;"><strong>Departure Complete:</strong> ' + esc(result.data.message || 'Authority transferred and account deactivated.') + '<br><span style="font-size:0.9em; opacity:0.85;">Your session has ended. Redirecting to login...</span></div>';
+                }
+
+                // Redirect to login after deactivation
+                setTimeout(function () {
+                    window.location.href = '/login';
+                }, 2500);
+            })
+            .catch(function (err) {
+                if (btn) btn.disabled = false;
+                if (modal) modal.style.display = 'none';
+                if (msgEl) msgEl.innerHTML = '<div class="notice notice-danger">' + esc(err.message) + '</div>';
+            });
+    }
+
+    // --- Transfer & Departure Audit Ledger ---
+    function loadTransfersTable() {
+        var tbody = el('transfersTableBody');
+        var emptyNotice = el('transfersEmptyNotice');
+        if (!tbody || !state.user) return;
+
+        tbody.innerHTML = '<tr><td colspan="7" class="muted" style="text-align:center; padding:16px;">Loading history...</td></tr>';
+
+        fetch('/api/delegations/transfers')
+            .then(function (res) { return res.json(); })
+            .then(function (data) {
+                var list = data.transfers || [];
+                if (list.length === 0) {
+                    tbody.innerHTML = '';
+                    if (emptyNotice) emptyNotice.style.display = 'block';
+                    return;
+                }
+
+                if (emptyNotice) emptyNotice.style.display = 'none';
+
+                tbody.innerHTML = list.map(function (t) {
+                    var typeBadge = '';
+                    if (t.transferType === 'ROLE_TRANSFER') {
+                        typeBadge = '<span class="badge badge-primary">ROLE TRANSFER</span>';
+                    } else if (t.transferType === 'LEAVING_COLLEGE') {
+                        typeBadge = '<span class="badge badge-danger">COLLEGE DEPARTURE</span>';
+                    } else {
+                        typeBadge = '<span class="badge badge-secondary">' + esc(t.transferType) + '</span>';
+                    }
+
+                    var recordedDate = t.createdAt ? new Date(t.createdAt).toLocaleString() : '—';
+                    var notesText = t.notes ? esc(t.notes) : '—';
+
+                    return '<tr>' +
+                        '<td>' + typeBadge + '</td>' +
+                        '<td><strong>' + esc(t.previousHodName || 'HOD') + '</strong> <span class="muted">(@' + esc(t.previousHodUsername || '') + ')</span></td>' +
+                        '<td><strong>' + esc(t.newHodName || 'New HOD') + '</strong> <span class="muted">(@' + esc(t.newHodUsername || '') + ')</span></td>' +
+                        '<td>' + esc(t.effectiveDate || '—') + '</td>' +
+                        '<td>' + esc(t.performedByName || 'System') + '</td>' +
+                        '<td><span class="muted" style="font-size:0.85em;">' + esc(recordedDate) + '</span></td>' +
+                        '<td>' + notesText + '</td>' +
+                    '</tr>';
+                }).join('');
+            })
+            .catch(function (err) {
+                tbody.innerHTML = '<tr><td colspan="7" class="text-danger" style="text-align:center; padding:16px;">Failed to load audit history: ' + esc(err.message) + '</td></tr>';
+            });
+    }
 })();
+
