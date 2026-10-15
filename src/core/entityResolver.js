@@ -246,24 +246,8 @@ async function registerFacultyCatalogReference(facultyText, departmentCode, cata
             return existing.rows[0];
         }
 
-        let finalCode = code;
-        const codeConflict = await db.query('SELECT id FROM faculty WHERE UPPER(TRIM(code)) = UPPER(TRIM($1))', [finalCode]);
-        if (codeConflict.rows.length > 0) {
-            finalCode = `${finalCode.slice(0, 24)}_${Date.now().toString().slice(-4)}`;
-        }
-
-        const res = await db.query(
-            `INSERT INTO faculty (code, name, department_id, designation, status, max_weekly_periods)
-             VALUES ($1, $2, $3, 'Faculty', 'active', 28)
-             ON CONFLICT (code) DO UPDATE SET name = EXCLUDED.name, department_id = COALESCE(faculty.department_id, EXCLUDED.department_id)
-             RETURNING id, code, name, designation, status, department_id, false AS "hasUserAccount"`,
-            [finalCode, cleanName, deptId]
-        );
-        const newRecord = res.rows[0];
-        if (catalog && Array.isArray(catalog.faculty)) {
-            catalog.faculty.push(newRecord);
-        }
-        return newRecord;
+        // Do not auto-insert faculty records into the database merely on upload.
+        return null;
     }
 
     // In-memory catalog
@@ -273,20 +257,8 @@ async function registerFacultyCatalogReference(facultyText, departmentCode, cata
     if (existingMem) {
         return existingMem;
     }
-    const newId = source.faculty.length + 1;
-    const newRecord = {
-        id: newId,
-        code: cleanName,
-        name: cleanName,
-        department: dept,
-        status: 'active',
-        hasUserAccount: false
-    };
-    source.faculty.push(newRecord);
-    if (catalog && Array.isArray(catalog.faculty)) {
-        catalog.faculty.push(newRecord);
-    }
-    return newRecord;
+    // Do not auto-insert faculty records merely because a timetable is uploaded.
+    return null;
 }
 
 /**
@@ -716,24 +688,28 @@ async function resolveContract(contract, departmentCode, mappings = {}, options 
                     });
                 }
             } else {
-                informationalWarnings.add(`Faculty '${facultyText}' is not registered in the ${departmentCode} faculty roster and does not have an account in this branch (no login account).`);
-                const registered = await registerFacultyCatalogReference(facultyText, departmentCode, catalog, options);
-                if (registered && registered.id) {
-                    resolvedMap.faculty.set(facultyText, registered);
-                    if (entry.faculty_name && entry.faculty_name !== facultyText) {
-                        resolvedMap.faculty.set(entry.faculty_name, registered);
-                    }
+                const key = `faculty:${facultyText}`;
+                const reason = `Faculty '${facultyText}' is not registered in the ${departmentCode} faculty roster and does not have an account in this branch.`;
+                if (unresolvedMap.has(key)) {
+                    unresolvedMap.get(key).slotsAffected.push(slotLabel);
                 } else {
-                    const unregFac = {
-                        id: null,
-                        code: facultyText,
-                        name: facultyText,
-                        isUnregistered: true
-                    };
-                    resolvedMap.faculty.set(facultyText, unregFac);
-                    if (entry.faculty_name && entry.faculty_name !== facultyText) {
-                        resolvedMap.faculty.set(entry.faculty_name, unregFac);
-                    }
+                    unresolvedMap.set(key, {
+                        entityType: 'faculty',
+                        category: 'Faculty',
+                        extractedText: facultyText,
+                        slotsAffected: [slotLabel],
+                        reason
+                    });
+                }
+                const unregFac = {
+                    id: null,
+                    code: facultyText,
+                    name: facultyText,
+                    isUnregistered: true
+                };
+                resolvedMap.faculty.set(facultyText, unregFac);
+                if (entry.faculty_name && entry.faculty_name !== facultyText) {
+                    resolvedMap.faculty.set(entry.faculty_name, unregFac);
                 }
             }
         } else if (!isActivity && !facultyText) {

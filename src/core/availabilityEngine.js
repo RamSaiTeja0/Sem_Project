@@ -40,11 +40,18 @@ function createEngine(normalized) {
         const slot = bySlot.get(slotKey(record.day, record.period));
         if (!slot) return;
         if (record.status === 'busy') {
+            const fac = facultyMap.get((record.faculty || '').toUpperCase());
+            if (fac && fac.phone && !record.phone) {
+                record.phone = fac.phone;
+            }
             slot.busy.push(record);
         } else if (record.status === 'free') {
             const fac = facultyMap.get((record.faculty || '').toUpperCase());
             const isInactive = (fac && fac.status === 'inactive') || record.facultyStatus === 'inactive';
             if (!isInactive) {
+                if (fac && fac.phone && !record.phone) {
+                    record.phone = fac.phone;
+                }
                 slot.free.push(record);
             }
         }
@@ -370,15 +377,26 @@ function createEngine(normalized) {
         getFacultyGrid: facultyGrid,
 
         /** Summary for the dashboard: totals plus the picture across the week. */
-        getSummary(day, period) {
-            const slotSummary = (day && period) ? this.getAvailability(day, period) : null;
+        getSummary(day, period, branchCode = null) {
+            const bUpper = branchCode ? String(branchCode).trim().toUpperCase() : null;
+            const targetFaculty = bUpper
+                ? faculty.filter(f => (f.department || '').trim().toUpperCase() === bUpper)
+                : faculty;
+
+            const slotSummary = (day && period) ? this.getAvailability(day, period, bUpper ? { department: bUpper } : {}) : null;
             const perSlot = [];
             days.forEach(d => periods.forEach(p => {
                 const slot = bySlot.get(slotKey(d, p));
-                perSlot.push({ day: d, period: p, available: slot.free.length, busy: slot.busy.length });
+                const available = bUpper
+                    ? slot.free.filter(r => (r.department || '').trim().toUpperCase() === bUpper).length
+                    : slot.free.length;
+                const busy = bUpper
+                    ? slot.busy.filter(r => (r.department || '').trim().toUpperCase() === bUpper).length
+                    : slot.busy.length;
+                perSlot.push({ day: d, period: p, available, busy });
             }));
             return {
-                totalFaculty: faculty.length,
+                totalFaculty: targetFaculty.length,
                 days: days.slice(),
                 periods: periods.slice(),
                 classes: meta.classes.slice(),

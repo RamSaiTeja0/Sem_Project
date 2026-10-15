@@ -1305,6 +1305,63 @@ Prof. B. Kumar, FREE, FREE, Database Management Systems"></textarea>
             </div>
           </div>
         </div>
+
+        <!-- Deactivate Faculty / Faculty Leaving College Modal -->
+        <div id="deactivateFacultyModal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(15,23,42,0.6); z-index:1000; align-items:center; justify-content:center; padding:16px; overflow-y:auto;">
+          <div class="card" style="max-width:540px; width:100%; max-height:88vh; display:flex; flex-direction:column; margin:auto; box-shadow:var(--shadow-lg, 0 10px 25px rgba(0,0,0,0.2)); border-radius:var(--radius-md); overflow:hidden;">
+            <div class="card-head" style="border-bottom:1px solid var(--border); padding-bottom:12px; flex-shrink:0; background:var(--surface);">
+              <div>
+                <h3 style="margin:0; font-size:1.15rem; color:var(--danger-700);">Faculty Leaving College / Deactivate Faculty</h3>
+                <p class="muted" style="margin:4px 0 0; font-size:0.84rem;">Revoke system access and deactivate account while preserving all historical data.</p>
+              </div>
+              <button type="button" class="btn btn-ghost btn-sm" id="btnDeactivateFacClose" style="font-size:1.1rem; line-height:1; padding:4px 8px;">✕</button>
+            </div>
+            <div class="card-body" style="padding-top:16px; overflow-y:auto; flex:1 1 auto; max-height:calc(88vh - 65px);">
+              <form id="deactivateFacultyForm" autocomplete="off">
+                <input type="hidden" id="deactivateFacId" />
+                <div class="controls" style="display:flex; flex-direction:column; gap:12px;">
+                  <div style="background:var(--canvas-subtle); padding:12px 14px; border-radius:var(--radius-sm); border:1px solid var(--line); display:grid; grid-template-columns:auto 1fr; gap:6px 12px; font-size:0.88rem;">
+                    <span style="font-weight:600; color:var(--ink-600);">Faculty ID:</span>
+                    <span id="deactivateFacIdDisplay" class="mono" style="font-weight:700; color:var(--ink-900);">—</span>
+                    <span style="font-weight:600; color:var(--ink-600);">Faculty Name:</span>
+                    <span id="deactivateFacNameDisplay" style="font-weight:700; color:var(--ink-900);">—</span>
+                    <span style="font-weight:600; color:var(--ink-600);">Branch:</span>
+                    <div><span id="deactivateFacBranchDisplay" class="badge badge-primary">—</span></div>
+                    <span style="font-weight:600; color:var(--ink-600);">Account Status:</span>
+                    <span id="deactivateFacStatusDisplay" style="font-weight:600;">Active</span>
+                  </div>
+
+                  <div class="notice notice-warning" style="font-size:0.85rem; margin:0;">
+                    <strong>Notice:</strong> This action will:
+                    <ul style="margin:4px 0 0 16px; padding:0; font-size:0.84rem;">
+                      <li>Deactivate the faculty member's login account and invalidate all active sessions.</li>
+                      <li>Remove them from active faculty availability and substitution candidate lists.</li>
+                      <li>Safely cancel any pending substitution requests and active acting delegations.</li>
+                      <li><strong>Permanently preserve</strong> all historical timetable, attendance, substitution, and invigilation records.</li>
+                    </ul>
+                  </div>
+
+                  <label class="field">
+                    <span>Effective Leaving Date <em class="req" style="color:var(--danger-500);">*</em></span>
+                    <input type="date" id="deactivateEffectiveDate" required />
+                  </label>
+
+                  <label class="field">
+                    <span>Reason / Departure Notes (Optional)</span>
+                    <textarea id="deactivateReason" rows="2" placeholder="e.g. Resigned / Relocated to another institution"></textarea>
+                  </label>
+
+                  <div id="deactivateFacNote" class="notice notice-danger" style="display:none; margin-top:4px; font-weight:600; font-size:0.9rem; word-break:break-word;"></div>
+
+                  <div style="display:flex; gap:10px; justify-content:flex-end; margin-top:14px; padding-top:12px; border-top:1px solid var(--border);">
+                    <button type="button" class="btn btn-secondary" id="btnDeactivateFacCancel">Cancel</button>
+                    <button type="submit" class="btn btn-danger" id="btnConfirmDeactivateFaculty">Confirm Deactivation</button>
+                  </div>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
       </section>
 
       <!-- ---------------- FACULTY REGISTRATION REQUESTS ---------------- -->
@@ -2008,87 +2065,292 @@ Prof. B. Kumar, FREE, FREE, Database Management Systems"></textarea>
         </div>
       </section>
 
-      <!-- ----------------------- HOD DELEGATION ----------------------- -->
+      <!-- ----------------------- HOD DELEGATION & ROLE MANAGEMENT ----------------------- -->
       <section class="view" id="view-delegation">
-        <!-- Assign Acting HOD Card -->
-        <div class="card" style="margin-bottom: 20px;">
-          <div class="card-head">
-            <div>
-              <h2>Assign Acting HOD</h2>
-              <p>Temporarily delegate Head of Department (HOD) responsibilities to an active faculty member of your branch during leave or absence.</p>
+        <!-- Sub-Navigation Bar for Workflows -->
+        <div class="delegation-tabs" style="display: flex; gap: 8px; margin-bottom: 20px; border-bottom: 1px solid var(--border); padding-bottom: 8px; flex-wrap: wrap;">
+          <button type="button" class="btn btn-sm btn-primary active-del-tab" id="tabBtnActingDelegation" data-tab="pane-acting-delegation">⏱️ Acting HOD Delegation</button>
+          <button type="button" class="btn btn-sm btn-secondary" id="tabBtnPermanentTransfer" data-tab="pane-permanent-transfer">🔄 Permanent Role Transfer</button>
+          <button type="button" class="btn btn-sm btn-secondary" id="tabBtnLeavingCollege" data-tab="pane-leaving-college">🚪 HOD Leaving College</button>
+          <button type="button" class="btn btn-sm btn-secondary" id="tabBtnTransferHistory" data-tab="pane-transfer-history">📜 Audit History</button>
+        </div>
+
+        <!-- PANE 1: Temporary Acting HOD Delegation -->
+        <div class="del-tab-pane" id="pane-acting-delegation">
+          <!-- Assign Acting HOD Card -->
+          <div class="card" style="margin-bottom: 20px;">
+            <div class="card-head">
+              <div>
+                <h2>Assign Acting HOD (Temporary)</h2>
+                <p>Temporarily delegate Head of Department (HOD) responsibilities to an active faculty member of your branch during leave or absence.</p>
+              </div>
+              <span class="badge badge-primary" id="delCurrentBranchBadge">Branch</span>
             </div>
-            <span class="badge badge-primary" id="delCurrentBranchBadge">Branch</span>
+            <div class="card-body">
+              <form id="delegationForm" autocomplete="off">
+                <div class="field-grid" style="grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px;">
+                  <label class="field">
+                    <span>Current Permanent HOD</span>
+                    <input type="text" id="delCurrentHOD" readonly style="background: rgba(0,0,0,0.03);" />
+                  </label>
+                  <label class="field">
+                    <span>Acting HOD (Select Faculty) <strong style="color:var(--danger, #ef4444); font-size:0.85em;">*</strong></span>
+                    <select id="delFacultySelect" required>
+                      <option value="">-- Select Active Faculty Member --</option>
+                    </select>
+                  </label>
+                  <label class="field">
+                    <span>From (Start Date) <strong style="color:var(--danger, #ef4444); font-size:0.85em;">*</strong></span>
+                    <input type="date" id="delStartDate" required />
+                  </label>
+                  <label class="field">
+                    <span>To (End Date) <strong style="color:var(--danger, #ef4444); font-size:0.85em;">*</strong></span>
+                    <input type="date" id="delEndDate" required />
+                  </label>
+                </div>
+                <div style="margin-top: 14px;">
+                  <label class="field">
+                    <span>Notes / Reason (Optional)</span>
+                    <input type="text" id="delNotes" placeholder="e.g. Annual leave, duty leave, conference" />
+                  </label>
+                </div>
+                <div style="margin-top: 16px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+                  <button type="submit" class="btn btn-primary" id="btnAssignDelegation">Assign Acting HOD</button>
+                  <button type="button" class="btn btn-secondary" id="btnRefreshDelegations">Refresh History</button>
+                </div>
+              </form>
+              <div id="delFormMsg" style="margin-top: 14px;"></div>
+            </div>
           </div>
-          <div class="card-body">
-            <form id="delegationForm" autocomplete="off">
-              <div class="field-grid" style="grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px;">
-                <label class="field">
-                  <span>Current Permanent HOD</span>
-                  <input type="text" id="delCurrentHOD" readonly style="background: rgba(0,0,0,0.03);" />
-                </label>
-                <label class="field">
-                  <span>Acting HOD (Select Faculty) <strong style="color:var(--danger, #ef4444); font-size:0.85em;">*</strong></span>
-                  <select id="delFacultySelect" required>
-                    <option value="">-- Select Active Faculty Member --</option>
-                  </select>
-                </label>
-                <label class="field">
-                  <span>From (Start Date) <strong style="color:var(--danger, #ef4444); font-size:0.85em;">*</strong></span>
-                  <input type="date" id="delStartDate" required />
-                </label>
-                <label class="field">
-                  <span>To (End Date) <strong style="color:var(--danger, #ef4444); font-size:0.85em;">*</strong></span>
-                  <input type="date" id="delEndDate" required />
-                </label>
+
+          <!-- Delegation History Card -->
+          <div class="card">
+            <div class="card-head">
+              <div>
+                <h2>Acting Delegation History & Status</h2>
+                <p>View all active, future, expired, and cancelled temporary delegations for your branch.</p>
               </div>
-              <div style="margin-top: 14px;">
-                <label class="field">
-                  <span>Notes / Reason (Optional)</span>
-                  <input type="text" id="delNotes" placeholder="e.g. Annual leave, duty leave, conference" />
-                </label>
+            </div>
+            <div class="card-body">
+              <div class="table-scroll">
+                <table class="data" id="delegationsTable">
+                  <thead>
+                    <tr>
+                      <th>Acting HOD</th>
+                      <th>Designation</th>
+                      <th>From Date</th>
+                      <th>To Date</th>
+                      <th>Status</th>
+                      <th>Assigned By</th>
+                      <th>Created At</th>
+                      <th>Action</th>
+                    </tr>
+                  </thead>
+                  <tbody id="delegationsTableBody">
+                    <tr><td colspan="8" class="muted" style="text-align:center; padding:16px;">Loading delegations...</td></tr>
+                  </tbody>
+                </table>
               </div>
-              <div style="margin-top: 16px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
-                <button type="submit" class="btn btn-primary" id="btnAssignDelegation">Assign Acting HOD</button>
-                <button type="button" class="btn btn-secondary" id="btnRefreshDelegations">Refresh History</button>
+              <div id="delEmptyNotice" class="notice notice-info" style="display:none; margin-top:12px;">
+                No delegations recorded for your branch.
               </div>
-            </form>
-            <div id="delFormMsg" style="margin-top: 14px;"></div>
+            </div>
           </div>
         </div>
 
-        <!-- Delegation History Card -->
-        <div class="card">
-          <div class="card-head">
-            <div>
-              <h2>Delegation History & Status</h2>
-              <p>View all active, future, expired, and cancelled delegations for your branch.</p>
+        <!-- PANE 2: Permanent HOD Role Transfer (Outgoing HOD remains as Faculty) -->
+        <div class="del-tab-pane" id="pane-permanent-transfer" style="display:none;">
+          <div class="card" style="margin-bottom: 20px;">
+            <div class="card-head">
+              <div>
+                <h2>Permanent HOD Role Transfer</h2>
+                <p>Transfer the Head of Department (HOD) role to an active faculty colleague within your branch. You will transition to Faculty while preserving your existing faculty record, user account, timetable, attendance, and substitutions.</p>
+              </div>
+              <span class="badge badge-primary" id="transferBranchBadge">Branch</span>
             </div>
-          </div>
-          <div class="card-body">
-            <div class="table-scroll">
-              <table class="data" id="delegationsTable">
-                <thead>
-                  <tr>
-                    <th>Acting HOD</th>
-                    <th>Designation</th>
-                    <th>From Date</th>
-                    <th>To Date</th>
-                    <th>Status</th>
-                    <th>Assigned By</th>
-                    <th>Created At</th>
-                    <th>Action</th>
-                  </tr>
-                </thead>
-                <tbody id="delegationsTableBody">
-                  <tr><td colspan="8" class="muted" style="text-align:center; padding:16px;">Loading delegations...</td></tr>
-                </tbody>
-              </table>
-            </div>
-            <div id="delEmptyNotice" class="notice notice-info" style="display:none; margin-top:12px;">
-              No delegations recorded for your branch.
+            <div class="card-body">
+              <div class="notice notice-info" style="margin-bottom: 16px;">
+                <strong>Role Transfer Process:</strong> Upon explicit confirmation, the selected faculty member will be promoted to Head of Department (HOD) for this branch, and your role will become Faculty. All existing teaching records, timetables, and historical substitution logs remain intact.
+              </div>
+              <form id="formPermanentTransfer" autocomplete="off">
+                <div class="field-grid" style="grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px;">
+                  <label class="field">
+                    <span>Current Permanent HOD (You)</span>
+                    <input type="text" id="transferCurrentHOD" readonly style="background: rgba(0,0,0,0.03);" />
+                  </label>
+                  <label class="field">
+                    <span>New HOD (Replacement Faculty) <strong style="color:var(--danger, #ef4444); font-size:0.85em;">*</strong></span>
+                    <select id="transferFacultySelect" required>
+                      <option value="">-- Select Active Faculty Member --</option>
+                    </select>
+                  </label>
+                </div>
+                <div style="margin-top: 14px;">
+                  <label class="field">
+                    <span>Transition Reason / Handover Notes (Optional)</span>
+                    <input type="text" id="transferNotes" placeholder="e.g. Stepping down, departmental rotation, teaching focus" />
+                  </label>
+                </div>
+                <div style="margin-top: 16px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+                  <button type="submit" class="btn btn-primary" id="btnInitiateTransfer">Initiate Role Transfer</button>
+                </div>
+              </form>
+              <div id="transferFormMsg" style="margin-top: 14px;"></div>
             </div>
           </div>
         </div>
+
+        <!-- PANE 3: HOD Leaving College (Departure & Account Deactivation) -->
+        <div class="del-tab-pane" id="pane-leaving-college" style="display:none;">
+          <div class="card" style="margin-bottom: 20px;">
+            <div class="card-head">
+              <div>
+                <h2>HOD Leaving College</h2>
+                <p>Transfer departmental authority to a successor HOD when resigning or leaving the college completely. Outgoing HOD access will be revoked and accounts deactivated, while all historical records remain safely preserved.</p>
+              </div>
+              <span class="badge badge-danger" id="leavingBranchBadge">Departure</span>
+            </div>
+            <div class="card-body">
+              <div class="notice notice-warning" style="margin-bottom: 16px; border-left: 4px solid var(--danger, #ef4444);">
+                <strong>Departure Handover:</strong> You must select an active faculty colleague to succeed as the new HOD. Upon confirmation, your HOD authority and login access will be permanently revoked and deactivated. All historical timetable slots, attendance, invigilations, and substitution records are preserved for institutional auditing.
+              </div>
+              <form id="formLeavingCollege" autocomplete="off">
+                <div class="field-grid" style="grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px;">
+                  <label class="field">
+                    <span>Outgoing HOD (You)</span>
+                    <input type="text" id="leavingCurrentHOD" readonly style="background: rgba(0,0,0,0.03);" />
+                  </label>
+                  <label class="field">
+                    <span>Successor HOD (Replacement Faculty) <strong style="color:var(--danger, #ef4444); font-size:0.85em;">*</strong></span>
+                    <select id="leavingFacultySelect" required>
+                      <option value="">-- Select Active Faculty Member --</option>
+                    </select>
+                  </label>
+                  <label class="field">
+                    <span>Effective Date <strong style="color:var(--danger, #ef4444); font-size:0.85em;">*</strong></span>
+                    <input type="date" id="leavingEffectiveDate" required />
+                  </label>
+                </div>
+                <div style="margin-top: 14px;">
+                  <label class="field">
+                    <span>Departure Reason / Notes (Optional)</span>
+                    <input type="text" id="leavingNotes" placeholder="e.g. Resignation, retirement, relocation" />
+                  </label>
+                </div>
+                <div style="margin-top: 16px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+                  <button type="submit" class="btn btn-danger" id="btnInitiateLeaving" style="background:#ef4444; border-color:#dc2626; color:#fff;">Initiate HOD Departure</button>
+                </div>
+              </form>
+              <div id="leavingFormMsg" style="margin-top: 14px;"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- PANE 4: Audit History -->
+        <div class="del-tab-pane" id="pane-transfer-history" style="display:none;">
+          <div class="card">
+            <div class="card-head">
+              <div>
+                <h2>HOD Role Transfers & Departure History</h2>
+                <p>Complete audit ledger of permanent HOD role transfers and college departures for your branch.</p>
+              </div>
+              <button type="button" class="btn btn-secondary btn-sm" id="btnRefreshTransferHistory">Refresh</button>
+            </div>
+            <div class="card-body">
+              <div class="table-scroll">
+                <table class="data" id="transfersTable">
+                  <thead>
+                    <tr>
+                      <th>Event Type</th>
+                      <th>Previous HOD</th>
+                      <th>New HOD</th>
+                      <th>Effective Date</th>
+                      <th>Performed By</th>
+                      <th>Recorded At</th>
+                      <th>Notes</th>
+                    </tr>
+                  </thead>
+                  <tbody id="transfersTableBody">
+                    <tr><td colspan="7" class="muted" style="text-align:center; padding:16px;">Loading history...</td></tr>
+                  </tbody>
+                </table>
+              </div>
+              <div id="transfersEmptyNotice" class="notice notice-info" style="display:none; margin-top:12px;">
+                No permanent transfers or departures recorded for your branch.
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Modal: Confirm Permanent HOD Role Transfer -->
+        <div id="modalConfirmTransfer" style="display:none; position:fixed; inset:0; background:rgba(15,23,42,0.6); z-index:10000; align-items:center; justify-content:center; padding:16px;">
+          <div class="card" style="max-width:520px; width:100%; box-shadow:0 20px 25px -5px rgba(0,0,0,0.5);">
+            <div class="card-head">
+              <div>
+                <h3 style="margin:0; font-size:1.15rem;">🔄 Confirm Permanent HOD Role Transfer</h3>
+                <p class="muted" style="margin:4px 0 0 0; font-size:0.85rem;">Review transition details before applying changes.</p>
+              </div>
+              <button type="button" class="btn btn-ghost btn-sm" id="btnCloseTransferModal" style="font-size:1.1rem;">✕</button>
+            </div>
+            <div class="card-body">
+              <div style="background:rgba(59,130,246,0.08); border-left:4px solid var(--primary, #3b82f6); padding:12px; border-radius:4px; margin-bottom:16px;">
+                <p style="margin:0 0 6px 0; font-size:0.9rem;"><strong>What happens next:</strong></p>
+                <ul style="margin:0; padding-left:18px; font-size:0.85rem; line-height:1.5;">
+                  <li><strong id="modalTransferNewName">Selected Faculty</strong> will immediately become the new <strong>Head of Department (HOD)</strong>.</li>
+                  <li><strong id="modalTransferOutName">You</strong> will transition to <strong>Faculty</strong> role.</li>
+                  <li>Your user account and faculty record will remain active.</li>
+                  <li>All timetables, attendance, and substitution history are preserved.</li>
+                </ul>
+              </div>
+              <table style="width:100%; font-size:0.9rem; margin-bottom:16px; border-collapse:collapse;">
+                <tr><td style="padding:6px 0; color:var(--muted); width:40%;">Branch:</td><td style="padding:6px 0; font-weight:600;" id="modalTransferBranch">--</td></tr>
+                <tr><td style="padding:6px 0; color:var(--muted);">Outgoing HOD:</td><td style="padding:6px 0; font-weight:600;" id="modalTransferPrevHod">--</td></tr>
+                <tr><td style="padding:6px 0; color:var(--muted);">New HOD:</td><td style="padding:6px 0; font-weight:600; color:var(--primary, #3b82f6);" id="modalTransferNewHod">--</td></tr>
+                <tr><td style="padding:6px 0; color:var(--muted);">Notes:</td><td style="padding:6px 0;" id="modalTransferNotes">--</td></tr>
+              </table>
+              <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:16px;">
+                <button type="button" class="btn btn-secondary" id="btnCancelTransferModal">Cancel</button>
+                <button type="button" class="btn btn-primary" id="btnConfirmTransferSubmit">Confirm Role Transfer</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Modal: Confirm HOD Leaving College -->
+        <div id="modalConfirmLeaving" style="display:none; position:fixed; inset:0; background:rgba(15,23,42,0.6); z-index:10000; align-items:center; justify-content:center; padding:16px;">
+          <div class="card" style="max-width:540px; width:100%; box-shadow:0 20px 25px -5px rgba(0,0,0,0.5);">
+            <div class="card-head" style="border-bottom-color:rgba(239,68,68,0.2);">
+              <div>
+                <h3 style="margin:0; font-size:1.15rem; color:var(--danger, #ef4444);">🚪 Confirm HOD Leaving College & Deactivation</h3>
+                <p class="muted" style="margin:4px 0 0 0; font-size:0.85rem;">Warning: This action will permanently deactivate your account.</p>
+              </div>
+              <button type="button" class="btn btn-ghost btn-sm" id="btnCloseLeavingModal" style="font-size:1.1rem;">✕</button>
+            </div>
+            <div class="card-body">
+              <div style="background:rgba(239,68,68,0.08); border-left:4px solid var(--danger, #ef4444); padding:12px; border-radius:4px; margin-bottom:16px;">
+                <p style="margin:0 0 6px 0; font-size:0.9rem; color:#b91c1c;"><strong>Critical Security Notice:</strong></p>
+                <ul style="margin:0; padding-left:18px; font-size:0.85rem; line-height:1.5;">
+                  <li>HOD authority will be transferred to <strong id="modalLeavingNewName">Successor</strong>.</li>
+                  <li><strong>Your account access will be revoked immediately</strong> and active sessions will end.</li>
+                  <li>You will not be able to log in after this action.</li>
+                  <li>All historical timetable and substitution records remain safely stored.</li>
+                </ul>
+              </div>
+              <table style="width:100%; font-size:0.9rem; margin-bottom:16px; border-collapse:collapse;">
+                <tr><td style="padding:6px 0; color:var(--muted); width:40%;">Branch:</td><td style="padding:6px 0; font-weight:600;" id="modalLeavingBranch">--</td></tr>
+                <tr><td style="padding:6px 0; color:var(--muted);">Outgoing HOD:</td><td style="padding:6px 0; font-weight:600; color:var(--danger, #ef4444);" id="modalLeavingPrevHod">--</td></tr>
+                <tr><td style="padding:6px 0; color:var(--muted);">Successor HOD:</td><td style="padding:6px 0; font-weight:600; color:var(--primary, #3b82f6);" id="modalLeavingNewHod">--</td></tr>
+                <tr><td style="padding:6px 0; color:var(--muted);">Effective Date:</td><td style="padding:6px 0; font-weight:600;" id="modalLeavingEffectiveDate">--</td></tr>
+                <tr><td style="padding:6px 0; color:var(--muted);">Notes:</td><td style="padding:6px 0;" id="modalLeavingNotes">--</td></tr>
+              </table>
+              <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:16px;">
+                <button type="button" class="btn btn-secondary" id="btnCancelLeavingModal">Cancel</button>
+                <button type="button" class="btn btn-danger" id="btnConfirmLeavingSubmit" style="background:#ef4444; border-color:#dc2626; color:#fff;">Confirm Departure & Handover</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
       </section>
 
     </div>

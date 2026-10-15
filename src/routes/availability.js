@@ -23,13 +23,15 @@ const { AUTHORITATIVE_PERIOD_TIMINGS } = require('../core/normalizer');
  * Returns active faculty who have valid active faculty login accounts (role = 'faculty').
  * Relational join: faculty.id = users.faculty_id
  */
-async function getActiveFacultyWithAccounts() {
+async function getActiveFacultyWithAccounts(branchCode = null) {
+    const bUpper = branchCode ? String(branchCode).trim().toUpperCase() : null;
     if (db.isConfigured() && store.usingDatabase) {
         try {
-            const { rows } = await db.query(`
+            let query = `
                 SELECT f.id, f.code, f.name, f.department_id, d.code AS branch,
                        u.id AS user_id, u.username, u.role, u.status AS user_status, u.active AS user_active,
-                       f.designation, f.phone
+                       f.designation,
+                       COALESCE(NULLIF(f.phone, ''), NULLIF(u.phone, '')) AS phone
                   FROM faculty f
                  INNER JOIN users u ON u.faculty_id = f.id
                   LEFT JOIN departments d ON d.id = f.department_id
@@ -37,18 +39,34 @@ async function getActiveFacultyWithAccounts() {
                    AND (u.active IS TRUE OR u.active IS NULL)
                    AND (u.status = 'active' OR u.status IS NULL)
                    AND (f.status = 'active' OR f.status IS NULL)
-                 ORDER BY f.name
-            `);
+            `;
+            const params = [];
+            if (bUpper) {
+                params.push(bUpper);
+                query += ` AND UPPER(d.code) = $${params.length}`;
+            }
+            query += ` ORDER BY f.name`;
+            const { rows } = await db.query(query, params);
             if (rows.length > 0) return rows;
 
-            const fallback = await db.query(`
+            let fallbackQuery = `
                 SELECT f.id, f.code, f.name, f.department_id, d.code AS branch,
-                       f.designation, f.phone
+                       f.designation,
+                       COALESCE(
+                           NULLIF(f.phone, ''),
+                           (SELECT NULLIF(u.phone, '') FROM users u WHERE (u.faculty_id = f.id OR UPPER(u.username) = UPPER(f.code)) AND u.phone IS NOT NULL AND u.phone <> '' LIMIT 1)
+                       ) AS phone
                   FROM faculty f
                   LEFT JOIN departments d ON d.id = f.department_id
                  WHERE (f.status = 'active' OR f.status IS NULL)
-                 ORDER BY f.name
-            `);
+            `;
+            const fallbackParams = [];
+            if (bUpper) {
+                fallbackParams.push(bUpper);
+                fallbackQuery += ` AND UPPER(d.code) = $${fallbackParams.length}`;
+            }
+            fallbackQuery += ` ORDER BY f.name`;
+            const fallback = await db.query(fallbackQuery, fallbackParams);
             return fallback.rows;
         } catch (err) {
             console.error('[db] Error loading active faculty with accounts:', err.message);
@@ -60,16 +78,20 @@ async function getActiveFacultyWithAccounts() {
     const memUsers = (typeof usersModule.list === 'function' ? usersModule.list() : []) || [];
     const validMemUsers = memUsers.filter(u =>
         u.role === 'faculty' &&
+        (!bUpper || (u.department || '').trim().toUpperCase() === bUpper) &&
         (u.active === true || u.active === undefined) &&
         (u.status === 'active' || u.status === undefined)
     );
 
     const roster = store.engine ? store.engine.getFaculty() : [];
+    const filteredRoster = bUpper
+        ? roster.filter(f => (f.department || '').trim().toUpperCase() === bUpper)
+        : roster;
     const matched = [];
     for (const u of validMemUsers) {
         const uFacId = u.facultyId || u.faculty_id;
         const uName = u.name || u.facultyName;
-        const fac = roster.find(f =>
+        const fac = filteredRoster.find(f =>
             (uFacId != null && f.id != null && String(f.id).toUpperCase() === String(uFacId).toUpperCase()) ||
             (uFacId != null && f.code != null && String(f.code).toUpperCase() === String(uFacId).toUpperCase()) ||
             (uName != null && f.name != null && String(f.name).trim().toUpperCase() === String(uName).trim().toUpperCase())
@@ -91,8 +113,8 @@ async function getActiveFacultyWithAccounts() {
             });
         }
     }
-    if (matched.length === 0 && roster.length > 0) {
-        return roster.filter(f => f.status !== 'inactive').map(fac => ({
+    if (matched.length === 0 && filteredRoster.length > 0) {
+        return filteredRoster.filter(f => f.status !== 'inactive').map(fac => ({
             id: fac.id,
             code: fac.code,
             name: fac.name,
@@ -106,6 +128,46 @@ async function getActiveFacultyWithAccounts() {
         }));
     }
     return matched;
+}
+
+function buildFacultyPhoneResolver(validFacultyList) {
+    const facultyPhoneMap = new Map();
+    if (Array.isArray(validFacultyList)) {
+        validFacultyList.forEach(f => {
+            const ph = f.phone ? String(f.phone).trim() : null;
+            if (ph) {
+                if (f.id != null) facultyPhoneMap.set(String(f.id), ph);
+                if (f.code != null) facultyPhoneMap.set(String(f.code).toUpperCase(), ph);
+                if (f.name != null) facultyPhoneMap.set(String(f.name).trim().toUpperCase(), ph);
+                if (f.facultyName != null) facultyPhoneMap.set(String(f.facultyName).trim().toUpperCase(), ph);
+            }
+        });
+    }
+    if (store.engine && typeof store.engine.getFaculty === 'function') {
+        try {
+            store.engine.getFaculty().forEach(f => {
+                const ph = f.phone ? String(f.phone).trim() : null;
+                if (ph) {
+                    if (f.id != null && !facultyPhoneMap.has(String(f.id))) facultyPhoneMap.set(String(f.id), ph);
+                    if (f.code != null && !facultyPhoneMap.has(String(f.code).toUpperCase())) facultyPhoneMap.set(String(f.code).toUpperCase(), ph);
+                    if (f.name != null && !facultyPhoneMap.has(String(f.name).trim().toUpperCase())) facultyPhoneMap.set(String(f.name).trim().toUpperCase(), ph);
+                }
+            });
+        } catch (_) {}
+    }
+
+    return function resolvePhone(r) {
+        if (!r) return null;
+        const directPhone = r.phone ? String(r.phone).trim() : null;
+        if (directPhone) return directPhone;
+        const idStr = r.facultyId != null ? String(r.facultyId) : (r.id != null ? String(r.id) : null);
+        if (idStr && facultyPhoneMap.has(idStr)) return facultyPhoneMap.get(idStr);
+        const codeUpper = r.code ? String(r.code).trim().toUpperCase() : null;
+        if (codeUpper && facultyPhoneMap.has(codeUpper)) return facultyPhoneMap.get(codeUpper);
+        const nameUpper = (r.faculty || r.name || r.facultyName || '').trim().toUpperCase();
+        if (nameUpper && facultyPhoneMap.has(nameUpper)) return facultyPhoneMap.get(nameUpper);
+        return null;
+    };
 }
 
 function resolveSlot(engine, rawDay, rawPeriod) {
@@ -253,10 +315,19 @@ async function handle(req, input, res, isHOSOnly = false) {
         return false;
     };
 
-    const filteredAvailable = (result.available || []).filter(isAllowed);
-    const filteredBusy = (result.busy || []).filter(isAllowed);
-    const filteredSameBranchAvailable = (result.sameBranch ? result.sameBranch.available : []).filter(isAllowed);
-    const filteredOtherBranchesAvailable = (result.otherBranches ? result.otherBranches.available : []).filter(isAllowed);
+    const resolvePhone = buildFacultyPhoneResolver(validFacultyList);
+    const enrichPhone = r => {
+        if (!r) return r;
+        return {
+            ...r,
+            phone: resolvePhone(r)
+        };
+    };
+
+    const filteredAvailable = (result.available || []).filter(isAllowed).map(enrichPhone);
+    const filteredBusy = (result.busy || []).filter(isAllowed).map(enrichPhone);
+    const filteredSameBranchAvailable = (result.sameBranch ? result.sameBranch.available : []).filter(isAllowed).map(enrichPhone);
+    const filteredOtherBranchesAvailable = (result.otherBranches ? result.otherBranches.available : []).filter(isAllowed).map(enrichPhone);
 
     const branchFaculty = validFacultyList.filter(f =>
         !priorityBranch || (f.branch || '').toUpperCase() === priorityBranch.toUpperCase()
@@ -272,7 +343,7 @@ async function handle(req, input, res, isHOSOnly = false) {
             facultyName: r.faculty,
             department: r.department,
             branch: r.department,
-            phone: r.phone || null,
+            phone: resolvePhone(r),
             status: 'FREE',
             reason: null,
             isSameBranch: r.isSameBranch
@@ -284,7 +355,7 @@ async function handle(req, input, res, isHOSOnly = false) {
             facultyName: r.faculty,
             department: r.department,
             branch: r.department,
-            phone: r.phone || null,
+            phone: resolvePhone(r),
             subject: r.subject,
             className: r.className,
             room: r.room,
@@ -307,7 +378,7 @@ async function handle(req, input, res, isHOSOnly = false) {
                     facultyName: ab.name,
                     department: ab.department,
                     branch: ab.department,
-                    phone: null,
+                    phone: resolvePhone(ab),
                     status: 'ABSENT',
                     reason: null,
                     isSameBranch: Boolean(priorityBranch && (ab.department || '').toUpperCase() === priorityBranch.toUpperCase())
@@ -342,6 +413,7 @@ async function handle(req, input, res, isHOSOnly = false) {
                 facultyName: f.name,
                 department: f.branch || f.department,
                 branch: f.branch || f.department,
+                phone: resolvePhone(f),
                 status: 'ABSENT',
                 reason: null,
                 isSameBranch: true
@@ -356,6 +428,7 @@ async function handle(req, input, res, isHOSOnly = false) {
                     facultyName: f.name,
                     department: f.branch || f.department,
                     branch: f.branch || f.department,
+                    phone: resolvePhone(f),
                     subject: bRec.subject || null,
                     className: bRec.className || null,
                     room: bRec.room || null,
@@ -372,6 +445,7 @@ async function handle(req, input, res, isHOSOnly = false) {
                     facultyName: f.name,
                     department: f.branch || f.department,
                     branch: f.branch || f.department,
+                    phone: resolvePhone(f),
                     status: 'FREE',
                     reason: null,
                     isSameBranch: true
@@ -390,6 +464,7 @@ async function handle(req, input, res, isHOSOnly = false) {
             facultyName: ob.faculty,
             department: ob.department,
             branch: ob.department,
+            phone: resolvePhone(ob),
             status: 'FREE',
             reason: null,
             isSameBranch: false
@@ -412,7 +487,7 @@ async function handle(req, input, res, isHOSOnly = false) {
         branch: branchCode,
         department: branchCode,
         priorityBranch: priorityBranch,
-        absentFaculty: absentMember ? { id: absentMember.id, name: absentMember.name, department: absentMember.branch || absentMember.department } : null,
+        absentFaculty: absentMember ? { id: absentMember.id, name: absentMember.name, department: absentMember.branch || absentMember.department, phone: resolvePhone(absentMember) } : null,
         absentList: absentFacultyList,
         faculty: facultyList,
         allFaculty: allFaculty,
@@ -611,10 +686,19 @@ async function handleCandidates(req, input, res) {
         return false;
     };
 
-    const filteredAvailable = (result.available || []).filter(isAllowed);
-    const filteredBusy = (result.busy || []).filter(isAllowed);
-    const filteredSameBranch = (result.sameBranch ? result.sameBranch.available : []).filter(isAllowed);
-    const filteredOtherBranches = (result.otherBranches ? result.otherBranches.available : []).filter(isAllowed);
+    const resolveHOSPhone = buildFacultyPhoneResolver(validFacultyList);
+    const enrichHOSPhone = r => {
+        if (!r) return r;
+        return {
+            ...r,
+            phone: resolveHOSPhone(r)
+        };
+    };
+
+    const filteredAvailable = (result.available || []).filter(isAllowed).map(enrichHOSPhone);
+    const filteredBusy = (result.busy || []).filter(isAllowed).map(enrichHOSPhone);
+    const filteredSameBranch = (result.sameBranch ? result.sameBranch.available : []).filter(isAllowed).map(enrichHOSPhone);
+    const filteredOtherBranches = (result.otherBranches ? result.otherBranches.available : []).filter(isAllowed).map(enrichHOSPhone);
 
     // Candidates: ONLY FREE faculty with active accounts
     const candidates = filteredAvailable.map(r => ({
@@ -624,7 +708,7 @@ async function handleCandidates(req, input, res) {
         name: r.faculty,
         department: r.department,
         branch: r.department,
-        phone: r.phone || null,
+        phone: resolveHOSPhone(r),
         status: 'FREE',
         reason: null,
         isSameBranch: r.isSameBranch
@@ -637,7 +721,7 @@ async function handleCandidates(req, input, res) {
         name: r.faculty,
         department: r.department,
         branch: r.department,
-        phone: r.phone || null,
+        phone: resolveHOSPhone(r),
         status: 'FREE',
         reason: null,
         isSameBranch: true
@@ -650,7 +734,7 @@ async function handleCandidates(req, input, res) {
         name: r.faculty,
         department: r.department,
         branch: r.department,
-        phone: r.phone || null,
+        phone: resolveHOSPhone(r),
         status: 'FREE',
         reason: null,
         isSameBranch: false
@@ -681,6 +765,7 @@ async function handleCandidates(req, input, res) {
                 name: f.name,
                 department: f.branch || f.department,
                 branch: f.branch || f.department,
+                phone: resolveHOSPhone(f),
                 status: 'ABSENT',
                 reason: null,
                 isSameBranch: true
@@ -695,6 +780,7 @@ async function handleCandidates(req, input, res) {
                     name: f.name,
                     department: f.branch || f.department,
                     branch: f.branch || f.department,
+                    phone: resolveHOSPhone(f),
                     subject: bRec.subject || null,
                     className: bRec.className || null,
                     room: bRec.room || null,
@@ -711,6 +797,7 @@ async function handleCandidates(req, input, res) {
                     name: f.name,
                     department: f.branch || f.department,
                     branch: f.branch || f.department,
+                    phone: resolveHOSPhone(f),
                     status: 'FREE',
                     reason: null,
                     isSameBranch: true
@@ -730,6 +817,7 @@ async function handleCandidates(req, input, res) {
             name: c.name,
             department: c.department,
             branch: c.branch,
+            phone: resolveHOSPhone(c),
             status: 'FREE',
             reason: null,
             isSameBranch: false
@@ -775,12 +863,13 @@ router.get('/summary', async (req, res, next) => {
     try {
         const engine = store.engine;
         const { day, period } = req.query;
+        const branchCode = req.query.branch || req.query.department || (req.session && req.session.department) || null;
 
         const timings = (engine && engine.getMeta && engine.getMeta().periodTimings && Object.keys(engine.getMeta().periodTimings).length > 0)
             ? engine.getMeta().periodTimings
             : AUTHORITATIVE_PERIOD_TIMINGS;
 
-        const validFacultyList = await getActiveFacultyWithAccounts();
+        const validFacultyList = await getActiveFacultyWithAccounts(branchCode);
         const validFacultyIds = new Set(validFacultyList.map(f => String(f.id)));
         const validFacultyNames = new Set(validFacultyList.map(f => (f.name || '').toUpperCase()));
 
@@ -796,15 +885,19 @@ router.get('/summary', async (req, res, next) => {
         if (day || period) {
             const slot = resolveSlot(engine, day, period);
             if (slot.error) return res.status(400).json({ error: slot.error, code: slot.code });
-            const rawSummary = engine.getSummary(slot.day, slot.period);
+            const rawSummary = engine.getSummary(slot.day, slot.period, branchCode);
+            const slotAvailable = (rawSummary.selected && rawSummary.selected.available != null) ? rawSummary.selected.available : 0;
+            const slotBusy = (rawSummary.selected && rawSummary.selected.busy != null) ? rawSummary.selected.busy : 0;
             return res.json({
                 ...rawSummary,
                 totalFaculty: validFacultyList.length > 0 ? validFacultyList.length : rawSummary.totalFaculty,
+                totalAvailable: slotAvailable,
+                totalBusy: slotBusy,
                 periodTimings: timings
             });
         }
 
-        const rawSummary = engine.getSummary();
+        const rawSummary = engine.getSummary(null, null, branchCode);
         res.json({
             ...rawSummary,
             totalFaculty: validFacultyList.length > 0 ? validFacultyList.length : rawSummary.totalFaculty,

@@ -560,3 +560,49 @@ CREATE INDEX IF NOT EXISTS hod_delegations_fac_idx ON hod_delegations (acting_fa
 CREATE INDEX IF NOT EXISTS hod_delegations_dates_idx ON hod_delegations (start_date, end_date);
 CREATE INDEX IF NOT EXISTS hod_delegations_status_idx ON hod_delegations (status);
 
+-- Phase B9.2: HOD Role Transfers and Departures Audit Table
+CREATE TABLE IF NOT EXISTS hod_transfers (
+    id                     SERIAL PRIMARY KEY,
+    branch_code            TEXT NOT NULL,
+    transfer_type          TEXT NOT NULL
+                           CHECK (transfer_type IN ('ROLE_TRANSFER', 'LEAVING_COLLEGE')),
+    previous_hod_user_id   INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    previous_hod_name      TEXT NOT NULL,
+    previous_hod_username  TEXT NOT NULL,
+    new_hod_user_id        INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    new_hod_name           TEXT NOT NULL,
+    new_hod_username       TEXT NOT NULL,
+    performed_by_user_id   INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    performed_by_name      TEXT NOT NULL,
+    effective_date         DATE NOT NULL DEFAULT CURRENT_DATE,
+    notes                  TEXT,
+    created_at             TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS hod_transfers_branch_idx ON hod_transfers (branch_code);
+CREATE INDEX IF NOT EXISTS hod_transfers_created_idx ON hod_transfers (created_at);
+CREATE INDEX IF NOT EXISTS hod_transfers_type_idx ON hod_transfers (transfer_type);
+
+-- Phase B9.3: Faculty Departures / Deactivations Audit Table
+CREATE TABLE IF NOT EXISTS faculty_departures (
+    id                     SERIAL PRIMARY KEY,
+    faculty_id             INTEGER REFERENCES faculty(id) ON DELETE SET NULL,
+    faculty_code           TEXT NOT NULL,
+    faculty_name           TEXT NOT NULL,
+    user_id                INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    username               TEXT,
+    branch_code            TEXT NOT NULL,
+    effective_date         DATE NOT NULL DEFAULT CURRENT_DATE,
+    reason                 TEXT,
+    previous_status        TEXT NOT NULL DEFAULT 'active',
+    deactivated_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    deactivated_by_name    TEXT,
+    created_at             TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS faculty_departures_fac_idx ON faculty_departures (faculty_id);
+CREATE INDEX IF NOT EXISTS faculty_departures_branch_idx ON faculty_departures (branch_code);
+CREATE INDEX IF NOT EXISTS faculty_departures_created_idx ON faculty_departures (created_at);
+
+
+

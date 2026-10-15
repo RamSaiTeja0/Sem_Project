@@ -37,6 +37,7 @@ function syncFromDatabase(dbUsers = []) {
             facultyName: u.facultyName || (u.role === 'faculty' ? u.name : null),
             facultyCode: u.facultyCode || null,
             status: u.status || 'active',
+            active: u.active !== undefined ? Boolean(u.active) : (u.status !== 'inactive'),
             createdAt: u.createdAt ? (u.createdAt instanceof Date ? u.createdAt.toISOString() : String(u.createdAt)) : new Date().toISOString()
         };
         if (existingIdx >= 0) {
@@ -63,7 +64,8 @@ function hasHOSForBranch(branchCode) {
     const code = String(branchCode).trim().toUpperCase();
     const foundRegistered = registeredUsers.some(u =>
         (u.role === 'hos' || u.role === 'coordinator') &&
-        u.department && u.department.toUpperCase() === code
+        u.department && u.department.toUpperCase() === code &&
+        (u.active !== undefined ? Boolean(u.active) : (u.status !== 'inactive'))
     );
     if (foundRegistered) return true;
 
@@ -84,7 +86,10 @@ function hasHOS(branchCode = null) {
     if (branchCode) {
         return hasHOSForBranch(branchCode);
     }
-    const foundRegistered = registeredUsers.some(u => u.role === 'hos' || u.role === 'coordinator');
+    const foundRegistered = registeredUsers.some(u =>
+        (u.role === 'hos' || u.role === 'coordinator') &&
+        (u.active !== undefined ? Boolean(u.active) : (u.status !== 'inactive'))
+    );
     if (foundRegistered) return true;
 
     if (process.env.EMPTY_INSTANCE === 'true') {
@@ -103,11 +108,15 @@ function findHOSByBranch(branchCode) {
         const code = String(branchCode).trim().toUpperCase();
         const found = registeredUsers.find(u =>
             (u.role === 'hos' || u.role === 'coordinator') &&
-            u.department && u.department.toUpperCase() === code
+            u.department && u.department.toUpperCase() === code &&
+            (u.active !== undefined ? Boolean(u.active) : (u.status !== 'inactive'))
         );
         if (found) return toPublicUser(found);
     }
-    const firstHos = registeredUsers.find(u => u.role === 'hos' || u.role === 'coordinator');
+    const firstHos = registeredUsers.find(u =>
+        (u.role === 'hos' || u.role === 'coordinator') &&
+        (u.active !== undefined ? Boolean(u.active) : (u.status !== 'inactive'))
+    );
     if (firstHos) return toPublicUser(firstHos);
     return findByUsername('hos');
 }
@@ -198,23 +207,75 @@ async function register(data, sessionUser = null) {
     if (role === 'hos') {
         const bCode = data.branchCode ? String(data.branchCode).trim().toUpperCase() : '';
         const bName = data.branchName ? String(data.branchName).trim() : '';
-        if (!bCode || !bName) {
-            const err = new Error('Branch Name and Branch Code are required to set up an HOS account.');
+        if (!bCode) {
+            const err = new Error('Branch Code is required to set up an HOD account.');
             err.status = 400; err.code = 'INVALID_BRANCH';
             throw err;
         }
 
-        // Branch code must uniquely identify a branch.
-        // If someone attempts: Branch Code = CME when CME already exists:
-        // Reject the creation with a clear message: "Branch code CME already exists."
-        if (hasHOSForBranch(bCode) || isBranchRegistered(bCode)) {
-            const err = new Error(`Branch code ${bCode} already exists.`);
+        // 1. Check whether an existing HOD is already assigned to that branch
+        let hasActiveHOD = false;
+        if (db.isConfigured() && store.usingDatabase) {
+            try {
+                const { rows } = await db.query(`
+                    SELECT u.id, u.username, u.name, u.role
+                    FROM users u
+                    JOIN departments d ON d.id = u.department_id
+                    WHERE UPPER(d.code) = UPPER($1)
+                      AND u.role IN ('hos', 'coordinator', 'admin')
+                      AND COALESCE(u.active, true) = true
+                      AND COALESCE(u.status, 'active') <> 'inactive'
+                    LIMIT 1
+                `, [bCode]);
+                if (rows.length > 0) {
+                    hasActiveHOD = true;
+                }
+            } catch (_) {}
+        }
+        if (!hasActiveHOD) {
+            hasActiveHOD = hasHOSForBranch(bCode);
+        }
+
+        if (hasActiveHOD) {
+            const err = new Error(`An active Head of Department (HOD) is already assigned to branch ${bCode}.`);
             err.status = 403; err.code = 'FORBIDDEN';
             throw err;
         }
 
-        targetBranchCode = bCode;
-        targetBranchName = bName;
+        // 2. Check if branch already exists (in DB or in-memory)
+        let existingBranch = null;
+        if (db.isConfigured() && store.usingDatabase) {
+            try {
+                const { rows: dRows } = await db.query(
+                    'SELECT id, code, name, academic_year AS "academicYear", semester, total_semesters AS "totalSemesters" FROM departments WHERE UPPER(code) = UPPER($1) LIMIT 1',
+                    [bCode]
+                );
+                if (dRows.length > 0) {
+                    existingBranch = dRows[0];
+                }
+            } catch (_) {}
+        }
+        if (!existingBranch && isBranchRegistered(bCode)) {
+            const b = getBranch(bCode);
+            if (b && b.configured) {
+                existingBranch = b;
+            }
+        }
+
+        if (existingBranch) {
+            // Reuse existing branch record instead of trying to insert a duplicate
+            targetBranchCode = existingBranch.code ? existingBranch.code.toUpperCase() : bCode;
+            targetBranchName = existingBranch.name || bName || targetBranchCode;
+        } else {
+            // Create a new branch only when that branch code does not exist
+            if (!bName) {
+                const err = new Error('Branch Name and Branch Code are required to set up an HOD account.');
+                err.status = 400; err.code = 'INVALID_BRANCH';
+                throw err;
+            }
+            targetBranchCode = bCode;
+            targetBranchName = bName;
+        }
     } else if (role === 'faculty') {
         // Faculty accounts MUST be created by an authenticated HOS or Acting HOD session
         const delegations = require('./delegations');
@@ -316,6 +377,7 @@ async function register(data, sessionUser = null) {
             phone: phone,
             role: role,
             departmentCode: targetBranchCode,
+            branchName: targetBranchName,
             passwordHash: passwordHash,
             status: 'active',
             facultyId: facultyId,
@@ -325,12 +387,13 @@ async function register(data, sessionUser = null) {
 
     // ONLY AFTER DATABASE SUCCESS (or in memory mode): update in-memory state
     if (role === 'hos') {
+        const existing = getBranch(targetBranchCode);
         registerBranch({
             code: targetBranchCode,
-            name: targetBranchName,
-            academicYear: data.academicYear || null,
-            semester: data.semester || null,
-            totalSemesters: data.totalSemesters || data.total_semesters || 6
+            name: (existing && existing.configured && existing.name) ? existing.name : targetBranchName,
+            academicYear: (existing && existing.configured && existing.academicYear) ? existing.academicYear : (data.academicYear || null),
+            semester: (existing && existing.configured && existing.semester != null) ? existing.semester : (data.semester || null),
+            totalSemesters: (existing && existing.configured && existing.totalSemesters) ? existing.totalSemesters : (data.totalSemesters || data.total_semesters || 6)
         });
     }
 
@@ -370,6 +433,7 @@ async function register(data, sessionUser = null) {
 function toPublicUser(user) {
     if (!user) return null;
     const dept = user.department ? String(user.department).trim().toUpperCase() : '';
+    const isActive = (user.active !== undefined) ? Boolean(user.active) : (user.status !== 'inactive');
     return {
         id: user.id,
         username: user.username,
@@ -381,7 +445,8 @@ function toPublicUser(user) {
         subjects: Array.isArray(user.subjects) ? user.subjects : [],
         facultyName: user.facultyName || (user.role === 'faculty' ? user.name : null),
         facultyId: user.facultyId || null,
-        status: user.status || 'active'
+        status: user.status || (isActive ? 'active' : 'inactive'),
+        active: isActive
     };
 }
 
@@ -781,8 +846,19 @@ function updateFacultyUser(facultyIdOrUsername, updates = {}) {
         if (Array.isArray(updates.subjects)) {
             registeredUsers[idx].subjects = updates.subjects.map(s => String(s).trim()).filter(Boolean);
         }
+        if (updates.role !== undefined) {
+            registeredUsers[idx].role = updates.role;
+        }
         if (updates.status) {
             registeredUsers[idx].status = updates.status;
+            if (updates.status === 'inactive') {
+                registeredUsers[idx].active = false;
+            } else if (updates.status === 'active') {
+                registeredUsers[idx].active = true;
+            }
+        }
+        if (updates.active !== undefined) {
+            registeredUsers[idx].active = Boolean(updates.active);
         }
         return toPublicUser(registeredUsers[idx]);
     }
@@ -1029,8 +1105,55 @@ async function createAccountForFaculty(data, sessionUser = null) {
     return toPublicUser(newUser);
 }
 
+let inMemoryFacultyDepartures = [];
+
+function recordFacultyDepartureInMemory(record) {
+    const item = {
+        id: 'dep_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6),
+        facultyId: record.facultyId || null,
+        facultyCode: record.facultyCode || null,
+        facultyName: record.facultyName || '',
+        userId: record.userId || null,
+        username: record.username || null,
+        branchCode: record.branchCode || record.department || '',
+        effectiveDate: record.effectiveDate || new Date().toISOString().slice(0, 10),
+        reason: record.reason || null,
+        previousStatus: record.previousStatus || 'active',
+        deactivatedByUserId: record.deactivatedByUserId || null,
+        deactivatedByName: record.deactivatedByName || 'HOD',
+        createdAt: new Date().toISOString()
+    };
+    inMemoryFacultyDepartures.unshift(item);
+    return item;
+}
+
+function listFacultyDeparturesInMemory(branchCode = null) {
+    if (!branchCode) return inMemoryFacultyDepartures.slice();
+    const code = String(branchCode).trim().toUpperCase();
+    return inMemoryFacultyDepartures.filter(d => (d.branchCode || '').toUpperCase() === code);
+}
+
 function resetForTesting() {
     registeredUsers = [];
+    inMemoryFacultyDepartures = [];
+}
+
+function updateUserRoleAndStatus(usernameOrId, { role, status } = {}) {
+    const needle = String(usernameOrId || '').trim().toLowerCase();
+    const idx = registeredUsers.findIndex(u =>
+        (u.id && String(u.id).toLowerCase() === needle) ||
+        (u.username && u.username.toLowerCase() === needle) ||
+        (u.facultyId && String(u.facultyId).toLowerCase() === needle)
+    );
+    if (idx !== -1) {
+        if (role) registeredUsers[idx].role = role;
+        if (status) {
+            registeredUsers[idx].status = status;
+            if (status === 'inactive') registeredUsers[idx].active = false;
+        }
+        return toPublicUser(registeredUsers[idx]);
+    }
+    return null;
 }
 
 module.exports = {
@@ -1050,9 +1173,14 @@ module.exports = {
     getProfile,
     updateProfile,
     updateFacultyUser,
+    updateUserRoleAndStatus,
+    recordFacultyDepartureInMemory,
+    listFacultyDeparturesInMemory,
     syncFromDatabase,
     resetForTesting,
     toPublicUser
 };
+
+
 
 

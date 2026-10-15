@@ -145,6 +145,34 @@ router.get('/:uploadId', async (req, res) => {
             });
         }
 
+        // Re-evaluate validation against authoritative upload metadata to capture conflicts & errors
+        const validationRecord = {
+            uploadId,
+            uploadType: upload.uploadType || 'MASTER_TIMETABLE',
+            departmentCode: upload.departmentCode
+        };
+        const validation = validateExtractedContract(staging.extractedJson, validationRecord, {
+            skipCatalogCheck: true,
+            timetableType: upload.uploadType || 'MASTER_TIMETABLE',
+            isFacultyTimetable: false
+        });
+
+        const combinedErrors = [
+            ...(Array.isArray(validation.errors) ? validation.errors.map(err => typeof err === 'string' ? { message: err } : err) : []),
+            ...(Array.isArray(validation.conflicts) ? validation.conflicts.map(c => typeof c === 'string' ? { message: c } : { code: c.code || 'SLOT_CONFLICT', message: c.message || JSON.stringify(c) }) : [])
+        ];
+        const currentValStatus = validation.ok ? 'VALID' : 'INVALID';
+        const currentValErrors = combinedErrors.length > 0 ? combinedErrors : (validation.ok ? null : (staging.validationErrors || null));
+
+        if (staging.validationStatus !== currentValStatus || JSON.stringify(staging.validationErrors) !== JSON.stringify(currentValErrors)) {
+            staging.validationStatus = currentValStatus;
+            staging.validationErrors = currentValErrors;
+            updateStagedStatus(uploadId, {
+                validationStatus: currentValStatus,
+                validationErrors: currentValErrors
+            }).catch(() => {});
+        }
+
         // Re-evaluate resolution with any saved mappings
         const resolution = await resolveContract(
             staging.extractedJson,
@@ -159,6 +187,7 @@ router.get('/:uploadId', async (req, res) => {
             uploadType: upload.uploadType,
             validationStatus: staging.validationStatus,
             validationErrors: staging.validationErrors,
+            conflicts: validation.conflicts || [],
             importStatus: staging.importStatus || 'STAGED',
             reviewedBy: staging.reviewedBy || null,
             reviewedAt: staging.reviewedAt || null,
@@ -375,6 +404,15 @@ router.put('/:uploadId/entry', async (req, res) => {
                 contract.entries.push(updatedEntry);
             }
 
+            // If a multi-period span is explicitly set, clear covered periods on this day to prevent phantom overlaps
+            if (numSpanTo != null && numSpanTo > numPeriod && req.body.clear_overlapping !== false) {
+                contract.entries = contract.entries.filter(e => {
+                    if (String(e.day).trim().toUpperCase() !== normDay.toUpperCase()) return true;
+                    const eP = parseInt(e.period, 10);
+                    return !(eP > numPeriod && eP <= numSpanTo);
+                });
+            }
+
             // Ensure faculty and subject legends are updated if new names are added
             if (cleanFaculty) {
                 if (!Array.isArray(contract.faculty_legend)) contract.faculty_legend = [];
@@ -408,8 +446,12 @@ router.put('/:uploadId/entry', async (req, res) => {
             isFacultyTimetable: false
         });
 
+        const combinedErrors = [
+            ...(Array.isArray(validation.errors) ? validation.errors.map(err => typeof err === 'string' ? { message: err } : err) : []),
+            ...(Array.isArray(validation.conflicts) ? validation.conflicts.map(c => typeof c === 'string' ? { message: c } : { code: c.code || 'SLOT_CONFLICT', message: c.message || JSON.stringify(c) }) : [])
+        ];
         const validationStatus = validation.ok ? 'VALID' : 'INVALID';
-        const validationErrors = (validation.errors && validation.errors.length > 0) ? validation.errors : null;
+        const validationErrors = combinedErrors.length > 0 ? combinedErrors : null;
 
         // Re-evaluate resolution with saved mappings
         const resolution = await resolveContract(
@@ -431,6 +473,7 @@ router.put('/:uploadId/entry', async (req, res) => {
             uploadId,
             validationStatus: updated.validationStatus,
             validationErrors: updated.validationErrors,
+            conflicts: validation.conflicts || [],
             resolution: {
                 ok: resolution.ok,
                 unresolvedCount: resolution.unresolvedCount,
@@ -652,6 +695,9 @@ async function registerEntityIntoCatalog(entityType, extractedText, extra = {}, 
                 return res.rows.length > 0 ? res.rows[0] : { code, name, room_type: roomType };
             }
         });
+        if (db.isConfigured() && store.usingDatabase) {
+            await store.reloadFromDatabase().catch(() => {});
+        }
         return result;
     }
 
@@ -716,6 +762,23 @@ async function registerEntityIntoCatalog(entityType, extractedText, extra = {}, 
 
         const obj = { id: source.faculty.length + 1, code: finalCode, name, department: branch, status: 'active' };
         source.faculty.push(obj);
+
+        if (!source.users) source.users = [];
+        let uName = String(name).toLowerCase()
+            .replace(/^(dr|prof|mr|mrs|ms)\.?\s+/, '')
+            .replace(/[^a-z0-9]+/g, '.')
+            .replace(/^\.|\.$/g, '');
+        if (!uName) uName = `fac_${obj.id}`;
+        source.users.push({
+            id: source.users.length + 1,
+            username: uName,
+            name: name,
+            role: 'faculty',
+            department: branch,
+            faculty_id: obj.id,
+            status: 'active'
+        });
+
         return obj;
     } else if (type === 'room') {
         const code = String(extra.code || extractedText).trim().toUpperCase();
@@ -926,7 +989,7 @@ router.post('/:uploadId/approve', async (req, res) => {
             return res.status(422).json({
                 error: 'Cannot approve: Timetable failed B2.3 contract validation.',
                 code: 'CANNOT_APPROVE_INVALID_DATA',
-                validationErrors: staging.validationErrors
+                validationErrors: staging.validationErrors || [{ message: 'Timetable contains slot conflicts or invalid entries.' }]
             });
         }
 

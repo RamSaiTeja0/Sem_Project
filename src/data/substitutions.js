@@ -806,7 +806,8 @@ async function getActiveFacultyWithAccounts() {
             const { rows } = await db.query(`
                 SELECT f.id, f.code, f.name, f.department_id, d.code AS branch,
                        u.id AS user_id, u.username, u.role, u.status AS user_status, u.active AS user_active,
-                       f.designation, f.phone
+                       f.designation,
+                       COALESCE(NULLIF(f.phone, ''), NULLIF(u.phone, '')) AS phone
                   FROM faculty f
                  INNER JOIN users u ON u.faculty_id = f.id
                   LEFT JOIN departments d ON d.id = f.department_id
@@ -927,6 +928,41 @@ async function getCandidates({ date, period, className, sessionUser }) {
         priorityBranch: priorityBranch
     });
 
+    const facultyPhoneMap = new Map();
+    validFacultyList.forEach(f => {
+        const ph = f.phone ? String(f.phone).trim() : null;
+        if (ph) {
+            if (f.id != null) facultyPhoneMap.set(String(f.id), ph);
+            if (f.code != null) facultyPhoneMap.set(String(f.code).toUpperCase(), ph);
+            if (f.name != null) facultyPhoneMap.set(String(f.name).trim().toUpperCase(), ph);
+        }
+    });
+    if (store.engine && typeof store.engine.getFaculty === 'function') {
+        try {
+            store.engine.getFaculty().forEach(f => {
+                const ph = f.phone ? String(f.phone).trim() : null;
+                if (ph) {
+                    if (f.id != null && !facultyPhoneMap.has(String(f.id))) facultyPhoneMap.set(String(f.id), ph);
+                    if (f.code != null && !facultyPhoneMap.has(String(f.code).toUpperCase())) facultyPhoneMap.set(String(f.code).toUpperCase(), ph);
+                    if (f.name != null && !facultyPhoneMap.has(String(f.name).trim().toUpperCase())) facultyPhoneMap.set(String(f.name).trim().toUpperCase(), ph);
+                }
+            });
+        } catch (_) {}
+    }
+
+    const resolveCandidatePhone = r => {
+        if (!r) return null;
+        const directPhone = r.phone ? String(r.phone).trim() : null;
+        if (directPhone) return directPhone;
+        const idStr = r.facultyId != null ? String(r.facultyId) : (r.id != null ? String(r.id) : null);
+        if (idStr && facultyPhoneMap.has(idStr)) return facultyPhoneMap.get(idStr);
+        const codeUpper = r.code ? String(r.code).trim().toUpperCase() : null;
+        if (codeUpper && facultyPhoneMap.has(codeUpper)) return facultyPhoneMap.get(codeUpper);
+        const nameUpper = (r.faculty || r.name || r.facultyName || '').trim().toUpperCase();
+        if (nameUpper && facultyPhoneMap.has(nameUpper)) return facultyPhoneMap.get(nameUpper);
+        return null;
+    };
+
     const candidates = (result.available || []).filter(isAllowed).map(r => ({
         facultyId: r.facultyId || r.id,
         id: r.facultyId || r.id,
@@ -934,7 +970,7 @@ async function getCandidates({ date, period, className, sessionUser }) {
         name: r.faculty,
         department: r.department,
         branch: r.department,
-        phone: r.phone || null,
+        phone: resolveCandidatePhone(r),
         status: 'FREE',
         reason: null,
         isSameBranch: r.isSameBranch
@@ -947,7 +983,7 @@ async function getCandidates({ date, period, className, sessionUser }) {
         name: r.faculty,
         department: r.department,
         branch: r.department,
-        phone: r.phone || null,
+        phone: resolveCandidatePhone(r),
         status: 'FREE',
         reason: null,
         isSameBranch: true
@@ -960,7 +996,7 @@ async function getCandidates({ date, period, className, sessionUser }) {
         name: r.faculty,
         department: r.department,
         branch: r.department,
-        phone: r.phone || null,
+        phone: resolveCandidatePhone(r),
         status: 'FREE',
         reason: null,
         isSameBranch: false

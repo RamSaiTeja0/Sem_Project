@@ -1,45 +1,85 @@
-/* TecSubstitution — sign-in page. Same tokens as the rest of the app. */
+/* TecSubstitution — sign-in & registration pages. Same tokens as the rest of the app. */
 
-.login-page { background: var(--canvas); }
+.login-page {
+  background: var(--canvas);
+  min-height: 100vh;
+  width: 100%;
+  overflow-x: hidden;
+}
 
 .login-shell {
   min-height: 100vh;
-  display: grid; grid-template-columns: 1fr 1fr;
+  width: 100%;
+  max-width: 100vw;
+  display: grid;
+  grid-template-columns: minmax(320px, 1fr) minmax(0, 1.25fr);
+  box-sizing: border-box;
 }
 
 /* --------------------------- brand panel --------------------------- */
 .login-aside {
   background: var(--brand-700);
   color: #ffffff;
-  padding: 56px 52px;
-  display: flex; flex-direction: column; justify-content: center; gap: 22px;
+  padding: clamp(36px, 5vw, 56px) clamp(24px, 4vw, 52px);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 22px;
+  min-width: 0;
+  box-sizing: border-box;
 }
 .login-aside .brand-text { color: #ffffff; }
 .login-aside .brand-subtitle { color: #c7d2fe; font-size: 0.72rem; }
 .login-aside .brand-mark { background: rgba(255, 255, 255, 0.16); color: #ffffff; }
 .login-aside h1 {
-  color: #ffffff; font-size: clamp(1.7rem, 2.8vw, 2.4rem);
-  font-weight: 700; letter-spacing: -0.03em; line-height: 1.2;
+  color: #ffffff;
+  font-size: clamp(1.7rem, 2.5vw, 2.4rem);
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  line-height: 1.2;
 }
-.login-aside p { color: #d5d8f5; font-size: 1rem; max-width: 44ch; }
+.login-aside p { color: #d5d8f5; font-size: 1rem; max-width: 44ch; line-height: 1.55; }
 .login-points { list-style: none; margin: 6px 0 0; padding: 0; display: grid; gap: 10px; }
 .login-points li { display: flex; align-items: center; gap: 10px; font-size: 0.94rem; color: #eef2ff; }
 .login-points .tick { color: #a5f3c4; }
 
 /* ------------------------------ form ------------------------------- */
-.login-main { display: flex; align-items: center; justify-content: center; padding: 48px 24px; }
+.login-main {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: clamp(28px, 4vw, 48px) clamp(16px, 3vw, 32px);
+  min-width: 0;
+  min-height: 100%;
+  box-sizing: border-box;
+}
 .login-card {
-  width: min(430px, 100%);
+  width: 100%;
+  max-width: 440px;
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow);
-  padding: 34px;
+  padding: clamp(24px, 4vw, 34px);
+  box-sizing: border-box;
+  min-width: 0;
+  margin: auto 0;
+}
+.login-card.register-card {
+  max-width: 560px;
 }
 .login-card h2 { font-size: 1.4rem; font-weight: 700; }
 .login-card > .muted { margin-top: 6px; }
-.login-card form { margin-top: 24px; display: grid; gap: 16px; }
-.login-submit { width: 100%; padding: 11px 18px; }
+.login-card form {
+  margin-top: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  width: 100%;
+  box-sizing: border-box;
+}
+.login-submit { width: 100%; padding: 11px 18px; box-sizing: border-box; font-weight: 600; }
 
 .login-message {
   display: none;
@@ -48,6 +88,8 @@
   font-size: 0.87rem;
   line-height: 1.45;
   border: 1px solid transparent;
+  box-sizing: border-box;
+  width: 100%;
 }
 .login-message.is-visible { display: block; }
 .login-message.is-error { background: var(--danger-100); border-color: var(--danger-line); color: var(--danger-700); }
@@ -55,18 +97,20 @@
 .login-message.is-info { background: var(--brand-050); border-color: var(--brand-100); color: var(--ink-700); }
 
 /* --------------------------- demo accounts -------------------------- */
-.login-demo { margin-top: 26px; padding-top: 22px; border-top: 1px solid var(--line-soft); }
+.login-demo { margin-top: 26px; padding-top: 22px; border-top: 1px solid var(--line-soft); width: 100%; box-sizing: border-box; }
 .section-label {
   font-size: 0.72rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;
   color: var(--ink-500); margin-bottom: 8px;
 }
-.demo-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 12px; }
+.demo-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 12px; width: 100%; box-sizing: border-box; }
 .demo-chip {
   display: flex; flex-direction: column; gap: 2px; align-items: flex-start;
   padding: 9px 12px; text-align: left;
   background: var(--canvas); border: 1px solid var(--line); border-radius: var(--radius-sm);
   font: inherit; font-size: 0.84rem; font-weight: 600; color: var(--ink-800); cursor: pointer;
   transition: border-color 0.15s ease, background-color 0.15s ease;
+  min-width: 0;
+  box-sizing: border-box;
 }
 .demo-chip:hover { background: var(--brand-050); border-color: var(--brand-100); }
 .demo-chip span { font-size: 0.72rem; font-weight: 500; color: var(--ink-500); }
@@ -74,12 +118,43 @@
 .login-foot {
   margin-top: 24px; padding-top: 18px; border-top: 1px solid var(--line-soft);
   display: flex; justify-content: space-between; gap: 12px; font-size: 0.86rem;
+  width: 100%;
+  box-sizing: border-box;
 }
 .login-foot a { text-decoration: none; color: var(--ink-500); }
 .login-foot a:hover { color: var(--brand-600); }
 
-@media (max-width: 900px) {
-  .login-shell { grid-template-columns: 1fr; }
-  .login-aside { padding: 40px 28px; }
-  .login-aside h1 { font-size: 1.6rem; }
+@media (max-width: 960px) {
+  .login-shell {
+    grid-template-columns: 1fr;
+    min-height: 100vh;
+  }
+  .login-aside {
+    padding: 36px 24px;
+    gap: 16px;
+  }
+  .login-aside h1 {
+    font-size: 1.6rem;
+  }
+  .login-main {
+    padding: 32px 16px;
+    justify-content: flex-start;
+  }
+  .login-card {
+    margin: 0 auto;
+    padding: 26px 20px;
+  }
+}
+
+@media (max-width: 480px) {
+  .login-aside {
+    padding: 28px 16px;
+  }
+  .login-main {
+    padding: 20px 12px;
+  }
+  .login-card {
+    padding: 22px 14px;
+    border-radius: var(--radius-md);
+  }
 }

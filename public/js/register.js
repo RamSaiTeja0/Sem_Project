@@ -170,10 +170,17 @@
         var facultyBranchRow = el('facultyBranchRow');
         var facultyDesignationRow = el('facultyDesignationRow');
 
+        var setupNotice = el('setupNotice');
+        var asideTitle = el('asideTitle');
+        var asideDesc = el('asideDesc');
+
         if (isHOSSession) {
             // FLOW B: Authenticated HOS is creating faculty
             // DO NOT show editable Branch Name and Branch Code inputs!
             if (registerTitle) registerTitle.textContent = 'Create Faculty Account';
+            if (setupNotice) setupNotice.style.display = 'none';
+            if (asideTitle) asideTitle.textContent = 'Faculty Management';
+            if (asideDesc) asideDesc.textContent = 'Create official faculty accounts and assign subjects for your active branch.';
             if (hosFacultyHeader) hosFacultyHeader.style.display = 'block';
             if (roleSelectorWrap) roleSelectorWrap.style.display = 'none';
             if (branchRow) branchRow.style.display = 'none'; // strictly hidden
@@ -198,6 +205,12 @@
             if (isHOS) {
                 // Initial HOD creating new branch: inputs are EMPTY and EDITABLE
                 if (registerTitle) registerTitle.textContent = 'Create Head of Department Account';
+                if (setupNotice) {
+                    setupNotice.style.display = 'block';
+                    setupNotice.textContent = 'Create an independent Head of Department (HOD) account and configure your academic branch below.';
+                }
+                if (asideTitle) asideTitle.innerHTML = 'Academic Branch<br />Registration';
+                if (asideDesc) asideDesc.textContent = 'Create a new Head of Department (HOD) account to manage an independent academic branch, or add faculty members to your active branch.';
                 if (subjectsSec) subjectsSec.style.display = 'none';
                 if (branchRow) branchRow.style.display = 'grid';
                 if (facultyBranchRow) facultyBranchRow.style.display = 'none';
@@ -213,6 +226,12 @@
             } else {
                 // Public visitor selected Faculty Registration (Flow C)
                 if (registerTitle) registerTitle.textContent = 'Request Faculty Account';
+                if (setupNotice) {
+                    setupNotice.style.display = 'block';
+                    setupNotice.textContent = 'Submit your details to request a faculty account from your branch HOD.';
+                }
+                if (asideTitle) asideTitle.textContent = 'Faculty Registration';
+                if (asideDesc) asideDesc.textContent = 'Faculty members can request access to their registered academic branch. Once your branch HOD approves your request, you can sign in and manage your schedule.';
                 if (subjectsSec) subjectsSec.style.display = 'block';
                 if (branchRow) branchRow.style.display = 'none';
                 if (facultyBranchRow) facultyBranchRow.style.display = 'block';
@@ -299,17 +318,35 @@
                     if (el('regBranchName')) el('regBranchName').value = '';
                     if (el('regBranchCode')) el('regBranchCode').value = '';
 
-                    if (setupNotice) setupNotice.style.display = 'block';
-                    if (hosRadio) {
-                        hosRadio.disabled = false;
-                        hosRadio.checked = true;
+                    var urlParams = new URLSearchParams(window.location.search);
+                    var roleParam = urlParams.get('role');
+                    if (roleParam === 'faculty' || roleParam === 'faculty_request') {
+                        if (hosRadio) hosRadio.checked = false;
+                        if (facRadio) {
+                            facRadio.disabled = false;
+                            facRadio.checked = true;
+                        }
+                        updateRoleUI('faculty_request');
+                    } else {
+                        if (facRadio) facRadio.checked = false;
+                        if (hosRadio) {
+                            hosRadio.disabled = false;
+                            hosRadio.checked = true;
+                        }
+                        updateRoleUI('hos');
                     }
-                    updateRoleUI('hos');
                 }
             })
             .catch(function () {
-                // Fallback to empty HOS form
-                updateRoleUI('hos');
+                var urlParams = new URLSearchParams(window.location.search);
+                var roleParam = urlParams.get('role');
+                if (roleParam === 'faculty' || roleParam === 'faculty_request') {
+                    var facRadio = el('roleFaculty');
+                    if (facRadio) facRadio.checked = true;
+                    updateRoleUI('faculty_request');
+                } else {
+                    updateRoleUI('hos');
+                }
             });
 
         // Role radio change listeners

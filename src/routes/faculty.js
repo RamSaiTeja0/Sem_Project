@@ -129,7 +129,8 @@ router.get('/designations', (req, res) => {
 router.get('/', async (req, res, next) => {
     try {
         const engine = store.engine;
-        const { department, search, day, period } = req.query;
+        const { department, branch, search, day, period } = req.query;
+        const targetDept = department || branch;
 
         const options = {};
         if (day || period) {
@@ -148,7 +149,7 @@ router.get('/', async (req, res, next) => {
         let stats = engine.getFacultyStats(options);
 
         const sessionDept = req.session && req.session.department ? String(req.session.department).trim().toUpperCase() : null;
-        const queryDept = department ? String(department).trim().toUpperCase() : null;
+        const queryDept = targetDept ? String(targetDept).trim().toUpperCase() : null;
 
         if (sessionDept) {
             if (queryDept && queryDept !== sessionDept) {
@@ -173,17 +174,39 @@ router.get('/', async (req, res, next) => {
 
         // Relational user account resolution
         let dbUsersMap = new Map();
-        if (db.isConfigured() && store.usingDatabase) {
+        if (db.isConfigured()) {
             try {
                 const { rows } = await db.query(`
-                    SELECT u.id, u.username, u.name, u.role, u.status, u.active, u.phone, u.faculty_id
+                    SELECT u.id, u.username, u.name, u.role, u.status, u.active, u.phone, u.faculty_id,
+                           f.id AS faculty_db_id, f.code AS faculty_code, f.name AS faculty_name,
+                           COALESCE(d.code, d_fac.code, '') AS branch
                       FROM users u
+                      LEFT JOIN faculty f ON f.id = u.faculty_id
+                      LEFT JOIN departments d ON d.id = u.department_id
+                      LEFT JOIN departments d_fac ON d_fac.id = f.department_id
                      WHERE u.role = 'faculty'
-                       AND u.faculty_id IS NOT NULL
                 `);
                 for (const u of rows) {
                     if (u.faculty_id != null) {
                         dbUsersMap.set(String(u.faculty_id), u);
+                        dbUsersMap.set('id:' + String(u.faculty_id), u);
+                    }
+                    if (u.faculty_code) {
+                        const codeUpper = String(u.faculty_code).trim().toUpperCase();
+                        dbUsersMap.set(codeUpper, u);
+                        dbUsersMap.set('code:' + codeUpper, u);
+                        dbUsersMap.set(String(u.faculty_code).trim().toLowerCase(), u);
+                    }
+                    const bUpper = String(u.branch || '').trim().toUpperCase();
+                    const nUpper = String(u.faculty_name || u.name || '').trim().toUpperCase();
+                    if (bUpper && nUpper) {
+                        dbUsersMap.set('branch_name:' + bUpper + '::' + nUpper, u);
+                    }
+                    if (nUpper) {
+                        dbUsersMap.set('name:' + nUpper, u);
+                    }
+                    if (u.username) {
+                        dbUsersMap.set('username:' + String(u.username).trim().toLowerCase(), u);
                     }
                 }
             } catch (_) {}
@@ -194,28 +217,78 @@ router.get('/', async (req, res, next) => {
         stats = stats.map(f => {
             let matchedUser = null;
             const facIdStr = f.id != null ? String(f.id).trim() : '';
+            const facCodeStr = f.code != null ? String(f.code).trim() : '';
+            const facNameStr = f.name != null ? String(f.name).trim() : '';
+            const facBranchStr = (f.department || f.branch || '').trim().toUpperCase();
 
-            // 1. Check DB map strictly by relational faculty_id
-            if (facIdStr && dbUsersMap.has(facIdStr)) {
-                matchedUser = dbUsersMap.get(facIdStr);
+            // 1. Check DB map
+            if (facIdStr) {
+                matchedUser = dbUsersMap.get(facIdStr) ||
+                    dbUsersMap.get(facIdStr.toUpperCase()) ||
+                    dbUsersMap.get('code:' + facIdStr.toUpperCase()) ||
+                    dbUsersMap.get('id:' + facIdStr);
+            }
+            if (!matchedUser && facCodeStr) {
+                matchedUser = dbUsersMap.get(facCodeStr.toUpperCase()) ||
+                    dbUsersMap.get('code:' + facCodeStr.toUpperCase());
+            }
+            if (!matchedUser && facBranchStr && facNameStr) {
+                matchedUser = dbUsersMap.get('branch_name:' + facBranchStr + '::' + facNameStr.toUpperCase());
+            }
+            if (!matchedUser && facNameStr && dbUsersMap.has('name:' + facNameStr.toUpperCase())) {
+                const candidate = dbUsersMap.get('name:' + facNameStr.toUpperCase());
+                if (!facBranchStr || !candidate.branch || candidate.branch.toUpperCase() === facBranchStr) {
+                    matchedUser = candidate;
+                }
+            }
+            if (!matchedUser && facIdStr && dbUsersMap.has('username:' + facIdStr.toLowerCase())) {
+                const candidate = dbUsersMap.get('username:' + facIdStr.toLowerCase());
+                if (!facBranchStr || !candidate.branch || candidate.branch.toUpperCase() === facBranchStr) {
+                    matchedUser = candidate;
+                }
             }
 
-            // 2. Check in-memory registered users by facultyId or numeric ID
+            // 2. Check in-memory registered users by facultyId, facultyCode, name, or username
             if (!matchedUser) {
-                matchedUser = registeredUsers.find(u =>
-                    u.role === 'faculty' &&
-                    u.facultyId != null &&
-                    (
-                        (facIdStr && String(u.facultyId).trim().toLowerCase() === facIdStr.toLowerCase()) ||
-                        (/^\d+$/.test(facIdStr) && parseInt(u.facultyId, 10) === parseInt(facIdStr, 10))
-                    )
-                );
+                matchedUser = registeredUsers.find(u => {
+                    if (u.role !== 'faculty') return false;
+                    const uBranch = (u.department || u.branchName || '').trim().toUpperCase();
+                    if (facBranchStr && uBranch && uBranch !== facBranchStr) return false;
+
+                    const uFacId = u.facultyId != null ? String(u.facultyId).trim() : '';
+                    const uFacCode = u.facultyCode != null ? String(u.facultyCode).trim() : '';
+                    const uFacName = (u.facultyName || u.name || '').trim();
+                    const uUsername = (u.username || '').trim();
+
+                    if (facIdStr) {
+                        if (uFacId && uFacId.toLowerCase() === facIdStr.toLowerCase()) return true;
+                        if (uFacCode && uFacCode.toLowerCase() === facIdStr.toLowerCase()) return true;
+                        if (/^\d+$/.test(facIdStr) && /^\d+$/.test(uFacId) && parseInt(uFacId, 10) === parseInt(facIdStr, 10)) return true;
+                    }
+                    if (facCodeStr) {
+                        if (uFacId && uFacId.toLowerCase() === facCodeStr.toLowerCase()) return true;
+                        if (uFacCode && uFacCode.toLowerCase() === facCodeStr.toLowerCase()) return true;
+                    }
+                    if (facNameStr && uFacName && facNameStr.toUpperCase() === uFacName.toUpperCase()) {
+                        return true;
+                    }
+                    if (facIdStr && uUsername && uUsername.toLowerCase() === facIdStr.toLowerCase()) {
+                        return true;
+                    }
+                    return false;
+                });
             }
 
             const hasAccount = Boolean(matchedUser);
+            const isInactive = (f.status === 'inactive') ||
+                (matchedUser && (matchedUser.status === 'inactive' || matchedUser.active === false));
+
             return {
                 ...f,
                 hasAccount,
+                status: isInactive ? 'inactive' : (f.status || 'active'),
+                phone: (matchedUser && matchedUser.phone) ? matchedUser.phone : f.phone,
+                dbId: matchedUser ? (matchedUser.faculty_id || matchedUser.faculty_db_id || matchedUser.facultyId || null) : (f.dbId || null),
                 account: matchedUser ? {
                     id: matchedUser.id,
                     username: matchedUser.username,
@@ -386,18 +459,42 @@ async function requireHOSUser(req, res, next) {
 }
 
 /**
+ * GET /api/faculty/departures — audit history of faculty deactivations and departures
+ */
+router.get('/departures', requireHOSUser, async (req, res, next) => {
+    try {
+        const sessionDept = req.session && req.session.department ? String(req.session.department).trim().toUpperCase() : (req.query.branch || null);
+        let departures = [];
+        if (db.isConfigured()) {
+            try {
+                departures = await repository.listFacultyDepartures(sessionDept);
+            } catch (_) {}
+        }
+        if (!departures || departures.length === 0) {
+            departures = users.listFacultyDeparturesInMemory(sessionDept);
+        }
+        res.json({ success: true, count: departures.length, departures });
+    } catch (err) {
+        next(err);
+    }
+});
+
+/**
  * GET /api/faculty/:id — detailed profile of a single faculty member
  */
 router.get('/:id', async (req, res) => {
     const targetId = req.params.id;
     const engine = store.engine;
-    let member = findFacultyMember(engine, targetId);
+    let member = null;
 
-    if (db.isConfigured() && store.usingDatabase) {
+    if (db.isConfigured()) {
         try {
             const dbMember = await repository.getFaculty(targetId);
             if (dbMember) member = dbMember;
         } catch (err) {}
+    }
+    if (!member) {
+        member = findFacultyMember(engine, targetId);
     }
 
     if (!member) {
@@ -425,12 +522,15 @@ router.put('/:id', requireHOSUser, async (req, res) => {
     const engine = store.engine;
     const sessionDept = req.session.department ? String(req.session.department).trim().toUpperCase() : null;
 
-    let member = findFacultyMember(engine, targetId);
-    if (db.isConfigured() && store.usingDatabase) {
+    let member = null;
+    if (db.isConfigured()) {
         try {
             const dbMember = await repository.getFaculty(targetId);
             if (dbMember) member = dbMember;
         } catch (err) {}
+    }
+    if (!member) {
+        member = findFacultyMember(engine, targetId);
     }
 
     if (!member) {
@@ -518,20 +618,25 @@ router.put('/:id', requireHOSUser, async (req, res) => {
     }
 });
 
+
+
 /**
- * POST /api/faculty/:id/deactivate — HOS safely deactivates faculty
+ * POST /api/faculty/:id/deactivate — HOS safely deactivates faculty / processes faculty leaving college
  */
 router.post('/:id/deactivate', requireHOSUser, async (req, res) => {
     const targetId = req.params.id;
     const engine = store.engine;
-    const sessionDept = req.session.department ? String(req.session.department).trim().toUpperCase() : null;
+    const sessionDept = req.session && req.session.department ? String(req.session.department).trim().toUpperCase() : null;
 
-    let member = findFacultyMember(engine, targetId);
-    if (db.isConfigured() && store.usingDatabase) {
+    let member = null;
+    if (db.isConfigured()) {
         try {
             const dbMember = await repository.getFaculty(targetId);
             if (dbMember) member = dbMember;
         } catch (err) {}
+    }
+    if (!member) {
+        member = findFacultyMember(engine, targetId);
     }
 
     if (!member) {
@@ -545,22 +650,111 @@ router.post('/:id/deactivate', requireHOSUser, async (req, res) => {
         });
     }
 
+    // Prohibit self-deactivation
+    const sessionUsername = req.session ? String(req.session.username || '').toLowerCase() : '';
+    const sessionId = req.session ? String(req.session.id || '') : '';
+    const sessionFacId = req.session ? String(req.session.facultyId || '') : '';
+    const targetIdStr = String(targetId).trim().toLowerCase();
+    const memberIdStr = member.id != null ? String(member.id).trim().toLowerCase() : '';
+    const memberCodeStr = member.code != null ? String(member.code).trim().toLowerCase() : '';
+    const memberUsernameStr = member.username ? String(member.username).trim().toLowerCase() : '';
+
+    if (
+        (sessionUsername && (sessionUsername === targetIdStr || sessionUsername === memberUsernameStr)) ||
+        (sessionId && (sessionId === targetIdStr || (member.userId && String(member.userId) === sessionId))) ||
+        (sessionFacId && (sessionFacId === targetIdStr || sessionFacId === memberIdStr || sessionFacId === memberCodeStr))
+    ) {
+        return res.status(400).json({
+            error: 'You cannot deactivate your own account.',
+            code: 'SELF_DEACTIVATION_PROHIBITED'
+        });
+    }
+
+    // Special Case: Cannot deactivate faculty holding HOD role without role handover
+    const allUsers = (typeof users.list === 'function' ? users.list() : []) || [];
+    const targetUser = allUsers.find(u =>
+        (u.facultyId && (String(u.facultyId).toLowerCase() === targetIdStr || String(u.facultyId).toLowerCase() === memberIdStr || String(u.facultyId).toLowerCase() === memberCodeStr)) ||
+        (u.id && String(u.id).toLowerCase() === targetIdStr) ||
+        (u.username && (u.username.toLowerCase() === targetIdStr || u.username.toLowerCase() === memberUsernameStr)) ||
+        (u.name && u.name.toUpperCase() === member.name.toUpperCase())
+    );
+
+    if (targetUser && (targetUser.role === 'hos' || targetUser.role === 'coordinator')) {
+        return res.status(400).json({
+            error: `Cannot deactivate faculty "${member.name}" because they currently hold the HOD role for branch "${member.department}". HOD authority must be transferred using the HOD Leaving College workflow before deactivation.`,
+            code: 'HOD_DEACTIVATION_REQUIRES_HANDOVER'
+        });
+    }
+
+    const body = req.body || {};
+    const effectiveDate = body.effectiveDate ? String(body.effectiveDate).trim() : new Date().toISOString().slice(0, 10);
+    const reason = body.reason ? String(body.reason).trim() : null;
+
     try {
-        if (db.isConfigured() && store.usingDatabase) {
-            await repository.deactivateFaculty(member.id || targetId, sessionDept);
-            await store.reloadFromDatabase();
+        let deactResult = null;
+        if (db.isConfigured()) {
+            try {
+                deactResult = await repository.deactivateFaculty(member.id || targetId, sessionDept, {
+                    effectiveDate,
+                    reason,
+                    performedByUserId: req.session ? req.session.id : null,
+                    performedByName: req.session ? (req.session.name || req.session.username) : 'HOD'
+                });
+                if (store.usingDatabase) {
+                    await store.reloadFromDatabase();
+                } else {
+                    try { store.setFacultyStatusInMemory(member.id || targetId, 'inactive'); } catch (_) {}
+                }
+            } catch (dbErr) {
+                if (dbErr.code === 'HOD_DEACTIVATION_REQUIRES_HANDOVER' || dbErr.code === 'SELF_DEACTIVATION_PROHIBITED' || dbErr.code === 'FORBIDDEN') {
+                    throw dbErr;
+                }
+                // If not found in DB or DB error, fallback to in-memory
+                try { store.setFacultyStatusInMemory(member.id || targetId, 'inactive'); } catch (_) {}
+                users.recordFacultyDepartureInMemory({
+                    facultyId: member.id || targetId,
+                    facultyCode: member.code || String(member.id || targetId),
+                    facultyName: member.name,
+                    userId: targetUser ? targetUser.id : null,
+                    username: targetUser ? targetUser.username : (member.username || null),
+                    branchCode: member.department || sessionDept || 'General',
+                    effectiveDate,
+                    reason,
+                    previousStatus: member.status || 'active',
+                    deactivatedByUserId: req.session ? req.session.id : null,
+                    deactivatedByName: req.session ? (req.session.name || req.session.username) : 'HOD'
+                });
+            }
         } else {
-            store.setFacultyStatusInMemory(member.id || targetId, 'inactive');
+            try { store.setFacultyStatusInMemory(member.id || targetId, 'inactive'); } catch (_) {}
+            users.recordFacultyDepartureInMemory({
+                facultyId: member.id || targetId,
+                facultyCode: member.code || String(member.id || targetId),
+                facultyName: member.name,
+                userId: targetUser ? targetUser.id : null,
+                username: targetUser ? targetUser.username : (member.username || null),
+                branchCode: member.department || sessionDept || 'General',
+                effectiveDate,
+                reason,
+                previousStatus: member.status || 'active',
+                deactivatedByUserId: req.session ? req.session.id : null,
+                deactivatedByName: req.session ? (req.session.name || req.session.username) : 'HOD'
+            });
         }
 
-        users.updateFacultyUser(member.id || targetId, { status: 'inactive' });
+        if (targetUser && targetUser.username) {
+            users.updateFacultyUser(targetUser.username, { status: 'inactive', active: false });
+        }
+        users.updateFacultyUser(member.id || targetId, { status: 'inactive', active: false });
 
         res.json({
             success: true,
             message: `Faculty ${member.name} has been safely deactivated.`,
             id: member.id || targetId,
             name: member.name,
-            status: 'inactive'
+            status: 'inactive',
+            effectiveDate,
+            reason
         });
     } catch (err) {
         res.status(err.status || 400).json({ error: err.message, code: err.code || 'DEACTIVATION_FAILED' });
@@ -575,12 +769,15 @@ router.post('/:id/activate', requireHOSUser, async (req, res) => {
     const engine = store.engine;
     const sessionDept = req.session.department ? String(req.session.department).trim().toUpperCase() : null;
 
-    let member = findFacultyMember(engine, targetId);
-    if (db.isConfigured() && store.usingDatabase) {
+    let member = null;
+    if (db.isConfigured()) {
         try {
             const dbMember = await repository.getFaculty(targetId);
             if (dbMember) member = dbMember;
         } catch (err) {}
+    }
+    if (!member) {
+        member = findFacultyMember(engine, targetId);
     }
 
     if (!member) {
@@ -598,6 +795,9 @@ router.post('/:id/activate', requireHOSUser, async (req, res) => {
         if (db.isConfigured() && store.usingDatabase) {
             await repository.activateFaculty(member.id || targetId, sessionDept);
             await store.reloadFromDatabase();
+        } else if (db.isConfigured()) {
+            await repository.activateFaculty(member.id || targetId, sessionDept);
+            try { store.setFacultyStatusInMemory(member.id || targetId, 'active'); } catch (_) {}
         } else {
             store.setFacultyStatusInMemory(member.id || targetId, 'active');
         }

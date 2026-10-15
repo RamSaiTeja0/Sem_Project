@@ -297,17 +297,16 @@ async function runTest() {
 
         const res2 = await resolveContract(contract2, branchCode);
         const unresolvedFaculty = (res2.unresolvedEntities || []).filter(e => e.entityType === 'faculty');
-        assert.strictEqual(unresolvedFaculty.length, 0, 'Unregistered faculty should NOT be flagged as unresolved blocking entity');
-        assert(res2.informationalWarnings.length > 0, 'Must produce informational warning');
-        assert(res2.informationalWarnings[0].includes('does not have an account in this branch') || res2.informationalWarnings[0].includes('no login account'), 'Warning must specify no login account available');
+        assert.strictEqual(unresolvedFaculty.length, 1, 'Unregistered faculty MUST be flagged as an unresolved entity requiring registration');
+        assert.strictEqual(unresolvedFaculty[0].extractedText, unregFacName);
 
-        // Verify in DB/store that no user account was fabricated
+        // Verify in DB/store that no user account was fabricated merely by uploading/resolving
         const fakeUserCheck = await call('POST', '/api/auth/login', {
             username: unregFacName.toLowerCase().replace(/[^a-z0-9]/g, '_'),
             password: 'any_password'
         });
-        assert.notStrictEqual(fakeUserCheck.status, 200, 'Fabricated user login must not exist');
-        console.log('✓ Unregistered faculty created catalog reference with NO fake user credentials!');
+        assert.notStrictEqual(fakeUserCheck.status, 200, 'Fabricated user login must not exist prior to explicit registration');
+        console.log('✓ Unregistered faculty flagged as unresolved without premature automatic registration!');
 
         // ========================================================
         // AREA 3: WRONG-BRANCH DETECTION

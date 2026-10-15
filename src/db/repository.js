@@ -112,7 +112,12 @@ async function loadSource(meta) {
                              'General'
                          ) AS department,
                          COALESCE(f.designation, 'Faculty') AS designation,
-                         f.email, f.phone, f.max_weekly_periods,
+                         f.email,
+                         COALESCE(
+                             NULLIF(f.phone, ''),
+                             (SELECT NULLIF(u.phone, '') FROM users u WHERE (u.faculty_id = f.id OR UPPER(u.username) = UPPER(f.code)) AND u.phone IS NOT NULL AND u.phone <> '' LIMIT 1)
+                         ) AS phone,
+                         f.max_weekly_periods,
                          COALESCE(f.status, 'active') AS status,
                          COALESCE((SELECT array_agg(subject) FROM faculty_subjects WHERE faculty_id = f.id), ARRAY[]::text[]) AS subjects
                     FROM faculty f LEFT JOIN departments d ON d.id = f.department_id
@@ -1212,8 +1217,13 @@ function usernameFor(name) {
 async function getFaculty(id, client) {
     const runner = client || db;
     const { rows } = await runner.query(`
-        SELECT f.id AS numeric_id, f.code AS id, f.name, COALESCE(d.code, 'General') AS department,
-               f.designation, f.email, f.phone,
+        SELECT f.id AS numeric_id, f.code AS id, f.name,
+               COALESCE(d.code, (SELECT ud.code FROM users u JOIN departments ud ON u.department_id = ud.id WHERE u.faculty_id = f.id LIMIT 1), 'General') AS department,
+               f.designation, f.email,
+               COALESCE(
+                   NULLIF(f.phone, ''),
+                   (SELECT NULLIF(u.phone, '') FROM users u WHERE (u.faculty_id = f.id OR UPPER(u.username) = UPPER(f.code)) AND u.phone IS NOT NULL AND u.phone <> '' LIMIT 1)
+               ) AS phone,
                f.max_weekly_periods AS "maxWeeklyPeriods", f.status,
                COALESCE((SELECT array_agg(subject) FROM faculty_subjects WHERE faculty_id = f.id), ARRAY[]::text[]) AS subjects
           FROM faculty f LEFT JOIN departments d ON d.id = f.department_id
@@ -1227,7 +1237,8 @@ async function getFaculty(id, client) {
 async function updateFaculty(id, branchCode, updates) {
     return db.withTransaction(async client => {
         const found = await client.query(`
-            SELECT f.id, f.code, f.name, f.status, COALESCE(d.code, 'General') AS department
+            SELECT f.id, f.code, f.name, f.status,
+                   COALESCE(d.code, (SELECT ud.code FROM users u JOIN departments ud ON u.department_id = ud.id WHERE u.faculty_id = f.id LIMIT 1), 'General') AS department
               FROM faculty f LEFT JOIN departments d ON d.id = f.department_id
              WHERE f.id::text = $1::text OR UPPER(f.code) = UPPER($1::text) OR UPPER(f.name) = UPPER($1::text)
                 OR f.id IN (SELECT faculty_id FROM users WHERE id::text = $1::text OR UPPER(username) = UPPER($1::text))
@@ -1291,10 +1302,11 @@ async function updateFaculty(id, branchCode, updates) {
     });
 }
 
-async function deactivateFaculty(id, branchCode) {
+async function deactivateFaculty(id, branchCode, opts = {}) {
     return db.withTransaction(async client => {
         const found = await client.query(`
-            SELECT f.id, f.code, f.name, f.status, COALESCE(d.code, 'General') AS department
+            SELECT f.id, f.code, f.name, f.status,
+                   COALESCE(d.code, (SELECT ud.code FROM users u JOIN departments ud ON u.department_id = ud.id WHERE u.faculty_id = f.id LIMIT 1), 'General') AS department
               FROM faculty f LEFT JOIN departments d ON d.id = f.department_id
              WHERE f.id::text = $1::text OR UPPER(f.code) = UPPER($1::text) OR UPPER(f.name) = UPPER($1::text)
                 OR f.id IN (SELECT faculty_id FROM users WHERE id::text = $1::text OR UPPER(username) = UPPER($1::text))
@@ -1315,10 +1327,130 @@ async function deactivateFaculty(id, branchCode) {
             throw err;
         }
 
-        await client.query(`UPDATE faculty SET status = 'inactive' WHERE id = $1`, [fac.id]);
-        await client.query(`UPDATE users SET status = 'inactive' WHERE faculty_id = $1`, [fac.id]);
+        // Check linked user account and role
+        const userQ = await client.query(`
+            SELECT id, username, name, role, status, active
+              FROM users
+             WHERE faculty_id = $1 OR id::text = $2::text OR UPPER(username) = UPPER($2::text)
+             LIMIT 1
+        `, [fac.id, String(id)]);
+        const linkedUser = userQ.rows.length > 0 ? userQ.rows[0] : null;
 
-        return { id: fac.code, name: fac.name, department: fac.department, status: 'inactive' };
+        // Special Case: Cannot deactivate active HOD via ordinary faculty deactivation
+        if (linkedUser && (linkedUser.role === 'hos' || linkedUser.role === 'coordinator')) {
+            const err = new Error(`Cannot deactivate faculty "${fac.name}" because they currently hold the HOD role for branch "${fac.department}". HOD authority must be transferred using the HOD Leaving College workflow before deactivation.`);
+            err.code = 'HOD_DEACTIVATION_REQUIRES_HANDOVER';
+            err.status = 400;
+            throw err;
+        }
+
+        // Prevent self-deactivation if performedByUserId is supplied
+        const performedByUserId = opts.performedByUserId || null;
+        if (performedByUserId && (
+            String(performedByUserId) === String(fac.id) ||
+            (linkedUser && String(performedByUserId) === String(linkedUser.id))
+        )) {
+            const err = new Error('You cannot deactivate your own account.');
+            err.code = 'SELF_DEACTIVATION_PROHIBITED';
+            err.status = 400;
+            throw err;
+        }
+
+        const effectiveDate = opts.effectiveDate || new Date().toISOString().slice(0, 10);
+        const reason = opts.reason ? String(opts.reason).trim() : null;
+        const performedByName = opts.performedByName || 'HOD';
+        const targetBranch = branchCode || (opts && opts.branchCode) || fac.department || 'General';
+
+        // 1. Mark faculty as inactive
+        await client.query(`UPDATE faculty SET status = 'inactive' WHERE id = $1`, [fac.id]);
+
+        // 2. Mark linked user account(s) as inactive and inactive session flag
+        if (linkedUser) {
+            await client.query(`UPDATE users SET status = 'inactive', active = FALSE WHERE id = $1`, [linkedUser.id]);
+        }
+        await client.query(`UPDATE users SET status = 'inactive', active = FALSE WHERE faculty_id = $1`, [fac.id]);
+
+        // 3. Safely cancel pending substitution requests
+        try {
+            await client.query(`
+                UPDATE faculty_substitutions
+                   SET status = 'CANCELLED',
+                       cancelled_at = now(),
+                       rejection_reason = 'Cancelled due to faculty leaving college / deactivation'
+                 WHERE (original_faculty_id = $1 OR substitute_faculty_id = $1)
+                   AND status = 'PENDING'
+            `, [fac.id]);
+        } catch (_) {}
+
+        // 4. Safely cancel active acting HOD delegations
+        try {
+            await client.query(`
+                UPDATE hod_delegations
+                   SET status = 'CANCELLED',
+                       updated_at = now(),
+                       notes = COALESCE(notes || ' | ', '') || 'Cancelled due to faculty leaving college'
+                 WHERE acting_faculty_id = $1
+                   AND status = 'ACTIVE'
+            `, [fac.id]);
+        } catch (_) {}
+
+        // 5. Safely reject pending exam invigilation requests
+        try {
+            await client.query(`
+                UPDATE exam_invigilation_requests
+                   SET status = 'REJECTED',
+                       reviewed_by = $2,
+                       reviewed_at = now(),
+                       rejection_reason = 'Rejected due to faculty leaving college / deactivation'
+                 WHERE faculty_id = $1
+                   AND status = 'PENDING'
+            `, [fac.id, performedByName]);
+        } catch (_) {}
+
+        // 6. Record in faculty_departures audit table
+        let departureRecord = null;
+        try {
+            const dbLinkedUserId = linkedUser && Number.isInteger(Number(linkedUser.id)) && Number(linkedUser.id) > 0 ? parseInt(linkedUser.id, 10) : null;
+            const dbPerformedByUserId = performedByUserId && Number.isInteger(Number(performedByUserId)) && Number(performedByUserId) > 0 ? parseInt(performedByUserId, 10) : null;
+            const depRes = await client.query(`
+                INSERT INTO faculty_departures (
+                    faculty_id, faculty_code, faculty_name, user_id, username,
+                    branch_code, effective_date, reason, previous_status,
+                    deactivated_by_user_id, deactivated_by_name
+                ) VALUES (
+                    $1, $2, $3, $4, $5,
+                    $6, $7, $8, $9,
+                    $10, $11
+                )
+                RETURNING id, faculty_id, faculty_code, faculty_name, user_id, username,
+                          branch_code, effective_date, reason, previous_status,
+                          deactivated_by_user_id, deactivated_by_name, created_at
+            `, [
+                fac.id,
+                fac.code || String(fac.id),
+                fac.name,
+                dbLinkedUserId,
+                linkedUser ? linkedUser.username : null,
+                targetBranch,
+                effectiveDate,
+                reason,
+                fac.status || 'active',
+                dbPerformedByUserId,
+                performedByName
+            ]);
+            departureRecord = depRes.rows[0];
+        } catch (_) {}
+
+        return {
+            id: fac.code,
+            facultyId: fac.id,
+            name: fac.name,
+            department: fac.department,
+            status: 'inactive',
+            effectiveDate: effectiveDate,
+            reason: reason,
+            departureRecord: departureRecord
+        };
     });
 }
 
@@ -1966,7 +2098,12 @@ async function updateFacultyRequestStatus(id, branchCode, status, reviewedBy, re
 
 async function listFacultyAttendanceForDate(branchCode, date) {
     const { rows } = await db.query(`
-        SELECT f.id, f.code, f.name, f.designation, f.phone, f.status AS "facultyStatus",
+        SELECT f.id, f.code, f.name, f.designation,
+               COALESCE(
+                   NULLIF(f.phone, ''),
+                   (SELECT NULLIF(u.phone, '') FROM users u WHERE (u.faculty_id = f.id OR UPPER(u.username) = UPPER(f.code)) AND u.phone IS NOT NULL AND u.phone <> '' LIMIT 1)
+               ) AS phone,
+               f.status AS "facultyStatus",
                d.code AS department,
                COALESCE(fa.status, 'PRESENT') AS status,
                fa.id AS "attendanceId",
@@ -2595,19 +2732,24 @@ async function hasAcceptedFacultySubstitution({ substituteFacultyId, substituteF
     return rows.length > 0;
 }
 
-async function saveUser({ username, name, phone, role, departmentCode, passwordHash, status, facultyId, subjects }) {
+async function saveUser({ username, name, phone, role, departmentCode, branchName, passwordHash, status, facultyId, subjects }) {
     return db.withTransaction(async client => {
         let deptId = null;
         if (departmentCode) {
-            const dRes = await client.query('SELECT id FROM departments WHERE UPPER(code) = UPPER($1)', [departmentCode]);
+            const dRes = await client.query('SELECT id, name FROM departments WHERE UPPER(code) = UPPER($1)', [departmentCode]);
             if (dRes.rows.length) {
                 deptId = dRes.rows[0].id;
             } else {
                 const insD = await client.query(
-                    'INSERT INTO departments (code, name, total_semesters) VALUES ($1, $1, 6) ON CONFLICT (code) DO UPDATE SET name = EXCLUDED.name RETURNING id',
-                    [departmentCode]
+                    'INSERT INTO departments (code, name, total_semesters) VALUES ($1, $2, 6) ON CONFLICT (code) DO NOTHING RETURNING id',
+                    [departmentCode, branchName || departmentCode]
                 );
-                deptId = insD.rows[0].id;
+                if (insD.rows.length) {
+                    deptId = insD.rows[0].id;
+                } else {
+                    const fallbackRes = await client.query('SELECT id FROM departments WHERE UPPER(code) = UPPER($1)', [departmentCode]);
+                    deptId = fallbackRes.rows[0].id;
+                }
             }
         }
 
@@ -2622,6 +2764,8 @@ async function saveUser({ username, name, phone, role, departmentCode, passwordH
                     phone: phone,
                     status: status || 'active'
                 });
+            } else if (phone) {
+                await client.query("UPDATE faculty SET phone = COALESCE(NULLIF(phone, ''), $2) WHERE id = $1", [facId, phone]);
             }
         }
 
@@ -2748,7 +2892,7 @@ async function updateUserProfile({ username, phone, subjects, name }) {
 
 async function loadAllUsers() {
     const { rows } = await db.query(`
-        SELECT u.id, u.username, u.name, u.phone, u.role, u.status, u.password_hash AS "passwordHash",
+        SELECT u.id, u.username, u.name, u.phone, u.role, u.status, u.active, u.password_hash AS "passwordHash",
                u.created_at AS "createdAt",
                COALESCE(d.code, d_fac.code, '') AS department,
                COALESCE(d.name, d_fac.name, d.code, d_fac.code, '') AS "branchName",
@@ -3031,6 +3175,372 @@ async function getHODDelegationById(id) {
     return rows[0] || null;
 }
 
+async function recordHODTransfer({
+    branchCode,
+    transferType,
+    previousHodUserId,
+    previousHodName,
+    previousHodUsername,
+    newHodUserId,
+    newHodName,
+    newHodUsername,
+    performedByUserId,
+    performedByName,
+    effectiveDate,
+    notes
+}, client = null) {
+    const queryRunner = client || db;
+    const { rows } = await queryRunner.query(`
+        INSERT INTO hod_transfers (
+            branch_code, transfer_type, previous_hod_user_id, previous_hod_name, previous_hod_username,
+            new_hod_user_id, new_hod_name, new_hod_username, performed_by_user_id, performed_by_name,
+            effective_date, notes, created_at
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, COALESCE($11::date, CURRENT_DATE), $12, now())
+        RETURNING id, branch_code AS "branchCode", transfer_type AS "transferType",
+                  previous_hod_user_id AS "previousHodUserId", previous_hod_name AS "previousHodName", previous_hod_username AS "previousHodUsername",
+                  new_hod_user_id AS "newHodUserId", new_hod_name AS "newHodName", new_hod_username AS "newHodUsername",
+                  performed_by_user_id AS "performedByUserId", performed_by_name AS "performedByName",
+                  effective_date::text AS "effectiveDate", notes, created_at AS "createdAt"
+    `, [
+        String(branchCode).trim().toUpperCase(),
+        transferType,
+        previousHodUserId || null,
+        previousHodName,
+        previousHodUsername,
+        newHodUserId || null,
+        newHodName,
+        newHodUsername,
+        performedByUserId || null,
+        performedByName,
+        effectiveDate || null,
+        notes || null
+    ]);
+    return rows[0];
+}
+
+async function listHODTransfers(branchCode = null) {
+    const normBranch = branchCode ? String(branchCode).trim().toUpperCase() : null;
+    let query = `
+        SELECT id, branch_code AS "branchCode", transfer_type AS "transferType",
+               previous_hod_user_id AS "previousHodUserId", previous_hod_name AS "previousHodName", previous_hod_username AS "previousHodUsername",
+               new_hod_user_id AS "newHodUserId", new_hod_name AS "newHodName", new_hod_username AS "newHodUsername",
+               performed_by_user_id AS "performedByUserId", performed_by_name AS "performedByName",
+               effective_date::text AS "effectiveDate", notes, created_at AS "createdAt"
+          FROM hod_transfers
+    `;
+    const params = [];
+    if (normBranch) {
+        query += ` WHERE UPPER(branch_code) = $1`;
+        params.push(normBranch);
+    }
+    query += ` ORDER BY created_at DESC, id DESC`;
+    const { rows } = await db.query(query, params);
+    return rows;
+}
+
+async function transferHODRole({
+    branchCode,
+    outgoingUserId,
+    outgoingUsername,
+    replacementFacultyId,
+    replacementUserId,
+    performedByUserId,
+    performedByName,
+    notes
+}) {
+    return db.withTransaction(async client => {
+        const normBranch = String(branchCode).trim().toUpperCase();
+
+        let outUser = null;
+        if (outgoingUserId) {
+            const { rows } = await client.query(
+                `SELECT u.*, d.code AS branch_code FROM users u LEFT JOIN departments d ON d.id = u.department_id WHERE u.id = $1`,
+                [outgoingUserId]
+            );
+            if (rows.length) outUser = rows[0];
+        } else if (outgoingUsername) {
+            const { rows } = await client.query(
+                `SELECT u.*, d.code AS branch_code FROM users u LEFT JOIN departments d ON d.id = u.department_id WHERE LOWER(u.username) = LOWER($1)`,
+                [outgoingUsername]
+            );
+            if (rows.length) outUser = rows[0];
+        }
+
+        if (!outUser) {
+            const err = new Error('Outgoing HOD user record not found.');
+            err.status = 404; err.code = 'USER_NOT_FOUND';
+            throw err;
+        }
+
+        let repUser = null;
+        let repFaculty = null;
+
+        if (replacementUserId) {
+            const { rows } = await client.query(
+                `SELECT u.*, d.code AS branch_code, f.name AS faculty_name, f.status AS faculty_status, f.id AS resolved_faculty_id
+                   FROM users u
+                   LEFT JOIN departments d ON d.id = u.department_id
+                   LEFT JOIN faculty f ON f.id = u.faculty_id
+                  WHERE u.id = $1`,
+                [replacementUserId]
+            );
+            if (rows.length) {
+                repUser = rows[0];
+                if (rows[0].resolved_faculty_id) {
+                    repFaculty = { id: rows[0].resolved_faculty_id, name: rows[0].faculty_name, status: rows[0].faculty_status };
+                }
+            }
+        }
+
+        if (!repFaculty && replacementFacultyId) {
+            const { rows } = await client.query(
+                `SELECT f.*, d.code AS branch_code FROM faculty f LEFT JOIN departments d ON d.id = f.department_id WHERE f.id = $1`,
+                [replacementFacultyId]
+            );
+            if (rows.length) repFaculty = rows[0];
+        }
+
+        if (!repUser && repFaculty) {
+            const { rows } = await client.query(
+                `SELECT u.*, d.code AS branch_code FROM users u LEFT JOIN departments d ON d.id = u.department_id WHERE u.faculty_id = $1 OR (LOWER(u.name) = LOWER($2) AND u.role = 'faculty') LIMIT 1`,
+                [repFaculty.id, repFaculty.name]
+            );
+            if (rows.length) repUser = rows[0];
+        }
+
+        if (!repFaculty) {
+            const err = new Error('Replacement faculty member not found.');
+            err.status = 404; err.code = 'FACULTY_NOT_FOUND';
+            throw err;
+        }
+
+        if (!repUser) {
+            const err = new Error(`Replacement faculty (${repFaculty.name}) does not have an active user account.`);
+            err.status = 400; err.code = 'ACCOUNT_REQUIRED';
+            throw err;
+        }
+
+        if (repFaculty.status !== 'active' || repUser.status !== 'active') {
+            const err = new Error('Cannot transfer HOD role to an inactive faculty member.');
+            err.status = 400; err.code = 'INACTIVE_FACULTY';
+            throw err;
+        }
+
+        if (String(outUser.id) === String(repUser.id)) {
+            const err = new Error('Current HOD cannot transfer role to themselves.');
+            err.status = 400; err.code = 'SELF_TRANSFER_PROHIBITED';
+            throw err;
+        }
+
+        // Atomically update roles
+        await client.query(`UPDATE users SET role = 'hos' WHERE id = $1`, [repUser.id]);
+        await client.query(`UPDATE users SET role = 'faculty' WHERE id = $1`, [outUser.id]);
+
+        // Cancel active temporary delegations if any
+        await client.query(
+            `UPDATE hod_delegations SET status = 'CANCELLED', updated_at = now() WHERE UPPER(branch_code) = $1 AND status = 'ACTIVE'`,
+            [normBranch]
+        );
+
+        // Record audit trail
+        const auditRecord = await recordHODTransfer({
+            branchCode: normBranch,
+            transferType: 'ROLE_TRANSFER',
+            previousHodUserId: outUser.id,
+            previousHodName: outUser.name,
+            previousHodUsername: outUser.username,
+            newHodUserId: repUser.id,
+            newHodName: repUser.name,
+            newHodUsername: repUser.username,
+            performedByUserId: performedByUserId || outUser.id,
+            performedByName: performedByName || outUser.name,
+            effectiveDate: new Date().toISOString().slice(0, 10),
+            notes: notes || null
+        }, client);
+
+        return {
+            success: true,
+            transferType: 'ROLE_TRANSFER',
+            branchCode: normBranch,
+            previousHOD: { id: outUser.id, username: outUser.username, name: outUser.name, role: 'faculty', status: 'active' },
+            newHOD: { id: repUser.id, username: repUser.username, name: repUser.name, role: 'hos', status: 'active' },
+            auditRecord
+        };
+    });
+}
+
+async function hodLeaveCollege({
+    branchCode,
+    outgoingUserId,
+    outgoingUsername,
+    replacementFacultyId,
+    replacementUserId,
+    effectiveDate,
+    performedByUserId,
+    performedByName,
+    notes
+}) {
+    return db.withTransaction(async client => {
+        const normBranch = String(branchCode).trim().toUpperCase();
+
+        let outUser = null;
+        if (outgoingUserId) {
+            const { rows } = await client.query(
+                `SELECT u.*, d.code AS branch_code FROM users u LEFT JOIN departments d ON d.id = u.department_id WHERE u.id = $1`,
+                [outgoingUserId]
+            );
+            if (rows.length) outUser = rows[0];
+        } else if (outgoingUsername) {
+            const { rows } = await client.query(
+                `SELECT u.*, d.code AS branch_code FROM users u LEFT JOIN departments d ON d.id = u.department_id WHERE LOWER(u.username) = LOWER($1)`,
+                [outgoingUsername]
+            );
+            if (rows.length) outUser = rows[0];
+        }
+
+        if (!outUser) {
+            const err = new Error('Outgoing HOD user record not found.');
+            err.status = 404; err.code = 'USER_NOT_FOUND';
+            throw err;
+        }
+
+        let repUser = null;
+        let repFaculty = null;
+
+        if (replacementUserId) {
+            const { rows } = await client.query(
+                `SELECT u.*, d.code AS branch_code, f.name AS faculty_name, f.status AS faculty_status, f.id AS resolved_faculty_id
+                   FROM users u
+                   LEFT JOIN departments d ON d.id = u.department_id
+                   LEFT JOIN faculty f ON f.id = u.faculty_id
+                  WHERE u.id = $1`,
+                [replacementUserId]
+            );
+            if (rows.length) {
+                repUser = rows[0];
+                if (rows[0].resolved_faculty_id) {
+                    repFaculty = { id: rows[0].resolved_faculty_id, name: rows[0].faculty_name, status: rows[0].faculty_status };
+                }
+            }
+        }
+
+        if (!repFaculty && replacementFacultyId) {
+            const { rows } = await client.query(
+                `SELECT f.*, d.code AS branch_code FROM faculty f LEFT JOIN departments d ON d.id = f.department_id WHERE f.id = $1`,
+                [replacementFacultyId]
+            );
+            if (rows.length) repFaculty = rows[0];
+        }
+
+        if (!repUser && repFaculty) {
+            const { rows } = await client.query(
+                `SELECT u.*, d.code AS branch_code FROM users u LEFT JOIN departments d ON d.id = u.department_id WHERE u.faculty_id = $1 OR (LOWER(u.name) = LOWER($2) AND u.role = 'faculty') LIMIT 1`,
+                [repFaculty.id, repFaculty.name]
+            );
+            if (rows.length) repUser = rows[0];
+        }
+
+        if (!repFaculty) {
+            const err = new Error('Replacement faculty member not found.');
+            err.status = 404; err.code = 'FACULTY_NOT_FOUND';
+            throw err;
+        }
+
+        if (!repUser) {
+            const err = new Error(`Replacement faculty (${repFaculty.name}) does not have an active user account.`);
+            err.status = 400; err.code = 'ACCOUNT_REQUIRED';
+            throw err;
+        }
+
+        if (repFaculty.status !== 'active' || repUser.status !== 'active') {
+            const err = new Error('Cannot transfer HOD role to an inactive faculty member.');
+            err.status = 400; err.code = 'INACTIVE_FACULTY';
+            throw err;
+        }
+
+        if (String(outUser.id) === String(repUser.id)) {
+            const err = new Error('Current HOD cannot select themselves as replacement.');
+            err.status = 400; err.code = 'SELF_TRANSFER_PROHIBITED';
+            throw err;
+        }
+
+        // 1. Promote replacement to HOD ('hos')
+        await client.query(`UPDATE users SET role = 'hos' WHERE id = $1`, [repUser.id]);
+
+        // 2. Deactivate outgoing HOD user account & revoke HOD role
+        await client.query(
+            `UPDATE users SET status = 'inactive', active = FALSE, role = 'faculty' WHERE id = $1`,
+            [outUser.id]
+        );
+
+        // 3. Deactivate outgoing HOD faculty record
+        if (outUser.faculty_id) {
+            await client.query(`UPDATE faculty SET status = 'inactive' WHERE id = $1`, [outUser.faculty_id]);
+        } else {
+            await client.query(
+                `UPDATE faculty SET status = 'inactive' WHERE LOWER(TRIM(name)) = LOWER(TRIM($1)) AND department_id = (SELECT id FROM departments WHERE UPPER(code) = $2 LIMIT 1)`,
+                [outUser.name, normBranch]
+            );
+        }
+
+        // 4. Cancel active temporary delegations
+        await client.query(
+            `UPDATE hod_delegations SET status = 'CANCELLED', updated_at = now() WHERE UPPER(branch_code) = $1 AND status = 'ACTIVE'`,
+            [normBranch]
+        );
+
+        const effDate = effectiveDate || new Date().toISOString().slice(0, 10);
+
+        // 5. Record audit trail
+        const auditRecord = await recordHODTransfer({
+            branchCode: normBranch,
+            transferType: 'LEAVING_COLLEGE',
+            previousHodUserId: outUser.id,
+            previousHodName: outUser.name,
+            previousHodUsername: outUser.username,
+            newHodUserId: repUser.id,
+            newHodName: repUser.name,
+            newHodUsername: repUser.username,
+            performedByUserId: performedByUserId || outUser.id,
+            performedByName: performedByName || outUser.name,
+            effectiveDate: effDate,
+            notes: notes || null
+        }, client);
+
+        return {
+            success: true,
+            transferType: 'LEAVING_COLLEGE',
+            branchCode: normBranch,
+            previousHOD: { id: outUser.id, username: outUser.username, name: outUser.name, role: 'faculty', status: 'inactive' },
+            newHOD: { id: repUser.id, username: repUser.username, name: repUser.name, role: 'hos', status: 'active' },
+            effectiveDate: effDate,
+            auditRecord
+        };
+    });
+}
+
+async function listFacultyDepartures(branchCode = null, client = db) {
+    let query = `
+        SELECT id, faculty_id AS "facultyId", faculty_code AS "facultyCode",
+               faculty_name AS "facultyName", user_id AS "userId", username,
+               branch_code AS "branchCode", to_char(effective_date, 'YYYY-MM-DD') AS "effectiveDate",
+               reason, previous_status AS "previousStatus",
+               deactivated_by_user_id AS "deactivatedByUserId",
+               deactivated_by_name AS "deactivatedByName",
+               created_at AS "createdAt"
+          FROM faculty_departures
+    `;
+    const params = [];
+    if (branchCode) {
+        query += ` WHERE UPPER(branch_code) = UPPER($1) `;
+        params.push(String(branchCode).trim());
+    }
+    query += ` ORDER BY created_at DESC `;
+    const { rows } = await client.query(query, params);
+    return rows;
+}
+
 module.exports = {
     isEmpty, counts, loadSource,
     listEntries, getEntry, addEntry, updateEntry, deleteEntry, saveSlotEntry, replaceFacultyEntries,
@@ -3039,6 +3549,7 @@ module.exports = {
     addSubject, updateSubject, deleteSubject,
     addClass, updateClass, deleteClass, resolveOrCreateClass, clearTimetable,
     addFaculty, getFaculty, updateFaculty, deactivateFaculty, activateFaculty, usernameFor,
+    listFacultyDepartures,
     getInstanceBranch, updateInstanceBranch,
     importStagedTimetable, parseSemesterNumber, normalizeAcademicYearVariants,
     saveFacultyPersonalTimetable, getFacultyPersonalTimetable, clearFacultyPersonalTimetable, saveFacultyPersonalSlot,
@@ -3050,10 +3561,13 @@ module.exports = {
     listFacultySubstitutions, hasAcceptedFacultySubstitution,
     createHODDelegation, listHODDelegations, getOverlappingHODDelegations, getActiveHODDelegations,
     cancelHODDelegation, getHODDelegationById,
+    recordHODTransfer, listHODTransfers, transferHODRole, hodLeaveCollege,
     saveUser, updateUserProfile, loadAllUsers, loadAllDepartments,
     resolveFacultyDbId, ensureFacultyDbRecord,
     DAY_ORDER
 };
+
+
 
 
 

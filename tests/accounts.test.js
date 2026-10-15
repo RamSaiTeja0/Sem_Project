@@ -18,6 +18,9 @@
  *  14. Password validation works for all valid & invalid patterns.
  *  15. Existing A1-A5 tests remain passing.
  */
+process.env.DATABASE_URL = '';
+process.env.TEST_DATABASE_URL = '';
+
 const assert = require('assert');
 const http = require('http');
 const fs = require('fs');

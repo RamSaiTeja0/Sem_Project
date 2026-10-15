@@ -14,6 +14,7 @@ const legacyDemoConfigs = {
 
 const suites = [
     'frontend_syntax_and_dom.test.js',
+    'header_title_navigation.test.js',
     'web_auth_and_ui_lifecycle.test.js',
     'accounts.test.js',
     'singlebranch.e2e.test.js',
@@ -68,11 +69,14 @@ const suites = [
     'branch_isolation_invigilation.test.js',
     'hod_branch_authorization_regression.test.js',
     'hod_delegation.test.js',
+    'hod_role_transfer_and_departure.test.js',
+    'faculty_leaving_college.test.js',
     'unresolved_subject_registration_flow.test.js',
     'empty_faculty_startup_regression.test.js',
     'branch_alias_normalization.test.js',
     'fast_branding_ui.test.js',
     'swipe_gesture_navigation.test.js',
+    'hod_branch_registration.test.js',
     'live_verification.js'
 ];
 let failures = 0;
@@ -96,7 +100,9 @@ const dbSuites = new Set([
     'hod_master_timetable_upload_flow.test.js',
     'faculty_timetable_extraction.test.js',
     'unresolved_subject_registration_flow.test.js',
-    'empty_faculty_startup_regression.test.js'
+    'empty_faculty_startup_regression.test.js',
+    'hod_role_transfer_and_departure.test.js',
+    'faculty_leaving_college.test.js'
 ]);
 
 async function main() {

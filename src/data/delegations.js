@@ -17,6 +17,7 @@ const store = require('./store');
 
 // In-memory store for standalone/testing
 let inMemoryDelegations = [];
+let inMemoryTransfers = [];
 
 function generateDelegationId() {
     return 'del_' + Date.now().toString(36) + '_' + crypto.randomBytes(4).toString('hex');
@@ -795,8 +796,353 @@ async function isAuthorizedHOS(sessionUser, targetDate = null) {
     return false;
 }
 
+function sanitizeTransfer(t) {
+    if (!t) return null;
+    return {
+        id: t.id,
+        branchCode: t.branchCode || t.branch_code,
+        transferType: t.transferType || t.transfer_type,
+        previousHodUserId: t.previousHodUserId || t.previous_hod_user_id || null,
+        previousHodName: t.previousHodName || t.previous_hod_name,
+        previousHodUsername: t.previousHodUsername || t.previous_hod_username,
+        newHodUserId: t.newHodUserId || t.new_hod_user_id || null,
+        newHodName: t.newHodName || t.new_hod_name,
+        newHodUsername: t.newHodUsername || t.new_hod_username,
+        performedByUserId: t.performedByUserId || t.performed_by_user_id || null,
+        performedByName: t.performedByName || t.performed_by_name,
+        effectiveDate: t.effectiveDate || t.effective_date,
+        notes: t.notes || null,
+        createdAt: t.createdAt || t.created_at
+    };
+}
+
+/**
+ * Execute permanent HOD role transfer:
+ * Outgoing HOD becomes Faculty, replacement becomes HOD ('hos').
+ */
+async function transferHODRole(data = {}, sessionUser = null) {
+    if (!sessionUser || !sessionUser.username) {
+        const err = new Error('Authentication required.');
+        err.status = 401;
+        err.code = 'UNAUTHENTICATED';
+        throw err;
+    }
+
+    if (sessionUser.role === 'faculty') {
+        const err = new Error('Acting HOD cannot transfer permanent HOD role. Only the permanent Head of Department (HOD) can perform a role transfer.');
+        err.status = 403;
+        err.code = 'FORBIDDEN';
+        throw err;
+    }
+
+    if (!['hos', 'coordinator', 'admin'].includes(sessionUser.role)) {
+        const err = new Error('This action requires permanent Head of Department (HOD) role.');
+        err.status = 403;
+        err.code = 'FORBIDDEN';
+        throw err;
+    }
+
+    const branchCode = String(sessionUser.department || '').trim().toUpperCase();
+    if (!branchCode) {
+        const err = new Error('HOD session has no associated branch.');
+        err.status = 400;
+        err.code = 'NO_BRANCH';
+        throw err;
+    }
+
+    const facultyNeedle = data.replacementFacultyId || data.facultyId || data.faculty_id || data.replacementUserId || data.userId || data.facultyName || data.name;
+    if (!facultyNeedle) {
+        const err = new Error('Please select an active faculty member as the replacement HOD.');
+        err.status = 400;
+        err.code = 'MISSING_REPLACEMENT';
+        throw err;
+    }
+
+    const needleStr = String(facultyNeedle).trim().toUpperCase();
+    if (
+        (sessionUser.id && String(sessionUser.id).toUpperCase() === needleStr) ||
+        (sessionUser.username && sessionUser.username.toUpperCase() === needleStr) ||
+        (sessionUser.name && sessionUser.name.toUpperCase() === needleStr) ||
+        (sessionUser.facultyId && String(sessionUser.facultyId).toUpperCase() === needleStr)
+    ) {
+        const err = new Error('Current HOD cannot transfer HOD role to themselves.');
+        err.status = 400;
+        err.code = 'SELF_TRANSFER_PROHIBITED';
+        throw err;
+    }
+
+    // Verify candidate from authoritative active account candidates list
+    const candidates = await listActingHODCandidates(sessionUser);
+    const candidate = candidates.find(c =>
+        (c.id != null && String(c.id).toUpperCase() === needleStr) ||
+        (c.facultyId != null && String(c.facultyId).toUpperCase() === needleStr) ||
+        (c.userId != null && String(c.userId).toUpperCase() === needleStr) ||
+        (c.code && c.code.toUpperCase() === needleStr) ||
+        (c.name && c.name.toUpperCase() === needleStr) ||
+        (c.username && c.username.toUpperCase() === needleStr)
+    );
+
+    if (!candidate) {
+        const rawFaculty = await findBranchFaculty(facultyNeedle, branchCode);
+        if (!rawFaculty) {
+            const err = new Error(`Selected faculty was not found in branch ${branchCode}. Only active faculty from the same branch can be selected.`);
+            err.status = 400;
+            err.code = 'FACULTY_NOT_IN_BRANCH';
+            throw err;
+        }
+        if (rawFaculty.status === 'inactive') {
+            const err = new Error('Cannot transfer HOD role to an inactive faculty member.');
+            err.status = 400;
+            err.code = 'INACTIVE_FACULTY';
+            throw err;
+        }
+        const err = new Error(`Selected faculty member (${rawFaculty.name}) does not have an active login account.`);
+        err.status = 400;
+        err.code = 'ACCOUNT_REQUIRED';
+        throw err;
+    }
+
+    const notes = data.notes ? String(data.notes).trim() : null;
+
+    if (db.isConfigured() && store.usingDatabase) {
+        const result = await repository.transferHODRole({
+            branchCode,
+            outgoingUserId: sessionUser.id,
+            outgoingUsername: sessionUser.username,
+            replacementFacultyId: candidate.facultyId || candidate.id,
+            replacementUserId: candidate.userId,
+            performedByUserId: sessionUser.id,
+            performedByName: sessionUser.name,
+            notes
+        });
+
+        await store.reloadFromDatabase();
+        const allUsers = await repository.loadAllUsers();
+        const users = require('./users');
+        users.syncFromDatabase(allUsers);
+
+        return result;
+    } else {
+        const users = require('./users');
+        // Update replacement to HOS
+        users.updateUserRoleAndStatus(candidate.username || candidate.userId, { role: 'hos', status: 'active' });
+        // Update outgoing HOD to Faculty
+        users.updateUserRoleAndStatus(sessionUser.username || sessionUser.id, { role: 'faculty', status: 'active' });
+
+        // Cancel active temporary delegations
+        inMemoryDelegations.forEach(d => {
+            if (d.branchCode.toUpperCase() === branchCode && d.status === 'ACTIVE') {
+                d.status = 'CANCELLED';
+                d.updatedAt = new Date().toISOString();
+            }
+        });
+
+        const auditRecord = {
+            id: 'trf_' + Date.now().toString(36) + '_' + crypto.randomBytes(4).toString('hex'),
+            branchCode,
+            transferType: 'ROLE_TRANSFER',
+            previousHodUserId: sessionUser.id || null,
+            previousHodName: sessionUser.name,
+            previousHodUsername: sessionUser.username,
+            newHodUserId: candidate.userId || null,
+            newHodName: candidate.name,
+            newHodUsername: candidate.username,
+            performedByUserId: sessionUser.id || null,
+            performedByName: sessionUser.name,
+            effectiveDate: getTodayDateString(),
+            notes,
+            createdAt: new Date().toISOString()
+        };
+        inMemoryTransfers.unshift(auditRecord);
+
+        return {
+            success: true,
+            transferType: 'ROLE_TRANSFER',
+            branchCode,
+            previousHOD: { id: sessionUser.id, username: sessionUser.username, name: sessionUser.name, role: 'faculty', status: 'active' },
+            newHOD: { id: candidate.userId, username: candidate.username, name: candidate.name, role: 'hos', status: 'active' },
+            auditRecord: sanitizeTransfer(auditRecord)
+        };
+    }
+}
+
+/**
+ * Execute HOD Leaving College:
+ * Replacement becomes HOD ('hos'), outgoing HOD access is revoked and accounts deactivated.
+ */
+async function hodLeaveCollege(data = {}, sessionUser = null) {
+    if (!sessionUser || !sessionUser.username) {
+        const err = new Error('Authentication required.');
+        err.status = 401;
+        err.code = 'UNAUTHENTICATED';
+        throw err;
+    }
+
+    if (sessionUser.role === 'faculty') {
+        const err = new Error('Acting HOD cannot execute HOD college departure. Only the permanent Head of Department (HOD) can perform this action.');
+        err.status = 403;
+        err.code = 'FORBIDDEN';
+        throw err;
+    }
+
+    if (!['hos', 'coordinator', 'admin'].includes(sessionUser.role)) {
+        const err = new Error('This action requires permanent Head of Department (HOD) role.');
+        err.status = 403;
+        err.code = 'FORBIDDEN';
+        throw err;
+    }
+
+    const branchCode = String(sessionUser.department || '').trim().toUpperCase();
+    if (!branchCode) {
+        const err = new Error('HOD session has no associated branch.');
+        err.status = 400;
+        err.code = 'NO_BRANCH';
+        throw err;
+    }
+
+    const facultyNeedle = data.replacementFacultyId || data.facultyId || data.faculty_id || data.replacementUserId || data.userId || data.facultyName || data.name;
+    if (!facultyNeedle) {
+        const err = new Error('Please select an active faculty member as the replacement HOD.');
+        err.status = 400;
+        err.code = 'MISSING_REPLACEMENT';
+        throw err;
+    }
+
+    const needleStr = String(facultyNeedle).trim().toUpperCase();
+    if (
+        (sessionUser.id && String(sessionUser.id).toUpperCase() === needleStr) ||
+        (sessionUser.username && sessionUser.username.toUpperCase() === needleStr) ||
+        (sessionUser.name && sessionUser.name.toUpperCase() === needleStr) ||
+        (sessionUser.facultyId && String(sessionUser.facultyId).toUpperCase() === needleStr)
+    ) {
+        const err = new Error('Current HOD cannot select themselves as replacement.');
+        err.status = 400;
+        err.code = 'SELF_TRANSFER_PROHIBITED';
+        throw err;
+    }
+
+    const candidates = await listActingHODCandidates(sessionUser);
+    const candidate = candidates.find(c =>
+        (c.id != null && String(c.id).toUpperCase() === needleStr) ||
+        (c.facultyId != null && String(c.facultyId).toUpperCase() === needleStr) ||
+        (c.userId != null && String(c.userId).toUpperCase() === needleStr) ||
+        (c.code && c.code.toUpperCase() === needleStr) ||
+        (c.name && c.name.toUpperCase() === needleStr) ||
+        (c.username && c.username.toUpperCase() === needleStr)
+    );
+
+    if (!candidate) {
+        const rawFaculty = await findBranchFaculty(facultyNeedle, branchCode);
+        if (!rawFaculty) {
+            const err = new Error(`Selected faculty was not found in branch ${branchCode}. Only active faculty from the same branch can be selected.`);
+            err.status = 400;
+            err.code = 'FACULTY_NOT_IN_BRANCH';
+            throw err;
+        }
+        if (rawFaculty.status === 'inactive') {
+            const err = new Error('Cannot select an inactive faculty member as replacement HOD.');
+            err.status = 400;
+            err.code = 'INACTIVE_FACULTY';
+            throw err;
+        }
+        const err = new Error(`Selected faculty member (${rawFaculty.name}) does not have an active login account.`);
+        err.status = 400;
+        err.code = 'ACCOUNT_REQUIRED';
+        throw err;
+    }
+
+    const effectiveDate = parseDateString(data.effectiveDate || data.effective_date) || getTodayDateString();
+    const notes = data.notes ? String(data.notes).trim() : null;
+
+    if (db.isConfigured() && store.usingDatabase) {
+        const result = await repository.hodLeaveCollege({
+            branchCode,
+            outgoingUserId: sessionUser.id,
+            outgoingUsername: sessionUser.username,
+            replacementFacultyId: candidate.facultyId || candidate.id,
+            replacementUserId: candidate.userId,
+            effectiveDate,
+            performedByUserId: sessionUser.id,
+            performedByName: sessionUser.name,
+            notes
+        });
+
+        await store.reloadFromDatabase();
+        const allUsers = await repository.loadAllUsers();
+        const users = require('./users');
+        users.syncFromDatabase(allUsers);
+
+        return result;
+    } else {
+        const users = require('./users');
+        // Promote replacement to HOS
+        users.updateUserRoleAndStatus(candidate.username || candidate.userId, { role: 'hos', status: 'active' });
+        // Deactivate outgoing HOD user account and set role to faculty
+        users.updateUserRoleAndStatus(sessionUser.username || sessionUser.id, { role: 'faculty', status: 'inactive' });
+
+        // Deactivate outgoing faculty in store
+        if (sessionUser.facultyId || sessionUser.name) {
+            store.setFacultyStatusInMemory(sessionUser.facultyId || sessionUser.name, 'inactive');
+        }
+
+        // Cancel active temporary delegations
+        inMemoryDelegations.forEach(d => {
+            if (d.branchCode.toUpperCase() === branchCode && d.status === 'ACTIVE') {
+                d.status = 'CANCELLED';
+                d.updatedAt = new Date().toISOString();
+            }
+        });
+
+        const auditRecord = {
+            id: 'trf_' + Date.now().toString(36) + '_' + crypto.randomBytes(4).toString('hex'),
+            branchCode,
+            transferType: 'LEAVING_COLLEGE',
+            previousHodUserId: sessionUser.id || null,
+            previousHodName: sessionUser.name,
+            previousHodUsername: sessionUser.username,
+            newHodUserId: candidate.userId || null,
+            newHodName: candidate.name,
+            newHodUsername: candidate.username,
+            performedByUserId: sessionUser.id || null,
+            performedByName: sessionUser.name,
+            effectiveDate,
+            notes,
+            createdAt: new Date().toISOString()
+        };
+        inMemoryTransfers.unshift(auditRecord);
+
+        return {
+            success: true,
+            transferType: 'LEAVING_COLLEGE',
+            branchCode,
+            previousHOD: { id: sessionUser.id, username: sessionUser.username, name: sessionUser.name, role: 'faculty', status: 'inactive' },
+            newHOD: { id: candidate.userId, username: candidate.username, name: candidate.name, role: 'hos', status: 'active' },
+            effectiveDate,
+            auditRecord: sanitizeTransfer(auditRecord)
+        };
+    }
+}
+
+/**
+ * List historical HOD transfers and departures for a branch.
+ */
+async function listHODTransfers(branchCode = null, sessionUser = null) {
+    const normBranch = branchCode ? String(branchCode).trim().toUpperCase() : (sessionUser && sessionUser.department ? String(sessionUser.department).trim().toUpperCase() : null);
+    if (!normBranch) return [];
+
+    let rows = [];
+    if (db.isConfigured() && store.usingDatabase) {
+        rows = await repository.listHODTransfers(normBranch);
+    } else {
+        rows = inMemoryTransfers.filter(t => t.branchCode.toUpperCase() === normBranch);
+    }
+
+    return rows.map(r => sanitizeTransfer(r));
+}
+
 function wipeInMemoryStore() {
     inMemoryDelegations = [];
+    inMemoryTransfers = [];
 }
 
 module.exports = {
@@ -807,7 +1153,11 @@ module.exports = {
     getActiveDelegationForBranch,
     isAuthorizedHOS,
     listActingHODCandidates,
+    transferHODRole,
+    hodLeaveCollege,
+    listHODTransfers,
     parseDateString,
     getTodayDateString,
     wipeInMemoryStore
 };
+

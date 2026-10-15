@@ -99,11 +99,12 @@ function middleware(req, res, next) {
     if (sessionPayload) {
         const users = require('../data/users');
         const userExists = users.findByUsername(sessionPayload.username) || (sessionPayload.id && users.findById(sessionPayload.id));
-        if (userExists && userExists.status === 'inactive') {
+        if (userExists && (userExists.status === 'inactive' || userExists.status === 'deactivated' || userExists.active === false)) {
             req.session = null;
             res.setHeader('Set-Cookie', `${COOKIE_NAME}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`);
         } else {
             if (userExists) {
+                if (userExists.role) sessionPayload.role = userExists.role;
                 if (userExists.name) sessionPayload.name = userExists.name;
                 if (userExists.phone !== undefined) sessionPayload.phone = userExists.phone;
                 if (userExists.department) sessionPayload.department = String(userExists.department).trim().toUpperCase();

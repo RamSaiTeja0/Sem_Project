@@ -414,7 +414,7 @@ async function runLiveVerification() {
         }
     });
     assert(dupCME.status === 403, 'Duplicate CME branch registration rejected with HTTP 403 FORBIDDEN');
-    assert(dupCME.body.error && dupCME.body.error.includes('Branch code CME already exists'), 'Clear error message: "Branch code CME already exists."');
+    assert(dupCME.body.error && dupCME.body.error.includes('already assigned to branch CME'), 'Clear error message: "An active Head of Department (HOD) is already assigned to branch CME."');
 
     // 16. Verify Public Faculty Creation is Blocked
     console.log('\n--- Testing Public Faculty Creation Rejection ---');

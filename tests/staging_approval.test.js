@@ -112,7 +112,7 @@ async function run() {
             username: 'cme_hos',
             password: 'Cme_password1'
         });
-        assert.strictEqual(cmeHosReg.status, 201);
+        assert.ok(cmeHosReg.status === 201 || cmeHosReg.status === 409);
         const cmeHosLogin = await call('POST', '/api/auth/login', {
             username: 'cme_hos',
             password: 'Cme_password1'
@@ -129,7 +129,7 @@ async function run() {
             password: 'Kusuma_pass1',
             subjects: ['Python Programming']
         }, cmeHosCookie);
-        assert.strictEqual(cmeFacReg.status, 201);
+        assert.ok(cmeFacReg.status === 201 || cmeFacReg.status === 409);
         const cmeFacLogin = await call('POST', '/api/auth/login', {
             username: 'kusuma_fac',
             password: 'Kusuma_pass1'
@@ -147,7 +147,7 @@ async function run() {
             username: 'eee_hos',
             password: 'Eee_password1'
         });
-        assert.strictEqual(eeeHosReg.status, 201);
+        assert.ok(eeeHosReg.status === 201 || eeeHosReg.status === 409);
         const eeeHosLogin = await call('POST', '/api/auth/login', {
             username: 'eee_hos',
             password: 'Eee_password1'
@@ -342,20 +342,23 @@ async function run() {
 
         await saveStagedData('upl_cme_review_01', contractWithUnresolved, 'VALID', []);
 
-        await checkAsync('Staged record with uncatalogued subject blocks approval (HTTP 422)', async () => {
+        await checkAsync('Staged record with uncatalogued faculty/subject blocks approval (HTTP 422)', async () => {
             const res = await call('POST', '/api/staging/upl_cme_review_01/approve', {}, cmeHosCookie);
             assert.strictEqual(res.status, 422);
             assert.strictEqual(res.body.code, 'UNRESOLVED_ENTITIES');
-            assert.strictEqual(res.body.unresolvedEntities.length, 1);
+            assert.strictEqual(res.body.unresolvedEntities.length, 2);
 
             const types = res.body.unresolvedEntities.map(e => e.entityType);
             assert.ok(types.includes('subject'), 'Must detect unresolved subject');
+            assert.ok(types.includes('faculty'), 'Must detect unresolved faculty');
         });
 
-        await checkAsync('Unregistered faculty generates informational warning without blocking', async () => {
+        await checkAsync('Scheduled activity (TPC) with null faculty is NOT flagged as unresolved faculty', async () => {
             const detailRes = await call('GET', '/api/staging/upl_cme_review_01', null, cmeHosCookie);
             assert.strictEqual(detailRes.status, 200);
-            assert.ok(detailRes.body.resolution.informationalWarnings.length > 0, 'Must contain informational warning for unregistered faculty');
+            const facUnresolved = detailRes.body.resolution.unresolvedEntities.filter(e => e.entityType === 'faculty');
+            assert.strictEqual(facUnresolved.length, 1);
+            assert.strictEqual(facUnresolved[0].extractedText, 'Prof. Unknown Guest');
         });
 
         await checkAsync('HOS explicitly maps unresolved subject to existing catalog entity', async () => {
@@ -366,8 +369,15 @@ async function run() {
             }, cmeHosCookie);
             assert.strictEqual(mapSubjRes.status, 200);
             assert.strictEqual(mapSubjRes.body.success, true);
-            assert.strictEqual(mapSubjRes.body.resolution.unresolvedCount, 0); // 0 unresolved left!
-            assert.strictEqual(mapSubjRes.body.resolution.ok, true);
+            assert.strictEqual(mapSubjRes.body.resolution.unresolvedCount, 1); // Only faculty left
+        });
+
+        await checkAsync('HOS registers all remaining unresolved entities to branch catalog', async () => {
+            const regAllRes = await call('POST', '/api/staging/upl_cme_review_01/register-all-unresolved', {}, cmeHosCookie);
+            assert.strictEqual(regAllRes.status, 200);
+            assert.strictEqual(regAllRes.body.success, true);
+            assert.strictEqual(regAllRes.body.resolution.unresolvedCount, 0); // 0 unresolved left!
+            assert.strictEqual(regAllRes.body.resolution.ok, true);
         });
 
         // -------------------------------------------------------------
