@@ -17,6 +17,7 @@ const db = require('../db/pool');
 const repository = require('../db/repository');
 const { getBranch, getBranchSemesters, normalizeDepartmentCode } = require('../data/departments');
 const { AUTHORITATIVE_PERIOD_TIMINGS } = require('../core/normalizer');
+const { resolveFullSubjectName, formatTimetableGridSubjects } = require('../core/subjectResolver');
 
 async function getClassesList() {
     if (db.isConfigured() && store.usingDatabase) {
@@ -166,16 +167,15 @@ router.get('/records', (req, res) => {
     res.json({ count: records.length, records });
 });
 
-router.get('/mine', async (req, res) => {
-    if (!req.session || req.session.role !== 'faculty') {
-        return res.status(401).json({ error: 'Faculty sign-in required', code: 'UNAUTHORIZED' });
-    }
-    const facultyName = req.session.facultyName || req.session.name;
-    const facultyId = req.session.facultyId || facultyName;
+async function getFacultyGridForSession(session) {
+    const facultyName = session.facultyName || session.name || session.username;
+    const facultyId = session.facultyId || facultyName;
     const engine = store.engine;
     const meta = engine.getMeta();
-    const days = engine.getDays();
-    const periods = engine.getPeriods();
+    const defaultDays = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+    let engineDays = engine.getDays ? engine.getDays() : [];
+    const days = (engineDays && engineDays.length >= 5) ? [...engineDays] : [...defaultDays];
+    const periods = (engine.getPeriods && engine.getPeriods().length >= 7) ? engine.getPeriods() : [1, 2, 3, 4, 5, 6, 7];
 
     let personalSlots = [];
     try {
@@ -209,6 +209,62 @@ router.get('/mine', async (req, res) => {
             return m ? parseInt(m[1], 10) : null;
         };
 
+function normalizeClassName(className) {
+    if (!className) return null;
+    const s = String(className).trim();
+    if (!s) return null;
+    const direct = normalizeDepartmentCode(s);
+    if (direct !== s) return direct;
+    return s.replace(/^DCME([-_ \t]|$)/i, 'CME$1')
+            .replace(/^DCSE([-_ \t]|$)/i, 'CME$1')
+            .replace(/^DEEE([-_ \t]|$)/i, 'EEE$1')
+            .replace(/^DMEC([-_ \t]|$)/i, 'MEC$1')
+            .replace(/^DECE([-_ \t]|$)/i, 'ECE$1')
+            .replace(/^DCIVIL([-_ \t]|$)/i, 'CIVIL$1');
+}
+
+        personalSlots.forEach(s => {
+            const canonicalD = normDay(s.day);
+            if (canonicalD && !days.includes(canonicalD)) {
+                days.push(canonicalD);
+            }
+        });
+
+        // Pre-calculate consecutive lab spans if not explicitly stored
+        const labSpans = new Map();
+        const slotsByDay = {};
+        personalSlots.forEach(s => {
+            const dKey = normDay(s.day);
+            if (!slotsByDay[dKey]) slotsByDay[dKey] = [];
+            slotsByDay[dKey].push(s);
+        });
+        Object.keys(slotsByDay).forEach(dKey => {
+            const daySlots = slotsByDay[dKey].sort((a, b) => parseInt(a.period, 10) - parseInt(b.period, 10));
+            for (let i = 0; i < daySlots.length; i++) {
+                const cur = daySlots[i];
+                const curType = cur.type || cur.session_type;
+                const curP = parseInt(cur.period, 10);
+                if (curType === 'lab' && cur.subject && !cur.spanTo && !cur.span_to) {
+                    let lastP = curP;
+                    let j = i + 1;
+                    while (j < daySlots.length) {
+                        const next = daySlots[j];
+                        const nextType = next.type || next.session_type;
+                        const nextP = parseInt(next.period, 10);
+                        if (nextP === lastP + 1 && nextType === 'lab' && (next.subject || '').trim().toUpperCase() === (cur.subject || '').trim().toUpperCase()) {
+                            lastP = nextP;
+                            j++;
+                        } else {
+                            break;
+                        }
+                    }
+                    if (lastP > curP) {
+                        labSpans.set(`${dKey}|${curP}`, lastP);
+                    }
+                }
+            }
+        });
+
         const slotMap = new Map();
         personalSlots.forEach(s => {
             const dKey = normDay(s.day);
@@ -228,13 +284,14 @@ router.get('/mine', async (req, res) => {
                     cells.push({
                         day,
                         period: pKey,
-                        subject: match.subject,
+                        subject: resolveFullSubjectName(match.subject, { type: match.type || match.session_type, department: session.department }),
+                        rawSubject: match.subject,
                         faculty: facultyName,
                         facultyId,
-                        className: match.className || match.class_name || null,
+                        className: normalizeClassName(match.className || match.class_name),
                         room: match.room || match.room_code || null,
                         type: match.type || match.session_type || 'theory',
-                        spanTo: match.spanTo || match.span_to || null,
+                        spanTo: match.spanTo || match.span_to || labSpans.get(`${dKey}|${pKey}`) || null,
                         status: 'busy',
                         isPersonal: true
                     });
@@ -258,17 +315,17 @@ router.get('/mine', async (req, res) => {
             ? meta.periodTimings
             : AUTHORITATIVE_PERIOD_TIMINGS;
 
-        return res.json({
+        return {
             view: 'faculty',
             name: facultyName,
             faculty: facultyName,
-            branch: req.session.department,
+            branch: session.department,
             days,
             periods,
             cells,
             periodTimings: personalTimings,
             isCustomPersonal: true
-        });
+        };
     }
 
     let grid = engine.getFacultyGrid(facultyName);
@@ -282,17 +339,27 @@ router.get('/mine', async (req, res) => {
             });
         }));
         grid = { view: 'faculty', name: facultyName, days, periods, cells };
+    } else {
+        grid = formatTimetableGridSubjects(grid, session.department);
     }
     let personalTimings = (meta && meta.periodTimings && Object.keys(meta.periodTimings).length > 0)
         ? meta.periodTimings
         : AUTHORITATIVE_PERIOD_TIMINGS;
-    res.json({
+    return {
         ...grid,
         faculty: facultyName,
-        branch: req.session.department,
+        branch: session.department,
         periodTimings: personalTimings,
         isCustomPersonal: false
-    });
+    };
+}
+
+router.get('/mine', async (req, res) => {
+    if (!req.session || req.session.role !== 'faculty') {
+        return res.status(401).json({ error: 'Faculty sign-in required', code: 'UNAUTHORIZED' });
+    }
+    const result = await getFacultyGridForSession(req.session);
+    return res.json(result);
 });
 
 router.get('/', async (req, res) => {
@@ -319,13 +386,18 @@ router.get('/', async (req, res) => {
                 code: 'FORBIDDEN'
             });
         }
+        if (req.query.faculty) {
+            const facultyGrid = await getFacultyGridForSession(req.session);
+            return res.json(facultyGrid);
+        }
     }
 
     if (req.query.faculty) {
-        const grid = engine.getFacultyGrid(req.query.faculty);
+        let grid = engine.getFacultyGrid(req.query.faculty);
         if (!grid) {
             return res.status(404).json({ error: `No faculty named "${req.query.faculty}"`, code: 'NOT_FOUND' });
         }
+        grid = formatTimetableGridSubjects(grid, effectiveBranch);
         return res.json({ ...grid, periodTimings: engine.getMeta().periodTimings });
     }
 
@@ -422,7 +494,8 @@ router.get('/', async (req, res) => {
     }
 
     if (targetClassName) {
-        const grid = engine.getClassGrid(targetClassName);
+        let grid = engine.getClassGrid(targetClassName);
+        grid = formatTimetableGridSubjects(grid, effectiveBranch);
         const targetClassObj = allClasses.find(c => (c.code || c.class || '').toUpperCase() === targetClassName.toUpperCase());
         const classTimings = (grid && grid.periodTimings && Object.keys(grid.periodTimings).length > 0)
             ? grid.periodTimings
@@ -451,8 +524,10 @@ router.get('/', async (req, res) => {
     const defaultTimings = (meta && meta.periodTimings && Object.keys(meta.periodTimings).length > 0)
         ? meta.periodTimings
         : AUTHORITATIVE_PERIOD_TIMINGS;
+    let defaultGrid = engine.getClassGrid();
+    defaultGrid = formatTimetableGridSubjects(defaultGrid, effectiveBranch);
     res.json({
-        ...engine.getClassGrid(),
+        ...defaultGrid,
         periodTimings: defaultTimings,
         classes: meta.classes,
         primaryClass: meta.primaryClass,

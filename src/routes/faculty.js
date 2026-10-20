@@ -181,10 +181,11 @@ router.get('/', async (req, res, next) => {
                            f.id AS faculty_db_id, f.code AS faculty_code, f.name AS faculty_name,
                            COALESCE(d.code, d_fac.code, '') AS branch
                       FROM users u
-                      LEFT JOIN faculty f ON f.id = u.faculty_id
+                     INNER JOIN faculty f ON f.id = u.faculty_id
                       LEFT JOIN departments d ON d.id = u.department_id
                       LEFT JOIN departments d_fac ON d_fac.id = f.department_id
                      WHERE u.role = 'faculty'
+                       AND (u.status IS NULL OR u.status <> 'rejected')
                 `);
                 for (const u of rows) {
                     if (u.faculty_id != null) {
@@ -195,86 +196,48 @@ router.get('/', async (req, res, next) => {
                         const codeUpper = String(u.faculty_code).trim().toUpperCase();
                         dbUsersMap.set(codeUpper, u);
                         dbUsersMap.set('code:' + codeUpper, u);
-                        dbUsersMap.set(String(u.faculty_code).trim().toLowerCase(), u);
-                    }
-                    const bUpper = String(u.branch || '').trim().toUpperCase();
-                    const nUpper = String(u.faculty_name || u.name || '').trim().toUpperCase();
-                    if (bUpper && nUpper) {
-                        dbUsersMap.set('branch_name:' + bUpper + '::' + nUpper, u);
-                    }
-                    if (nUpper) {
-                        dbUsersMap.set('name:' + nUpper, u);
-                    }
-                    if (u.username) {
-                        dbUsersMap.set('username:' + String(u.username).trim().toLowerCase(), u);
                     }
                 }
             } catch (_) {}
         }
 
-        const registeredUsers = (typeof users.list === 'function' ? users.list() : []) || [];
+        const registeredUsers = (typeof users.listRegisteredUsersOnly === 'function'
+            ? users.listRegisteredUsersOnly()
+            : (typeof users.list === 'function' ? users.list() : [])) || [];
 
         stats = stats.map(f => {
             let matchedUser = null;
             const facIdStr = f.id != null ? String(f.id).trim() : '';
-            const facCodeStr = f.code != null ? String(f.code).trim() : '';
-            const facNameStr = f.name != null ? String(f.name).trim() : '';
+            const facCodeStr = (f.code != null ? String(f.code).trim().toUpperCase() : '') ||
+                (f.id && isNaN(Number(f.id)) ? String(f.id).trim().toUpperCase() : '');
+            const facNumericId = f.numeric_id != null
+                ? String(f.numeric_id)
+                : (/^\d+$/.test(facIdStr) ? facIdStr : null);
             const facBranchStr = (f.department || f.branch || '').trim().toUpperCase();
 
-            // 1. Check DB map
-            if (facIdStr) {
-                matchedUser = dbUsersMap.get(facIdStr) ||
-                    dbUsersMap.get(facIdStr.toUpperCase()) ||
-                    dbUsersMap.get('code:' + facIdStr.toUpperCase()) ||
-                    dbUsersMap.get('id:' + facIdStr);
-            }
-            if (!matchedUser && facCodeStr) {
-                matchedUser = dbUsersMap.get(facCodeStr.toUpperCase()) ||
-                    dbUsersMap.get('code:' + facCodeStr.toUpperCase());
-            }
-            if (!matchedUser && facBranchStr && facNameStr) {
-                matchedUser = dbUsersMap.get('branch_name:' + facBranchStr + '::' + facNameStr.toUpperCase());
-            }
-            if (!matchedUser && facNameStr && dbUsersMap.has('name:' + facNameStr.toUpperCase())) {
-                const candidate = dbUsersMap.get('name:' + facNameStr.toUpperCase());
-                if (!facBranchStr || !candidate.branch || candidate.branch.toUpperCase() === facBranchStr) {
-                    matchedUser = candidate;
-                }
-            }
-            if (!matchedUser && facIdStr && dbUsersMap.has('username:' + facIdStr.toLowerCase())) {
-                const candidate = dbUsersMap.get('username:' + facIdStr.toLowerCase());
-                if (!facBranchStr || !candidate.branch || candidate.branch.toUpperCase() === facBranchStr) {
-                    matchedUser = candidate;
-                }
+            // 1. Check DB map using direct relational identifiers
+            if (facNumericId && dbUsersMap.has(facNumericId)) {
+                matchedUser = dbUsersMap.get(facNumericId);
+            } else if (facIdStr && dbUsersMap.has(facIdStr)) {
+                matchedUser = dbUsersMap.get(facIdStr);
+            } else if (facCodeStr && dbUsersMap.has(facCodeStr)) {
+                matchedUser = dbUsersMap.get(facCodeStr);
             }
 
-            // 2. Check in-memory registered users by facultyId, facultyCode, name, or username
+            // 2. Check in-memory registered users by explicit facultyId / facultyCode (NOT display name)
             if (!matchedUser) {
                 matchedUser = registeredUsers.find(u => {
-                    if (u.role !== 'faculty') return false;
+                    if (u.role !== 'faculty' || u.status === 'rejected') return false;
                     const uBranch = (u.department || u.branchName || '').trim().toUpperCase();
                     if (facBranchStr && uBranch && uBranch !== facBranchStr) return false;
 
                     const uFacId = u.facultyId != null ? String(u.facultyId).trim() : '';
-                    const uFacCode = u.facultyCode != null ? String(u.facultyCode).trim() : '';
-                    const uFacName = (u.facultyName || u.name || '').trim();
-                    const uUsername = (u.username || '').trim();
+                    const uFacCode = u.facultyCode != null ? String(u.facultyCode).trim().toUpperCase() : '';
 
-                    if (facIdStr) {
-                        if (uFacId && uFacId.toLowerCase() === facIdStr.toLowerCase()) return true;
-                        if (uFacCode && uFacCode.toLowerCase() === facIdStr.toLowerCase()) return true;
-                        if (/^\d+$/.test(facIdStr) && /^\d+$/.test(uFacId) && parseInt(uFacId, 10) === parseInt(facIdStr, 10)) return true;
-                    }
-                    if (facCodeStr) {
-                        if (uFacId && uFacId.toLowerCase() === facCodeStr.toLowerCase()) return true;
-                        if (uFacCode && uFacCode.toLowerCase() === facCodeStr.toLowerCase()) return true;
-                    }
-                    if (facNameStr && uFacName && facNameStr.toUpperCase() === uFacName.toUpperCase()) {
-                        return true;
-                    }
-                    if (facIdStr && uUsername && uUsername.toLowerCase() === facIdStr.toLowerCase()) {
-                        return true;
-                    }
+                    if (facNumericId && uFacId && uFacId === facNumericId) return true;
+                    if (facIdStr && uFacId && uFacId.toUpperCase() === facIdStr.toUpperCase()) return true;
+                    if (facCodeStr && uFacCode && uFacCode === facCodeStr) return true;
+                    if (facCodeStr && uFacId && uFacId.toUpperCase() === facCodeStr) return true;
                     return false;
                 });
             }
@@ -288,7 +251,7 @@ router.get('/', async (req, res, next) => {
                 hasAccount,
                 status: isInactive ? 'inactive' : (f.status || 'active'),
                 phone: (matchedUser && matchedUser.phone) ? matchedUser.phone : f.phone,
-                dbId: matchedUser ? (matchedUser.faculty_id || matchedUser.faculty_db_id || matchedUser.facultyId || null) : (f.dbId || null),
+                dbId: matchedUser ? (matchedUser.faculty_id || matchedUser.faculty_db_id || matchedUser.facultyId || null) : (f.dbId || f.numeric_id || null),
                 account: matchedUser ? {
                     id: matchedUser.id,
                     username: matchedUser.username,
@@ -802,7 +765,26 @@ router.post('/:id/activate', requireHOSUser, async (req, res) => {
             store.setFacultyStatusInMemory(member.id || targetId, 'active');
         }
 
-        users.updateFacultyUser(member.id || targetId, { status: 'active' });
+        const allUsers = (typeof users.list === 'function' ? users.list() : []) || [];
+        const targetIdStr = String(targetId).trim().toLowerCase();
+        const memberIdStr = member.id != null ? String(member.id).trim().toLowerCase() : '';
+        const memberCodeStr = member.code != null ? String(member.code).trim().toLowerCase() : '';
+        const memberNumIdStr = member.numeric_id != null ? String(member.numeric_id).trim().toLowerCase() : '';
+
+        const targetUser = allUsers.find(u =>
+            (u.facultyId && (String(u.facultyId).toLowerCase() === targetIdStr || String(u.facultyId).toLowerCase() === memberIdStr || String(u.facultyId).toLowerCase() === memberCodeStr || String(u.facultyId).toLowerCase() === memberNumIdStr)) ||
+            (u.id && String(u.id).toLowerCase() === targetIdStr) ||
+            (u.username && (u.username.toLowerCase() === targetIdStr || (member.username && u.username.toLowerCase() === String(member.username).toLowerCase()))) ||
+            (u.name && u.name.toUpperCase() === member.name.toUpperCase())
+        );
+
+        if (targetUser && targetUser.username) {
+            users.updateFacultyUser(targetUser.username, { status: 'active', active: true });
+        }
+        users.updateFacultyUser(member.id || targetId, { status: 'active', active: true });
+        if (member.numeric_id) users.updateFacultyUser(member.numeric_id, { status: 'active', active: true });
+        if (member.code) users.updateFacultyUser(member.code, { status: 'active', active: true });
+        if (member.name) users.updateFacultyUser(member.name, { status: 'active', active: true });
 
         res.json({
             success: true,
@@ -900,17 +882,17 @@ router.post('/:id/create-account', requireHOSUser, async (req, res, next) => {
     }
 
     const phone = String(body.phone || member.phone || '').trim();
-    const subjects = body.subjects !== undefined
+    let subjects = body.subjects !== undefined
         ? (Array.isArray(body.subjects) ? body.subjects : String(body.subjects).split(',').map(s => s.trim()).filter(Boolean))
-        : (member.subjects || ['General']);
+        : ((member.subjects && member.subjects.length > 0) ? member.subjects : ['General']);
 
-    if (!subjects.length) {
-        return res.status(400).json({ error: 'At least one subject or area of expertise is required.', code: 'SUBJECTS_REQUIRED' });
+    if (!subjects || !subjects.length) {
+        subjects = ['General'];
     }
 
     try {
         const createdUser = await users.createAccountForFaculty({
-            facultyId: member.id,
+            facultyId: member.numeric_id || member.id,
             name: body.name || member.name,
             department: member.department,
             designation: member.designation,

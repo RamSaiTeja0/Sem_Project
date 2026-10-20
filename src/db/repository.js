@@ -1461,6 +1461,8 @@ async function activateFaculty(id, branchCode) {
               FROM faculty f LEFT JOIN departments d ON d.id = f.department_id
              WHERE f.id::text = $1::text OR UPPER(f.code) = UPPER($1::text) OR UPPER(f.name) = UPPER($1::text)
                 OR f.id IN (SELECT faculty_id FROM users WHERE id::text = $1::text OR UPPER(username) = UPPER($1::text))
+             ORDER BY (f.id::text = $1::text) DESC, (UPPER(f.code) = UPPER($1::text)) DESC, (UPPER(f.name) = UPPER($1::text)) DESC, f.id DESC
+             LIMIT 1
         `, [String(id)]);
 
         if (!found.rows.length) {
@@ -1478,8 +1480,24 @@ async function activateFaculty(id, branchCode) {
             throw err;
         }
 
+        let linkedUser = null;
+        try {
+            const uRes = await client.query(`
+                SELECT id, username, status, active, role, faculty_id
+                  FROM users
+                 WHERE faculty_id = $1
+                    OR (faculty_id IS NULL AND (UPPER(username) = UPPER($2) OR UPPER(username) = UPPER($3)))
+                 ORDER BY (faculty_id = $1) DESC
+                 LIMIT 1
+            `, [fac.id, fac.code || '', fac.name || '']);
+            if (uRes.rows.length) linkedUser = uRes.rows[0];
+        } catch (_) {}
+
         await client.query(`UPDATE faculty SET status = 'active' WHERE id = $1`, [fac.id]);
-        await client.query(`UPDATE users SET status = 'active' WHERE faculty_id = $1`, [fac.id]);
+        if (linkedUser) {
+            await client.query(`UPDATE users SET status = 'active', active = TRUE WHERE id = $1`, [linkedUser.id]);
+        }
+        await client.query(`UPDATE users SET status = 'active', active = TRUE WHERE faculty_id = $1`, [fac.id]);
 
         return { id: fac.code, name: fac.name, department: fac.department, status: 'active' };
     });

@@ -18,6 +18,9 @@
  *  14. Faculty cannot upload master timetable (HTTP 403).
  *  15. HOS cannot upload faculty timetable (HTTP 403).
  */
+const { verifySafetyGuard } = require('./testDbGuard');
+verifySafetyGuard();
+
 const assert = require('assert');
 const http = require('http');
 const path = require('path');

@@ -20,6 +20,7 @@ const repository = require('../db/repository');
 const importer = require('../importers');
 const { AUTHORITATIVE_PERIOD_TIMINGS } = require('../core/normalizer');
 const { normalizeDepartmentCode } = require('../data/departments');
+const { resolveFullSubjectName, formatTimetableGridSubjects } = require('../core/subjectResolver');
 
 const upload = multer({
     storage: multer.memoryStorage(),
@@ -54,6 +55,20 @@ function normalizeDayCanonical(dayStr) {
     if (!dayStr) return null;
     const clean = String(dayStr).trim().toUpperCase();
     return DAY_MAP[clean] || (clean.charAt(0) + clean.slice(1).toLowerCase());
+}
+
+function normalizeClassName(className) {
+    if (!className) return null;
+    const s = String(className).trim();
+    if (!s) return null;
+    const direct = normalizeDepartmentCode(s);
+    if (direct !== s) return direct;
+    return s.replace(/^DCME([-_ \t]|$)/i, 'CME$1')
+            .replace(/^DCSE([-_ \t]|$)/i, 'CME$1')
+            .replace(/^DEEE([-_ \t]|$)/i, 'EEE$1')
+            .replace(/^DMEC([-_ \t]|$)/i, 'MEC$1')
+            .replace(/^DECE([-_ \t]|$)/i, 'ECE$1')
+            .replace(/^DCIVIL([-_ \t]|$)/i, 'CIVIL$1');
 }
 
 function buildCandidateNames(sessionFaculty, sessionUsername) {
@@ -221,9 +236,11 @@ function matchFacultyInExtractedTimetable({ result, sessionFaculty, sessionDept,
                             day: canonicalDay,
                             period: p,
                             subject: subj,
-                            className: e.class_name || e.className || e.class || null,
+                            className: normalizeClassName(e.class_name || e.className || e.class),
                             room: e.room_code || e.room || null,
-                            type: e.session_type || e.type || 'theory'
+                            type: e.session_type || e.type || 'theory',
+                            spanTo: (p === startP && endP > startP) ? endP : null,
+                            span_to: (p === startP && endP > startP) ? endP : null
                         });
                     }
                 }
@@ -252,9 +269,11 @@ function matchFacultyInExtractedTimetable({ result, sessionFaculty, sessionDept,
                             day: canonicalDay,
                             period: p,
                             subject: subj,
-                            className: e.class_name || e.className || e.class || null,
+                            className: normalizeClassName(e.class_name || e.className || e.class),
                             room: e.room_code || e.room || null,
-                            type: e.session_type || e.type || 'theory'
+                            type: e.session_type || e.type || 'theory',
+                            spanTo: (p === startP && endP > startP) ? endP : null,
+                            span_to: (p === startP && endP > startP) ? endP : null
                         });
                     }
                 }
@@ -356,9 +375,10 @@ router.post('/preview', upload.single('timetable'), async (req, res) => {
             periodTimings = AUTHORITATIVE_PERIOD_TIMINGS;
         }
 
-        const days = (result.meta && result.meta.days && result.meta.days.length > 0)
+        const rawDays = (result.meta && result.meta.days && result.meta.days.length > 0)
             ? result.meta.days
             : ((store.engine && store.engine.getDays && store.engine.getDays()) || ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']);
+        const days = rawDays.map(d => normalizeDayCanonical(d) || d);
         const periods = (result.meta && result.meta.periods && result.meta.periods.length > 0)
             ? result.meta.periods
             : ((store.engine && store.engine.getPeriods && store.engine.getPeriods()) || [1, 2, 3, 4, 5, 6, 7]);
@@ -366,10 +386,19 @@ router.post('/preview', upload.single('timetable'), async (req, res) => {
         const contractEntries = matchedSlots.map(s => ({
             day: s.day,
             period: s.period,
+            span_to: s.spanTo || s.span_to || null,
             subject_name: s.subject,
             room_code: s.room,
             class_name: s.className,
             session_type: s.type
+        }));
+
+        const formattedSlots = matchedSlots.map(s => ({
+            ...s,
+            subject: s.subject,
+            rawSubject: s.subject,
+            displaySubject: s.subject ? resolveFullSubjectName(s.subject, { type: s.type, department: sessionDept }) : s.subject,
+            resolvedSubject: s.subject ? resolveFullSubjectName(s.subject, { type: s.type, department: sessionDept }) : s.subject
         }));
 
         return res.json({
@@ -378,13 +407,13 @@ router.post('/preview', upload.single('timetable'), async (req, res) => {
             format: result.format,
             provider: result.provider || null,
             faculty: sessionFaculty,
-            branch: sessionDept,
+            branch: normalizeDepartmentCode(sessionDept) || sessionDept,
             days,
             periods,
             periodTimings: periodTimings || {},
-            slotCount: matchedSlots.length,
-            totalSlots: matchedSlots.length,
-            slots: matchedSlots,
+            slotCount: formattedSlots.length,
+            totalSlots: formattedSlots.length,
+            slots: formattedSlots,
             contract: {
                 entries: contractEntries,
                 academic_year: (result.meta && result.meta.academicYear) || (result.rawContract && result.rawContract.academic_year) || null,
@@ -420,14 +449,22 @@ router.post('/confirm', async (req, res) => {
             (req.body && Array.isArray(req.body.entries) ? req.body.entries :
             (req.body && req.body.contract && Array.isArray(req.body.contract.entries) ? req.body.contract.entries : []));
 
-        const slots = rawSlots.map(s => ({
-            day: normalizeDayCanonical(s.day || s.day_of_week) || s.day,
-            period: parseInt(s.period, 10),
-            subject: s.subject || s.subject_name || '',
-            room: s.room || s.room_code || '',
-            className: s.className || s.class_name || '',
-            type: s.type || s.session_type || 'theory'
-        })).filter(s => s.day && !isNaN(s.period) && s.subject);
+        const slots = rawSlots.map(s => {
+            const rawClass = s.className || s.class_name || '';
+            const normClass = normalizeClassName(rawClass);
+            const startP = parseInt(s.period != null ? s.period : s.period_number, 10);
+            const spanTo = s.spanTo != null ? parseInt(s.spanTo, 10) :
+                (s.span_to != null ? parseInt(s.span_to, 10) : null);
+            return {
+                day: normalizeDayCanonical(s.day || s.day_of_week) || s.day,
+                period: startP,
+                spanTo: (spanTo && spanTo > startP) ? spanTo : null,
+                subject: s.rawSubject || s.subject || s.subject_name || '',
+                room: s.room || s.room_code || '',
+                className: normClass || null,
+                type: s.type || s.session_type || 'theory'
+            };
+        }).filter(s => s.day && !isNaN(s.period) && s.subject);
 
         console.log(`[Faculty Timetable Confirm] Saving ${slots.length} personal slots for faculty="${sessionFaculty}" (ID: ${facultyId})`);
 
@@ -543,10 +580,54 @@ router.get('/mine', async (req, res) => {
 
         const engine = store.engine;
         const meta = engine.getMeta();
-        const days = meta.days || ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+        const defaultDays = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+        const metaDays = meta.days || [];
+        const days = (metaDays && metaDays.length >= 5) ? [...metaDays] : [...defaultDays];
         const periods = meta.periods || [1, 2, 3, 4, 5, 6, 7];
 
         if (personalSlots && personalSlots.length > 0) {
+            personalSlots.forEach(s => {
+                const canonicalD = normalizeDayCanonical(s.day);
+                if (canonicalD && !days.includes(canonicalD)) {
+                    days.push(canonicalD);
+                }
+            });
+
+            // Pre-calculate consecutive lab spans if not explicitly stored
+            const labSpans = new Map();
+            const slotsByDay = {};
+            personalSlots.forEach(s => {
+                const dKey = normalizeDayCanonical(s.day);
+                if (!slotsByDay[dKey]) slotsByDay[dKey] = [];
+                slotsByDay[dKey].push(s);
+            });
+            Object.keys(slotsByDay).forEach(dKey => {
+                const daySlots = slotsByDay[dKey].sort((a, b) => parseInt(a.period, 10) - parseInt(b.period, 10));
+                for (let i = 0; i < daySlots.length; i++) {
+                    const cur = daySlots[i];
+                    const curType = cur.type || cur.session_type;
+                    const curP = parseInt(cur.period, 10);
+                    if (curType === 'lab' && cur.subject && !cur.spanTo && !cur.span_to) {
+                        let lastP = curP;
+                        let j = i + 1;
+                        while (j < daySlots.length) {
+                            const next = daySlots[j];
+                            const nextType = next.type || next.session_type;
+                            const nextP = parseInt(next.period, 10);
+                            if (nextP === lastP + 1 && nextType === 'lab' && (next.subject || '').trim().toUpperCase() === (cur.subject || '').trim().toUpperCase()) {
+                                lastP = nextP;
+                                j++;
+                            } else {
+                                break;
+                            }
+                        }
+                        if (lastP > curP) {
+                            labSpans.set(`${dKey}|${curP}`, lastP);
+                        }
+                    }
+                }
+            });
+
             const slotMap = new Map();
             personalSlots.forEach(s => {
                 const dKey = normalizeDayCanonical(s.day);
@@ -568,13 +649,14 @@ router.get('/mine', async (req, res) => {
                         cells.push({
                             day,
                             period: pKey,
-                            subject: match.subject,
+                            subject: resolveFullSubjectName(match.subject, { type: match.type || match.session_type, department: req.session.department }),
+                            rawSubject: match.subject,
                             faculty: sessionFaculty,
                             facultyId,
-                            className: match.className || match.class_name || null,
+                            className: normalizeClassName(match.className || match.class_name),
                             room: match.room || match.room_code || null,
                             type: match.type || match.session_type || 'theory',
-                            spanTo: match.spanTo || match.span_to || null,
+                            spanTo: match.spanTo || match.span_to || labSpans.get(`${dKey}|${pKey}`) || null,
                             status: 'busy',
                             isPersonal: true
                         });
@@ -609,7 +691,9 @@ router.get('/mine', async (req, res) => {
 
         // Fallback to Master Timetable grid for this faculty
         let grid = engine.getFacultyGrid(sessionFaculty);
-        if (!grid) {
+        if (grid && Array.isArray(grid.cells)) {
+            grid = formatTimetableGridSubjects(grid, req.session.department);
+        } else if (!grid) {
             const cells = [];
             days.forEach(day => periods.forEach(period => {
                 cells.push({

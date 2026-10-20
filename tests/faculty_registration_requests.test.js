@@ -25,6 +25,9 @@
  * 21. Duplicate approval and approving rejected requests are blocked (409 Conflict).
  * 22. Existing HOS direct faculty creation still works.
  */
+const { verifySafetyGuard } = require('./testDbGuard');
+verifySafetyGuard();
+
 const assert = require('assert');
 const http = require('http');
 const { check, counts } = require('./helpers');
@@ -602,6 +605,7 @@ async function run() {
     console.log('\n------------------------------------');
     console.log(`Results: ${c.passed} passed, ${c.failed} failed\n`);
     if (c.failed > 0) process.exit(1);
+    process.exit(0);
 }
 
 run().catch(err => {

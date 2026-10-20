@@ -12,6 +12,9 @@
  * 8. Master Timetable remains immutable.
  */
 
+const { verifySafetyGuard } = require('./testDbGuard');
+verifySafetyGuard();
+
 const assert = require('assert');
 const http = require('http');
 const fs = require('fs');

@@ -19,6 +19,9 @@
  *  15. Staged timetable rejection marks status REJECTED and leaves live timetable untouched.
  */
 
+const { verifySafetyGuard } = require('./testDbGuard');
+verifySafetyGuard();
+
 const assert = require('assert');
 const http = require('http');
 const path = require('path');

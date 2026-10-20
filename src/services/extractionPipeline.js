@@ -27,6 +27,20 @@ const { extractTimetableWithGemini, verifyTimetableWithGemini, GeminiExtractionE
 const { resolveContract } = require('../core/entityResolver');
 const { normalizeDepartmentCode } = require('../data/departments');
 
+function normalizeClassName(className) {
+    if (!className) return className;
+    const s = String(className).trim();
+    if (!s) return s;
+    const direct = normalizeDepartmentCode(s);
+    if (direct !== s) return direct;
+    return s.replace(/^DCME([-_ \t]|$)/i, 'CME$1')
+            .replace(/^DCSE([-_ \t]|$)/i, 'CME$1')
+            .replace(/^DEEE([-_ \t]|$)/i, 'EEE$1')
+            .replace(/^DMEC([-_ \t]|$)/i, 'MEC$1')
+            .replace(/^DECE([-_ \t]|$)/i, 'ECE$1')
+            .replace(/^DCIVIL([-_ \t]|$)/i, 'CIVIL$1');
+}
+
 /**
  * Normalizes extracted timetable contract JSON, preserving subject->faculty mapping,
  * resolving cell text faculty names, department alias canonicalization, and ensuring B2.1 consistency.
@@ -49,7 +63,17 @@ function normalizeExtractedContract(contract, uploadContext = {}) {
         contract.department_code = normalizeDepartmentCode(raw);
     }
 
+    if (contract.class_name) {
+        contract.class_name = normalizeClassName(contract.class_name);
+    }
+
     const entries = Array.isArray(contract.entries) ? contract.entries : (Array.isArray(contract.cells) ? contract.cells : []);
+    entries.forEach(entry => {
+        if (entry && entry.class_name) {
+            entry.class_name = normalizeClassName(entry.class_name);
+        }
+    });
+
     if (entries.length === 0 && !contract.faculty_subject_mapping && !contract.subject_faculty_mapping) {
         return contract;
     }

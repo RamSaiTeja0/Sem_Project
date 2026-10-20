@@ -1,10 +1,26 @@
+require('dotenv').config();
 const assert = require('assert');
+const { verifySafetyGuard, initTestDb } = require('./testDbGuard');
+
+// Enforce test database isolation before loading pool or config
+const guardInfo = verifySafetyGuard();
+console.log(`[Safety Guard] Active test database: ${guardInfo.parsedTest.full}`);
+
 const store = require('../src/data/store');
 const pool = require('../src/db/pool');
 const config = require('../src/config');
 
 async function runTest() {
     console.log('=== EMPTY FACULTY DATABASE STARTUP REGRESSION TEST ===\n');
+
+    // POSITIVE VERIFICATION: Ensure the active target is confirmed to be the isolated test database
+    const activeTarget = (pool.describeTarget() || '').toLowerCase();
+    const testDbName = (guardInfo.parsedTest.dbName || '').toLowerCase();
+    if (!activeTarget.includes(testDbName) || activeTarget.includes('neondb?')) {
+        throw new Error(`[SAFETY GUARD FATAL] Refusing to run destructive queries: active target "${activeTarget}" is not the test database "${testDbName}"!`);
+    }
+
+    await initTestDb();
 
     // 0. Establish clean empty-faculty baseline in test database while preserving HOD accounts
     await pool.query(`

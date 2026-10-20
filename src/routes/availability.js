@@ -193,13 +193,23 @@ function resolveAbsentFaculty(validFacultyList, input, branchCode) {
     if (!raw) return { member: null };
 
     const needle = String(typeof raw === 'object' ? (raw.name || raw.id || raw.code) : raw).trim().toUpperCase();
-    const found = (validFacultyList || []).find(f => {
+    let found = (validFacultyList || []).find(f => {
         const matchesName = f.name && f.name.toUpperCase() === needle;
         const matchesId = f.id != null && String(f.id).toUpperCase() === needle;
         const matchesCode = f.code && String(f.code).toUpperCase() === needle;
         const matchesBranch = !branchCode || !f.branch || f.branch.toUpperCase() === branchCode.toUpperCase();
         return (matchesName || matchesId || matchesCode) && matchesBranch;
     });
+    if (!found && store.engine && typeof store.engine.getFaculty === 'function') {
+        const roster = store.engine.getFaculty();
+        found = (roster || []).find(f => {
+            const matchesName = f.name && f.name.toUpperCase() === needle;
+            const matchesId = f.id != null && String(f.id).toUpperCase() === needle;
+            const matchesCode = f.code && String(f.code).toUpperCase() === needle;
+            const matchesBranch = !branchCode || !f.department || f.department.toUpperCase() === branchCode.toUpperCase();
+            return (matchesName || matchesId || matchesCode) && matchesBranch;
+        });
+    }
     if (!found) {
         return {
             error: `Unknown absent faculty "${typeof raw === 'object' ? (raw.name || raw.id) : raw}".`,
@@ -221,6 +231,20 @@ async function handle(req, input, res, isHOSOnly = false) {
                 code: 'FORBIDDEN'
             });
         }
+        const sessionFacultyName = req.session.facultyName || req.session.name;
+        const sessionFacultyId = req.session.facultyId;
+        if (input.faculty) {
+            const facStr = String(input.faculty).trim().toUpperCase();
+            const sessName = String(sessionFacultyName || '').trim().toUpperCase();
+            const sessId = sessionFacultyId ? String(sessionFacultyId).trim().toUpperCase() : null;
+            if (facStr !== sessName && (!sessId || facStr !== sessId)) {
+                return res.status(403).json({
+                    error: 'Forbidden: Faculty members cannot query availability on behalf of another faculty member.',
+                    code: 'FORBIDDEN'
+                });
+            }
+        }
+        input.faculty = sessionFacultyName;
     }
 
     // Date handling: parse UTC calendar date and auto-derive day if omitted

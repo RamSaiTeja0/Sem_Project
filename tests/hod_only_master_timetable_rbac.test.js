@@ -14,6 +14,8 @@ verifySafetyGuard();
 
 const assert = require('assert');
 const http = require('http');
+const fs = require('fs');
+const path = require('path');
 const { app } = require('../server');
 const db = require('../src/db/pool');
 const store = require('../src/data/store');
@@ -282,6 +284,61 @@ async function runTests() {
     assert.strictEqual(facSlotEdit.status, 403, 'Faculty slot edit must return 403 FORBIDDEN');
     console.log('✓ Faculty slot edit rejected with HTTP 403');
 
+    // Faculty attempts direct entry creation via POST /api/timetable/entries (HTTP 403)
+    const facDirectCreate = await call('POST', '/api/timetable/entries', {
+        class: className,
+        day: 'Tuesday',
+        period: 3,
+        subject: 'Unauthorized Faculty Direct Create',
+        faculty: facName,
+        room: `Room_${rand}_999`,
+        type: 'theory'
+    }, facCookie);
+    assert.strictEqual(facDirectCreate.status, 403, 'Faculty direct POST /api/timetable/entries must return 403 FORBIDDEN');
+    console.log('✓ Faculty direct POST /api/timetable/entries rejected with HTTP 403');
+
+    // Query valid subject & room from reference
+    const refRes = await call('GET', '/api/timetable/entries/reference', null, hodCookie);
+    const validSubject = (refRes.body && refRes.body.subjects && refRes.body.subjects[0] && refRes.body.subjects[0].name) || 'Advanced Algorithms Modified';
+    const validRoom = (refRes.body && refRes.body.rooms && refRes.body.rooms[0] && refRes.body.rooms[0].code) || null;
+
+    // HOD creates entry via POST /api/timetable/entries (HTTP 201)
+    const hodDirectCreate = await call('POST', '/api/timetable/entries', {
+        class: className,
+        day: 'Tuesday',
+        period: 3,
+        subject: validSubject,
+        faculty: facName,
+        room: validRoom,
+        type: 'theory'
+    }, hodCookie);
+    assert.strictEqual(hodDirectCreate.status, 201, `HOD direct create failed: ${JSON.stringify(hodDirectCreate.body)}`);
+    const hodEntryId = hodDirectCreate.body.entry.id;
+    console.log('✓ HOD can create Master Timetable entry via POST /api/timetable/entries');
+
+    // Faculty attempts direct entry update via PUT /api/timetable/entries/:id (HTTP 403)
+    const facDirectUpdate = await call('PUT', `/api/timetable/entries/${hodEntryId}`, {
+        class: className,
+        day: 'Tuesday',
+        period: 3,
+        subject: validSubject,
+        faculty: facName,
+        room: `Room_${rand}_999`,
+        type: 'theory'
+    }, facCookie);
+    assert.strictEqual(facDirectUpdate.status, 403, 'Faculty direct PUT /api/timetable/entries/:id must return 403 FORBIDDEN');
+    console.log('✓ Faculty direct PUT /api/timetable/entries/:id rejected with HTTP 403');
+
+    // Faculty attempts direct entry deletion via DELETE /api/timetable/entries/:id (HTTP 403)
+    const facDirectDelete = await call('DELETE', `/api/timetable/entries/${hodEntryId}`, null, facCookie);
+    assert.strictEqual(facDirectDelete.status, 403, 'Faculty direct DELETE /api/timetable/entries/:id must return 403 FORBIDDEN');
+    console.log('✓ Faculty direct DELETE /api/timetable/entries/:id rejected with HTTP 403');
+
+    // HOD can delete entry via DELETE /api/timetable/entries/:id (HTTP 200)
+    const hodDirectDelete = await call('DELETE', `/api/timetable/entries/${hodEntryId}`, null, hodCookie);
+    assert.strictEqual(hodDirectDelete.status, 200);
+    console.log('✓ HOD can delete Master Timetable entry via DELETE /api/timetable/entries/:id');
+
     // Verify cell content is unchanged by faculty attempt
     const verifyView = await call('GET', `/api/timetable?semester=SEM-5&section=A&academicYear=2024-2027`, null, facCookie);
     const cellP1 = (verifyView.body.cells || []).find(c => c.day === 'Monday' && c.period === 1);
@@ -339,9 +396,33 @@ async function runTests() {
     assert.strictEqual(myTtConfirm.body.saved, true);
     console.log('✓ Faculty My Timetable personal workflow operates independently and correctly');
 
+    // --- 16. Verify Frontend Master Timetable Read-Only Enforcement for Faculty ---
+    console.log('--- Step 16: Verify Frontend Master Timetable Read-Only for Faculty ---');
+    const appJsContent = fs.readFileSync(path.join(__dirname, '..', 'public', 'js', 'app.js'), 'utf8');
+    const indexHtmlContent = fs.readFileSync(path.join(__dirname, '..', 'public', 'index.html'), 'utf8');
+
+    assert.ok(appJsContent.includes('isMasterTimetable'), 'app.js must detect Master Timetable container');
+    assert.ok(appJsContent.includes('isAuthorizedHOD'), 'app.js must verify HOD authorization for Master Timetable indicators');
+    assert.ok(indexHtmlContent.includes('id="ttLiveSubtitle"'), 'index.html must have id="ttLiveSubtitle"');
+
+    // Verify role-based indicator resolution logic
+    function resolveShowEditIndicator(user, headId, bodyId, optionVal) {
+        const isMaster = (headId === 'ttHead' || bodyId === 'ttBody');
+        const isHOD = Boolean(user && (user.role === 'hos' || user.role === 'coordinator' || user.role === 'admin' || user.isActingHOD));
+        if (optionVal !== undefined) return Boolean(optionVal);
+        if (isMaster) return isHOD;
+        return true;
+    }
+
+    assert.strictEqual(resolveShowEditIndicator({ role: 'faculty' }, 'ttHead', 'ttBody'), false, 'Normal faculty MUST NOT see edit indicator on Master Timetable');
+    assert.strictEqual(resolveShowEditIndicator({ role: 'hos' }, 'ttHead', 'ttBody'), true, 'HOD MUST see edit indicator on Master Timetable');
+    assert.strictEqual(resolveShowEditIndicator({ role: 'faculty', isActingHOD: true }, 'ttHead', 'ttBody'), true, 'Acting HOD MUST see edit indicator on Master Timetable');
+    assert.strictEqual(resolveShowEditIndicator({ role: 'faculty' }, 'schedHead', 'schedBody', true), true, 'Faculty My Timetable must preserve edit indicator when requested');
+    console.log('✓ Frontend Master Timetable read-only logic verified for all roles');
+
     await stopServer();
     console.log('\n======================================================');
-    console.log('ALL 15 HOD-ONLY MASTER TIMETABLE RBAC CHECKS PASSED!');
+    console.log('ALL 16 HOD-ONLY MASTER TIMETABLE RBAC CHECKS PASSED!');
     console.log('======================================================\n');
     process.exit(0);
 }

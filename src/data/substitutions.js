@@ -28,8 +28,23 @@ const invigilation = require('./invigilation');
 // }
 let inMemorySubstitutions = [];
 
+function toIsoString(val) {
+    if (!val) return null;
+    if (typeof val === 'string') return val;
+    if (val instanceof Date) return val.toISOString();
+    return String(val);
+}
+
 function syncFromDatabase(records = []) {
     if (!Array.isArray(records)) return;
+    if (db.isConfigured() && store.usingDatabase) {
+        const dbIds = new Set(records.map(r => String(r.id)));
+        for (let i = inMemorySubstitutions.length - 1; i >= 0; i--) {
+            if (!dbIds.has(String(inMemorySubstitutions[i].id))) {
+                inMemorySubstitutions.splice(i, 1);
+            }
+        }
+    }
     for (const rec of records) {
         const idx = inMemorySubstitutions.findIndex(s => String(s.id) === String(rec.id));
         const item = {
@@ -49,9 +64,9 @@ function syncFromDatabase(records = []) {
             requestedBy: rec.requestedBy || rec.requested_by,
             status: rec.status,
             rejectionReason: rec.rejectionReason || rec.rejection_reason || null,
-            createdAt: rec.createdAt || rec.created_at,
-            respondedAt: rec.respondedAt || rec.responded_at || null,
-            cancelledAt: rec.cancelledAt || rec.cancelled_at || null
+            createdAt: toIsoString(rec.createdAt || rec.created_at) || new Date().toISOString(),
+            respondedAt: toIsoString(rec.respondedAt || rec.responded_at),
+            cancelledAt: toIsoString(rec.cancelledAt || rec.cancelled_at)
         };
         if (idx >= 0) inMemorySubstitutions[idx] = item;
         else inMemorySubstitutions.push(item);
@@ -106,16 +121,86 @@ function findFaculty(needle) {
 }
 
 /**
- * Check if a faculty member has an active teaching timetable conflict for a day of week and period.
+ * Canonicalize day strings (e.g. 'SAT', 'Saturday' -> 'Saturday')
  */
-function findTeachingClass(faculty, dayOfWeek, period) {
+const DAY_CANONICAL = {
+    'MON': 'Monday', 'MONDAY': 'Monday', 'M': 'Monday',
+    'TUE': 'Tuesday', 'TUES': 'Tuesday', 'TUESDAY': 'Tuesday', 'TU': 'Tuesday',
+    'WED': 'Wednesday', 'WEDNESDAY': 'Wednesday', 'W': 'Wednesday',
+    'THU': 'Thursday', 'THUR': 'Thursday', 'THURS': 'Thursday', 'THURSDAY': 'Thursday', 'TH': 'Thursday',
+    'FRI': 'Friday', 'FRIDAY': 'Friday', 'F': 'Friday',
+    'SAT': 'Saturday', 'SATURDAY': 'Saturday', 'S': 'Saturday',
+    'SUN': 'Sunday', 'SUNDAY': 'Sunday'
+};
+
+function normalizeDayCanonical(d) {
+    if (!d) return '';
+    const s = String(d).trim().toUpperCase();
+    return DAY_CANONICAL[s] || (s.charAt(0) + s.slice(1).toLowerCase());
+}
+
+/**
+ * Check if a faculty member has an active teaching timetable conflict for a day of week and period.
+ * When checkPersonal is true, checks the faculty's personal timetable (isolated schedule) first,
+ * falling back to the master timetable.
+ */
+async function findTeachingClass(faculty, dayOfWeek, period, { checkPersonal = false } = {}) {
     if (!faculty || !dayOfWeek || period == null) return null;
-    const records = store.engine ? store.engine.getRecords() : [];
-    const dayStr = dayOfWeek.trim().toUpperCase();
+    const targetDay = normalizeDayCanonical(dayOfWeek);
+    const dayStr = targetDay.trim().toUpperCase();
     const periodNum = parseInt(period, 10);
-    const facName = faculty.name.trim().toUpperCase();
+    const facName = faculty.name ? faculty.name.trim().toUpperCase() : '';
     const facId = faculty.id ? String(faculty.id).trim().toUpperCase() : null;
 
+    if (checkPersonal) {
+        let personalSlots = [];
+        try {
+            if (db.isConfigured() && store.usingDatabase) {
+                personalSlots = await repository.getFacultyPersonalTimetable(faculty.id || faculty.name);
+            }
+        } catch (_) {}
+
+        if (!personalSlots || personalSlots.length === 0) {
+            try {
+                if (typeof store.getFacultyPersonalTimetableInMemory === 'function') {
+                    personalSlots = (faculty.id ? store.getFacultyPersonalTimetableInMemory(faculty.id) : []) || [];
+                    if (!personalSlots.length && faculty.name) {
+                        personalSlots = store.getFacultyPersonalTimetableInMemory(faculty.name) || [];
+                    }
+                }
+            } catch (_) {}
+        }
+
+        if (personalSlots && personalSlots.length > 0) {
+            const match = personalSlots.find(s => {
+                const sDay = normalizeDayCanonical(s.day || s.day_of_week);
+                if (sDay.toUpperCase() !== dayStr) return false;
+                const p = parseInt(s.period != null ? s.period : s.period_number, 10);
+                const spanTo = s.spanTo ? parseInt(s.spanTo, 10) : (s.span_to ? parseInt(s.span_to, 10) : null);
+                const inPeriod = (p === periodNum) || (spanTo && periodNum >= p && periodNum <= spanTo);
+                if (!inPeriod) return false;
+                const isFree = s.is_free || s.isFree || !s.subject || s.subject.trim() === '' || s.subject.trim().toLowerCase() === 'free';
+                return !isFree;
+            });
+
+            if (match) {
+                return {
+                    className: match.className || match.class_name || null,
+                    subject: match.subject || match.rawSubject || 'Teaching',
+                    room: match.room || match.room_code || null,
+                    day: targetDay,
+                    period: periodNum,
+                    faculty: faculty.name,
+                    facultyId: faculty.id,
+                    type: match.type || match.session_type || 'theory',
+                    status: 'busy',
+                    isPersonal: true
+                };
+            }
+        }
+    }
+
+    const records = store.engine ? store.engine.getRecords() : [];
     return records.find(r =>
         r.status === 'busy' &&
         r.day && r.day.trim().toUpperCase() === dayStr &&
@@ -146,7 +231,7 @@ function hasAcceptedSubstitution(faculty, dateStr, period) {
 /**
  * Faculty A creates a substitution request for one of their vacant periods.
  */
-async function createRequest({ date, period, className, subject, substituteFacultyId, substituteFacultyName, sessionUser }) {
+async function createRequest({ date, period, className, subject, substituteFacultyId, substituteFacultyName, isAdjustment, sessionUser }) {
     if (!sessionUser) {
         const err = new Error('Authentication required. Please sign in as faculty.');
         err.status = 401; err.code = 'UNAUTHENTICATED';
@@ -189,21 +274,21 @@ async function createRequest({ date, period, className, subject, substituteFacul
         throw err;
     }
 
-    // 3. Verify Faculty A is actually marked ABSENT on that date
+    // 3. Verify Faculty A is marked ABSENT on that date, unless creating an adjustment request for their own class
     const absentRecords = await attendance.getAbsentFacultyOnDate(parsedDate.dateStr);
     const isFacultyAAbsent = absentRecords.some(r =>
         (r.id && String(r.id) === String(facultyA.id)) ||
         (r.name && r.name.toUpperCase() === facultyA.name.toUpperCase())
     );
 
-    if (!isFacultyAAbsent) {
+    if (!isFacultyAAbsent && !isAdjustment) {
         const err = new Error(`Faculty "${facultyA.name}" is not marked absent on ${parsedDate.dateStr}. Substitution requests can only be created for absent periods.`);
         err.status = 400; err.code = 'FACULTY_NOT_ABSENT';
         throw err;
     }
 
     // 4. Verify Faculty A actually has a scheduled timetable class during that slot
-    const scheduledClass = findTeachingClass(facultyA, parsedDate.dayOfWeek, normPeriod);
+    const scheduledClass = await findTeachingClass(facultyA, parsedDate.dayOfWeek, normPeriod, { checkPersonal: true });
     if (!scheduledClass) {
         const err = new Error(`Faculty "${facultyA.name}" has no scheduled class on ${parsedDate.dayOfWeek} period ${normPeriod}.`);
         err.status = 400; err.code = 'NO_SCHEDULED_CLASS';
@@ -216,7 +301,7 @@ async function createRequest({ date, period, className, subject, substituteFacul
         throw err;
     }
 
-    const targetClass = scheduledClass.className;
+    const targetClass = (className && className.trim()) || scheduledClass.className || (facultyA.department ? `${facultyA.department}-SEM1-A` : null);
     const targetSubject = subject || scheduledClass.subject || 'Teaching';
     const targetRoom = scheduledClass.room || null;
 
@@ -228,7 +313,8 @@ async function createRequest({ date, period, className, subject, substituteFacul
         throw err;
     }
 
-    const facultyB = findFaculty(subIdentifier);
+    const facultyB = (substituteFacultyId ? findFaculty(substituteFacultyId) : null) ||
+                     (substituteFacultyName ? findFaculty(substituteFacultyName) : null);
     if (!facultyB) {
         const err = new Error(`Selected substitute faculty "${subIdentifier}" could not be found.`);
         err.status = 404; err.code = 'SUBSTITUTE_NOT_FOUND';
@@ -261,9 +347,9 @@ async function createRequest({ date, period, className, subject, substituteFacul
     }
 
     // Faculty B must NOT have a timetable teaching class
-    const subTeaching = findTeachingClass(facultyB, parsedDate.dayOfWeek, normPeriod);
+    const subTeaching = await findTeachingClass(facultyB, parsedDate.dayOfWeek, normPeriod, { checkPersonal: false });
     if (subTeaching) {
-        const err = new Error(`Selected substitute "${facultyB.name}" is teaching another class (${subTeaching.className} - ${subTeaching.subject}) during period ${normPeriod}.`);
+        const err = new Error(`Selected substitute "${facultyB.name}" is teaching another class (${subTeaching.className ? subTeaching.className + ' - ' : ''}${subTeaching.subject || 'Teaching'}) during period ${normPeriod}.`);
         err.status = 400; err.code = 'SUBSTITUTE_NOT_FREE';
         throw err;
     }
@@ -288,6 +374,13 @@ async function createRequest({ date, period, className, subject, substituteFacul
     }
 
     // 6. Prevent duplicate substitution requests for the same slot
+    if (db.isConfigured() && store.usingDatabase) {
+        try {
+            const dbRecords = await repository.listFacultySubstitutions({ branchCode: facultyA.department });
+            syncFromDatabase(dbRecords);
+        } catch (_) {}
+    }
+
     const existingDuplicate = inMemorySubstitutions.find(s =>
         (s.status === 'PENDING' || s.status === 'ACCEPTED') &&
         s.date === parsedDate.dateStr &&
@@ -329,7 +422,13 @@ async function createRequest({ date, period, className, subject, substituteFacul
     if (db.isConfigured() && store.usingDatabase) {
         try {
             await repository.createFacultySubstitution(newRecord);
-        } catch (_) {}
+        } catch (dbErr) {
+            console.error('Failed to persist faculty substitution to database:', dbErr);
+            const err = new Error(`Database error saving substitution request: ${dbErr.message}`);
+            err.status = 500;
+            err.code = 'DATABASE_ERROR';
+            throw err;
+        }
     }
 
     inMemorySubstitutions.push(newRecord);
@@ -352,6 +451,13 @@ async function acceptRequest(id, sessionUser) {
         const err = new Error('HOS cannot accept or approve substitution requests. Only the requested substitute faculty can accept.');
         err.status = 403; err.code = 'FORBIDDEN';
         throw err;
+    }
+
+    if (db.isConfigured() && store.usingDatabase) {
+        try {
+            const dbRecords = await repository.listFacultySubstitutions({});
+            syncFromDatabase(dbRecords);
+        } catch (_) {}
     }
 
     const request = inMemorySubstitutions.find(s => String(s.id) === String(id));
@@ -400,7 +506,7 @@ async function acceptRequest(id, sessionUser) {
     // ==============================================================
     // CRITICAL: Fresh Real-Time Availability Re-validation
     // ==============================================================
-    const facultyB = findFaculty(request.substituteFacultyId || request.substituteFacultyName);
+    const facultyB = findFaculty(request.substituteFacultyId) || findFaculty(request.substituteFacultyName);
     if (!facultyB || facultyB.status === 'inactive') {
         const err = new Error('FACULTY_NO_LONGER_AVAILABLE: You are no longer active in the faculty roster.');
         err.status = 409; err.code = 'FACULTY_NO_LONGER_AVAILABLE';
@@ -420,9 +526,9 @@ async function acceptRequest(id, sessionUser) {
     }
 
     // Fresh timetable check
-    const currentTeaching = findTeachingClass(facultyB, request.dayOfWeek, request.period);
+    const currentTeaching = await findTeachingClass(facultyB, request.dayOfWeek, request.period, { checkPersonal: false });
     if (currentTeaching) {
-        const err = new Error(`FACULTY_NO_LONGER_AVAILABLE: You now have a scheduled teaching class (${currentTeaching.className} - ${currentTeaching.subject}) during period ${request.period}.`);
+        const err = new Error(`FACULTY_NO_LONGER_AVAILABLE: You now have a scheduled teaching class (${currentTeaching.className ? currentTeaching.className + ' - ' : ''}${currentTeaching.subject || 'Teaching'}) during period ${request.period}.`);
         err.status = 409; err.code = 'FACULTY_NO_LONGER_AVAILABLE';
         throw err;
     }
@@ -489,6 +595,13 @@ async function rejectRequest(id, reasonOrOpts, maybeSessionUser) {
         throw err;
     }
 
+    if (db.isConfigured() && store.usingDatabase) {
+        try {
+            const dbRecords = await repository.listFacultySubstitutions({});
+            syncFromDatabase(dbRecords);
+        } catch (_) {}
+    }
+
     const request = inMemorySubstitutions.find(s => String(s.id) === String(id));
     if (!request) {
         const err = new Error(`Substitution request "${id}" not found.`);
@@ -546,6 +659,13 @@ async function cancelRequest(id, sessionUser) {
         throw err;
     }
 
+    if (db.isConfigured() && store.usingDatabase) {
+        try {
+            const dbRecords = await repository.listFacultySubstitutions({});
+            syncFromDatabase(dbRecords);
+        } catch (_) {}
+    }
+
     const request = inMemorySubstitutions.find(s => String(s.id) === String(id));
     if (!request) {
         const err = new Error(`Substitution request "${id}" not found.`);
@@ -598,6 +718,13 @@ async function getMySubstitutions(sessionUser) {
         throw err;
     }
 
+    if (db.isConfigured() && store.usingDatabase) {
+        try {
+            const dbRecords = await repository.listFacultySubstitutions({});
+            syncFromDatabase(dbRecords);
+        } catch (_) {}
+    }
+
     const fac = findFaculty(sessionUser.facultyName || sessionUser.name || sessionUser.username);
     const facName = fac ? fac.name.toUpperCase() : (sessionUser.name || '').toUpperCase();
     const facId = fac ? String(fac.id) : null;
@@ -608,13 +735,13 @@ async function getMySubstitutions(sessionUser) {
                      (facId && String(s.originalFacultyId) === facId) ||
                      (s.requestedBy === username))
         .map(s => ({ ...s }))
-        .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+        .sort((a, b) => (new Date(b.createdAt || 0).getTime()) - (new Date(a.createdAt || 0).getTime()));
 
     const incomingRequests = inMemorySubstitutions
         .filter(s => (s.substituteFacultyName && s.substituteFacultyName.toUpperCase() === facName) ||
                      (facId && String(s.substituteFacultyId) === facId))
         .map(s => ({ ...s }))
-        .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+        .sort((a, b) => (new Date(b.createdAt || 0).getTime()) - (new Date(a.createdAt || 0).getTime()));
 
     return {
         facultyName: fac ? fac.name : sessionUser.name,
@@ -626,24 +753,39 @@ async function getMySubstitutions(sessionUser) {
 
 /**
  * Returns incoming requests directed to the logged-in faculty member.
+ * By default, returns only PENDING requests requiring action from the faculty member.
  */
-async function getIncomingSubstitutions(sessionUser) {
+async function getIncomingSubstitutions(sessionUser, queryOrOpts = {}) {
     if (!sessionUser) {
         const err = new Error('Authentication required.');
         err.status = 401; err.code = 'UNAUTHENTICATED';
         throw err;
     }
 
+    if (db.isConfigured() && store.usingDatabase) {
+        try {
+            const dbRecords = await repository.listFacultySubstitutions({});
+            syncFromDatabase(dbRecords);
+        } catch (_) {}
+    }
+
     const fac = findFaculty(sessionUser.facultyName || sessionUser.name || sessionUser.username);
     const facName = fac ? fac.name.toUpperCase() : (sessionUser.name || '').toUpperCase();
     const facId = fac ? String(fac.id) : null;
 
-    const list = inMemorySubstitutions.filter(s =>
-        ((s.substituteFacultyName && s.substituteFacultyName.toUpperCase() === facName) ||
-         (facId && String(s.substituteFacultyId) === facId))
-    );
+    const requestedStatus = queryOrOpts && queryOrOpts.status
+        ? String(queryOrOpts.status).trim().toUpperCase()
+        : 'PENDING';
 
-    const requests = list.map(s => ({ ...s })).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+    const list = inMemorySubstitutions.filter(s => {
+        const matchesFaculty = (s.substituteFacultyName && s.substituteFacultyName.toUpperCase() === facName) ||
+                               (facId && String(s.substituteFacultyId) === facId);
+        if (!matchesFaculty) return false;
+        if (requestedStatus === 'ALL') return true;
+        return (s.status || '').toUpperCase() === requestedStatus;
+    });
+
+    const requests = list.map(s => ({ ...s })).sort((a, b) => (new Date(b.createdAt || 0).getTime()) - (new Date(a.createdAt || 0).getTime()));
     return {
         requests,
         total: requests.length
@@ -690,6 +832,13 @@ async function getBranchSubstitutions(branchCodeOrOpts, maybeSessionUser) {
 
     const targetBranch = sessionBranch || (branchCode ? branchCode.toUpperCase() : null);
 
+    if (db.isConfigured() && store.usingDatabase) {
+        try {
+            const dbRecords = await repository.listFacultySubstitutions({ branchCode: targetBranch });
+            syncFromDatabase(dbRecords);
+        } catch (_) {}
+    }
+
     let list = inMemorySubstitutions.filter(s => {
         if (!targetBranch) return true;
         return s.originalFacultyBranch && s.originalFacultyBranch.toUpperCase() === targetBranch;
@@ -702,7 +851,7 @@ async function getBranchSubstitutions(branchCodeOrOpts, maybeSessionUser) {
         list = list.filter(s => s.status.toUpperCase() === filterStatus.toUpperCase());
     }
 
-    const sorted = list.map(s => ({ ...s })).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+    const sorted = list.map(s => ({ ...s })).sort((a, b) => (new Date(b.createdAt || 0).getTime()) - (new Date(a.createdAt || 0).getTime()));
     return {
         readOnly: true,
         branch: targetBranch,
@@ -750,25 +899,64 @@ async function getMyVacantPeriods({ date, sessionUser }) {
         };
     }
 
-    // Find all teaching timetable slots for Faculty A on this day of week
-    const records = store.engine ? store.engine.getRecords() : [];
-    const dayStr = parsedDate.dayOfWeek.trim().toUpperCase();
-    const facName = facultyA.name.trim().toUpperCase();
-    const facId = facultyA.id ? String(facultyA.id).trim().toUpperCase() : null;
+    // Find all teaching timetable slots for Faculty A on this day of week (checking personal timetable first)
+    let personalSlots = [];
+    try {
+        if (db.isConfigured() && store.usingDatabase) {
+            personalSlots = await repository.getFacultyPersonalTimetable(facultyA.id || facultyA.name);
+        }
+    } catch (_) {}
 
-    const teachingSlots = records.filter(r =>
-        r.status === 'busy' &&
-        r.day && r.day.trim().toUpperCase() === dayStr &&
-        ((r.faculty && r.faculty.trim().toUpperCase() === facName) ||
-         (r.facultyId && String(r.facultyId).trim().toUpperCase() === facId))
-    ).sort((a, b) => a.period - b.period);
+    if (!personalSlots || personalSlots.length === 0) {
+        try {
+            if (typeof store.getFacultyPersonalTimetableInMemory === 'function') {
+                personalSlots = (facultyA.id ? store.getFacultyPersonalTimetableInMemory(facultyA.id) : []) || [];
+                if (!personalSlots.length && facultyA.name) {
+                    personalSlots = store.getFacultyPersonalTimetableInMemory(facultyA.name) || [];
+                }
+            }
+        } catch (_) {}
+    }
+
+    const dayStr = normalizeDayCanonical(parsedDate.dayOfWeek).trim().toUpperCase();
+    let teachingSlots = [];
+
+    if (personalSlots && personalSlots.length > 0) {
+        teachingSlots = personalSlots.filter(s => {
+            const sDay = normalizeDayCanonical(s.day || s.day_of_week);
+            if (sDay.toUpperCase() !== dayStr) return false;
+            const isFree = s.is_free || s.isFree || !s.subject || s.subject.trim() === '' || s.subject.trim().toLowerCase() === 'free';
+            return !isFree;
+        }).map(s => {
+            const p = parseInt(s.period != null ? s.period : s.period_number, 10);
+            return {
+                period: p,
+                className: s.className || s.class_name || (facultyA.department ? `${facultyA.department}-SEM1-A` : null),
+                subject: s.subject || s.rawSubject || 'Teaching',
+                room: s.room || s.room_code || null
+            };
+        }).sort((a, b) => a.period - b.period);
+    }
+
+    if (teachingSlots.length === 0) {
+        const records = store.engine ? store.engine.getRecords() : [];
+        const facName = facultyA.name.trim().toUpperCase();
+        const facId = facultyA.id ? String(facultyA.id).trim().toUpperCase() : null;
+
+        teachingSlots = records.filter(r =>
+            r.status === 'busy' &&
+            r.day && r.day.trim().toUpperCase() === dayStr &&
+            ((r.faculty && r.faculty.trim().toUpperCase() === facName) ||
+             (r.facultyId && String(r.facultyId).trim().toUpperCase() === facId))
+        ).sort((a, b) => a.period - b.period);
+    }
 
     const periodsWithStatus = teachingSlots.map(slot => {
         const activeSub = inMemorySubstitutions.find(s =>
             (s.status === 'PENDING' || s.status === 'ACCEPTED') &&
             s.date === parsedDate.dateStr &&
             s.period === slot.period &&
-            s.className.toUpperCase() === slot.className.toUpperCase() &&
+            (s.className || '').toUpperCase() === (slot.className || '').toUpperCase() &&
             ((s.originalFacultyId && String(s.originalFacultyId) === String(facultyA.id)) ||
              (s.originalFacultyName && s.originalFacultyName.toUpperCase() === facultyA.name.toUpperCase()))
         );

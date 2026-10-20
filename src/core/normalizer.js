@@ -188,8 +188,12 @@ function normalize(source, options = {}) {
      */
     function buildMember(id, name, entry) {
         const source = entry || {};
+        const parsedNum = Number.isInteger(Number(source.id)) ? Number(source.id) : (Number.isInteger(Number(id)) ? Number(id) : null);
         return {
             id,
+            code: text(source.code) || (typeof id === 'string' && isNaN(Number(id)) ? id : null),
+            numeric_id: parsedNum,
+            dbId: parsedNum,
             name,
             department: text(source.department) || 'General',
             designation: text(source.designation) || null,

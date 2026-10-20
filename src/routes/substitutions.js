@@ -163,7 +163,7 @@ router.get('/my', requireFaculty, async (req, res) => {
  */
 router.get('/incoming', requireFaculty, async (req, res) => {
     try {
-        const result = await substitutions.getIncomingSubstitutions(req.session);
+        const result = await substitutions.getIncomingSubstitutions(req.session, req.query);
         res.json(result);
     } catch (err) {
         res.status(err.status || 500).json({
@@ -180,7 +180,7 @@ router.get('/incoming', requireFaculty, async (req, res) => {
  */
 router.post('/requests', requireFaculty, async (req, res) => {
     try {
-        const { date, period, className, subject, substituteFacultyId, substituteFacultyName } = req.body || {};
+        const { date, period, className, subject, substituteFacultyId, substituteFacultyName, isAdjustment } = req.body || {};
         const request = await substitutions.createRequest({
             date,
             period,
@@ -188,6 +188,7 @@ router.post('/requests', requireFaculty, async (req, res) => {
             subject,
             substituteFacultyId,
             substituteFacultyName,
+            isAdjustment: Boolean(isAdjustment),
             sessionUser: req.session
         });
         res.status(201).json({

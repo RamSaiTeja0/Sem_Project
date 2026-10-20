@@ -575,6 +575,19 @@ async function checkDeleteOwnership(req, res, next) {
     next();
 }
 
+async function requireMasterTimetableEditor(req, res, next) {
+    if (req.session && req.session.role === 'faculty') {
+        const isActingHOD = await delegations.isAuthorizedHOS(req.session);
+        if (!isActingHOD) {
+            return res.status(403).json({
+                error: 'Forbidden: Normal faculty users cannot modify Master Timetable entries.',
+                code: 'FORBIDDEN'
+            });
+        }
+    }
+    next();
+}
+
 router.post('/slot', async (req, res, next) => {
     const isAuthorizedHOS = req.session && (
         req.session.role === 'hos' ||
@@ -624,7 +637,7 @@ router.post('/slot', async (req, res, next) => {
     });
 });
 
-router.post('/', checkPostOwnership, async (req, res, next) => {
+router.post('/', requireMasterTimetableEditor, checkPostOwnership, async (req, res, next) => {
     const parsed = parseEntry(req.body || {});
     if (parsed.errors) {
         return res.status(400).json({
@@ -657,7 +670,7 @@ router.post('/', checkPostOwnership, async (req, res, next) => {
     });
 });
 
-router.put('/:id(\\d+)', checkModifyOwnership, async (req, res, next) => {
+router.put('/:id(\\d+)', requireMasterTimetableEditor, checkModifyOwnership, async (req, res, next) => {
     const entryId = parseInt(req.params.id, 10);
     const parsed = parseEntry(req.body || {});
     if (parsed.errors) {
@@ -691,7 +704,7 @@ router.put('/:id(\\d+)', checkModifyOwnership, async (req, res, next) => {
     });
 });
 
-router.delete('/:id(\\d+)', checkDeleteOwnership, async (req, res, next) => {
+router.delete('/:id(\\d+)', requireMasterTimetableEditor, checkDeleteOwnership, async (req, res, next) => {
     const entryId = parseInt(req.params.id, 10);
     requireStorage(req, res, async () => {
         try {

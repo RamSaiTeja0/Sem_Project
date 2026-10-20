@@ -660,21 +660,6 @@ async function registerEntityIntoCatalog(entityType, extractedText, extra = {}, 
                     [finalCode, name, deptId, extra.designation || 'Faculty']
                 );
 
-                let uName = String(name).toLowerCase()
-                    .replace(/^(dr|prof|mr|mrs|ms)\.?\s+/, '')
-                    .replace(/[^a-z0-9]+/g, '.')
-                    .replace(/^\.|\.$/g, '');
-                if (!uName) uName = `fac_${res.rows[0].id}`;
-                const uCheck = await client.query('SELECT id FROM users WHERE LOWER(username) = LOWER($1) AND (faculty_id != $2 OR faculty_id IS NULL)', [uName, res.rows[0].id]);
-                if (uCheck.rows.length > 0) {
-                    uName = `${uName}.${res.rows[0].id}`;
-                }
-                await client.query(`
-                    INSERT INTO users (username, name, role, department_id, faculty_id, status)
-                    VALUES ($1, $2, 'faculty', $3, $4, 'active')
-                    ON CONFLICT (username) DO UPDATE SET faculty_id = EXCLUDED.faculty_id, department_id = EXCLUDED.department_id, status = 'active'`,
-                    [uName, name, deptId, res.rows[0].id]
-                );
                 return res.rows[0];
             } else if (type === 'room') {
                 const code = String(extra.code || extractedText).trim().toUpperCase();
@@ -763,22 +748,6 @@ async function registerEntityIntoCatalog(entityType, extractedText, extra = {}, 
         const obj = { id: source.faculty.length + 1, code: finalCode, name, department: branch, status: 'active' };
         source.faculty.push(obj);
 
-        if (!source.users) source.users = [];
-        let uName = String(name).toLowerCase()
-            .replace(/^(dr|prof|mr|mrs|ms)\.?\s+/, '')
-            .replace(/[^a-z0-9]+/g, '.')
-            .replace(/^\.|\.$/g, '');
-        if (!uName) uName = `fac_${obj.id}`;
-        source.users.push({
-            id: source.users.length + 1,
-            username: uName,
-            name: name,
-            role: 'faculty',
-            department: branch,
-            faculty_id: obj.id,
-            status: 'active'
-        });
-
         return obj;
     } else if (type === 'room') {
         const code = String(extra.code || extractedText).trim().toUpperCase();
@@ -820,6 +789,10 @@ router.post('/:uploadId/register-entity', async (req, res) => {
             { code, name, type: subType, designation },
             upload.departmentCode
         );
+
+        if (db.isConfigured() && store.usingDatabase) {
+            await store.reloadFromDatabase().catch(() => {});
+        }
 
         // Re-evaluate resolution
         const resolution = await resolveContract(
@@ -935,6 +908,10 @@ router.post('/:uploadId/register-all-unresolved', async (req, res) => {
             } catch (entityErr) {
                 console.warn(`[register-all-unresolved] Skipping "${extractedText}" (${eType}) due to error:`, entityErr.message);
             }
+        }
+
+        if (db.isConfigured() && store.usingDatabase) {
+            await store.reloadFromDatabase().catch(() => {});
         }
 
         // Re-evaluate resolution

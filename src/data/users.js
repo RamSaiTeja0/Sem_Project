@@ -699,6 +699,10 @@ function findById(id) {
     return null;
 }
 
+function listRegisteredUsersOnly() {
+    return registeredUsers.slice();
+}
+
 function list(branchCode = null) {
     const code = branchCode ? String(branchCode).trim().toUpperCase() : null;
 
@@ -712,8 +716,8 @@ function list(branchCode = null) {
         return registeredUsers.map(toPublicUser);
     }
 
-    // In a fresh installation without loadDemoData or env branch, there are 0 users
-    if ((!config.loadDemoData && !Boolean(config.branchCode && config.branchName)) || process.env.EMPTY_INSTANCE === 'true') {
+    // In a fresh installation without loadDemoData or env branch, or when DB is active, there are 0 synthetic users
+    if ((!config.loadDemoData && !Boolean(config.branchCode && config.branchName)) || process.env.EMPTY_INSTANCE === 'true' || db.isConfigured()) {
         return [];
     }
 
@@ -1158,6 +1162,7 @@ function updateUserRoleAndStatus(usernameOrId, { role, status } = {}) {
 
 module.exports = {
     list,
+    listRegisteredUsersOnly,
     findById,
     findByUsername,
     findByUsernameAsync,

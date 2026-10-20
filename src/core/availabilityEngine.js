@@ -148,6 +148,9 @@ function createEngine(normalized) {
                 const busy = normalized.busyRecords.filter(r => r.faculty === member.name);
                 const stats = {
                     id: member.id,
+                    code: member.code || null,
+                    numeric_id: member.numeric_id || null,
+                    dbId: member.dbId || member.numeric_id || null,
                     name: member.name,
                     department: member.department,
                     designation: member.designation || null,

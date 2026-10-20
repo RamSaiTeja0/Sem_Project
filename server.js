@@ -8,7 +8,7 @@
  * The availability path is read-only: clicking a timetable cell never assigns
  * a substitute, saves a selection, or modifies any timetable.
  *
- * Live instance with clean database faculty accounts.
+ * Live instance with clean database faculty accounts and timetable.
  */
 const express = require('express');
 const path = require('path');
@@ -243,4 +243,5 @@ if (require.main === module) {
     bootstrap();
 }
 
+// Server bootstrap and exports
 module.exports = { app, start, bootstrap, config };

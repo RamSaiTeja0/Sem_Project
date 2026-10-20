@@ -24,6 +24,9 @@
  * 20. Failure endpoint marks upload as FAILED.
  */
 
+const { verifySafetyGuard } = require('./testDbGuard');
+verifySafetyGuard();
+
 const assert = require('assert');
 const http = require('http');
 const path = require('path');

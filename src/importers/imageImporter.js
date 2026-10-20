@@ -40,6 +40,16 @@ const MIME_TYPES = {
     '.webp': 'image/webp'
 };
 
+const DAY_ALIASES = {
+    MON: 'Monday', MONDAY: 'Monday', M: 'Monday',
+    TUE: 'Tuesday', TUES: 'Tuesday', TUESDAY: 'Tuesday', TU: 'Tuesday',
+    WED: 'Wednesday', WEDNESDAY: 'Wednesday', W: 'Wednesday',
+    THU: 'Thursday', THUR: 'Thursday', THURS: 'Thursday', THURSDAY: 'Thursday', TH: 'Thursday',
+    FRI: 'Friday', FRIDAY: 'Friday', F: 'Friday',
+    SAT: 'Saturday', SATURDAY: 'Saturday', S: 'Saturday',
+    SUN: 'Sunday', SUNDAY: 'Sunday'
+};
+
 const ALTERNATIVES = [
     'Import from Excel (.xlsx / .xls)',
     'Import from CSV',
@@ -50,6 +60,20 @@ const ALTERNATIVES = [
 function mimeTypeFor(filename, fallbackMime) {
     const ext = path.extname(String(filename || '')).toLowerCase();
     return MIME_TYPES[ext] || fallbackMime || 'image/jpeg';
+}
+
+function normalizeClassName(className) {
+    if (!className) return null;
+    const s = String(className).trim();
+    if (!s) return null;
+    const direct = normalizeDepartmentCode(s);
+    if (direct !== s) return direct;
+    return s.replace(/^DCME([-_ \t]|$)/i, 'CME$1')
+            .replace(/^DCSE([-_ \t]|$)/i, 'CME$1')
+            .replace(/^DEEE([-_ \t]|$)/i, 'EEE$1')
+            .replace(/^DMEC([-_ \t]|$)/i, 'MEC$1')
+            .replace(/^DECE([-_ \t]|$)/i, 'ECE$1')
+            .replace(/^DCIVIL([-_ \t]|$)/i, 'CIVIL$1');
 }
 
 /**
@@ -71,21 +95,43 @@ function contractToSource(payload, uploadContext = {}) {
     }
 
     const isFacultyTimetable = payload.timetable_type === 'FACULTY_TIMETABLE' || (uploadContext && uploadContext.uploadType === 'FACULTY_TIMETABLE');
-    const defaultClass = payload.class_name || (uploadContext && uploadContext.className) || null;
+    const defaultClass = normalizeClassName(payload.class_name || (uploadContext && uploadContext.className) || null);
     const department = payload.department_code || normalizeDepartmentCode(uploadContext && uploadContext.departmentCode) || 'General';
 
     // Dynamic Meta: Preserve exact days and periods from source
     const rawDays = Array.isArray(payload.days) && payload.days.length > 0
-        ? payload.days.map(d => String(d).trim())
+        ? payload.days.map(d => {
+            const s = String(d).trim();
+            const upper = s.toUpperCase();
+            return DAY_ALIASES[upper] || (s.charAt(0).toUpperCase() + s.slice(1).toLowerCase());
+        })
         : ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
     const rawPeriods = Array.isArray(payload.periods) && payload.periods.length > 0
         ? payload.periods.map(p => typeof p === 'object' && p !== null ? parseInt(p.period || p.period_number, 10) : parseInt(p, 10)).filter(p => !isNaN(p))
         : [1, 2, 3, 4, 5, 6, 7];
 
-    const periodTimings = Array.isArray(payload.period_timings)
-        ? payload.period_timings.map(p => (typeof p === 'object' && p !== null && p.start && p.end) ? `${p.start}-${p.end}` : '')
-        : (Array.isArray(payload.periods) && typeof payload.periods[0] === 'object' ? payload.periods.map(p => `${p.start_time || ''}-${p.end_time || ''}`) : []);
+    let periodTimings = {};
+    if (payload.period_timings && typeof payload.period_timings === 'object' && !Array.isArray(payload.period_timings)) {
+        periodTimings = { ...payload.period_timings };
+    } else if (Array.isArray(payload.period_timings)) {
+        payload.period_timings.forEach((p, idx) => {
+            const pNum = (p && p.period) || (idx + 1);
+            if (p && p.start && p.end) {
+                periodTimings[String(pNum)] = { start: p.start, end: p.end };
+            }
+        });
+    } else if (Array.isArray(payload.periods) && typeof payload.periods[0] === 'object') {
+        payload.periods.forEach(p => {
+            if (p && (p.period || p.period_number) && (p.start_time || p.start)) {
+                const pNum = p.period || p.period_number;
+                periodTimings[String(pNum)] = {
+                    start: p.start_time || p.start,
+                    end: p.end_time || p.end
+                };
+            }
+        });
+    }
 
     const meta = {
         days: rawDays,
@@ -143,14 +189,14 @@ function contractToSource(payload, uploadContext = {}) {
     rawEntries.forEach(e => {
         if (!e || typeof e !== 'object') return;
 
-        const day = e.day ? String(e.day).trim() : null;
+        const day = DAY_ALIASES[String(e.day || e.day_of_week || '').trim().toUpperCase()] || (e.day ? String(e.day).trim() : null);
         const startPeriod = parseInt(e.period != null ? e.period : e.period_number, 10);
         if (!day || isNaN(startPeriod)) return;
 
         const endPeriod = e.span_to != null ? parseInt(e.span_to, 10) : (e.span != null ? (startPeriod + parseInt(e.span, 10) - 1) : startPeriod);
         const subject = e.is_free ? 'FREE' : (e.subject_name ? String(e.subject_name).trim() : (e.subject_code ? String(e.subject_code).trim() : ''));
         const facultyName = e.faculty_name ? String(e.faculty_name).trim() : (isFacultyTimetable ? (payload.faculty_name || (uploadContext && uploadContext.facultyName)) : null);
-        const className = (e.class_name ? String(e.class_name).trim() : null) || defaultClass;
+        const className = normalizeClassName((e.class_name ? String(e.class_name).trim() : null) || defaultClass);
         const room = e.room_code || e.room || null;
         const sessionType = e.session_type ? String(e.session_type).trim().toLowerCase() : 'theory';
         const isFree = Boolean(e.is_free) || !subject || subject.toUpperCase() === 'FREE';
@@ -169,6 +215,8 @@ function contractToSource(payload, uploadContext = {}) {
                 faculty: isFree ? null : facultyName,
                 day,
                 period: p,
+                spanTo: (p === startPeriod && endPeriod > startPeriod) ? endPeriod : null,
+                span_to: (p === startPeriod && endPeriod > startPeriod) ? endPeriod : null,
                 subject: isFree ? 'FREE' : subject,
                 class: className,
                 room,

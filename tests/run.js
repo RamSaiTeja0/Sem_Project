@@ -65,6 +65,7 @@ const suites = [
     'faculty_timetable_extraction.test.js',
     'auth_full_lifecycle_regression.test.js',
     'faculty_account_management.test.js',
+    'faculty_relational_linkage_regression.test.js',
     'hod_invigilation_dropdown.test.js',
     'branch_isolation_invigilation.test.js',
     'hod_branch_authorization_regression.test.js',
@@ -77,6 +78,12 @@ const suites = [
     'fast_branding_ui.test.js',
     'swipe_gesture_navigation.test.js',
     'hod_branch_registration.test.js',
+    'faculty_timetable_extraction_regression.test.js',
+    'staging_registration_no_account_regression.test.js',
+    'subject_display_name_regression.test.js',
+    'substitution_request_validation.test.js',
+    'substitution_status_sync_regression.test.js',
+    'test_substitution_workflow_e2e.js',
     'live_verification.js'
 ];
 let failures = 0;
@@ -87,6 +94,13 @@ const dbSuites = new Set([
     'hod_branch_authorization_regression.test.js',
     'auth_full_lifecycle_regression.test.js',
     'faculty_account_management.test.js',
+    'faculty_relational_linkage_regression.test.js',
+    'faculty_timetable_extraction_regression.test.js',
+    'staging_registration_no_account_regression.test.js',
+    'subject_display_name_regression.test.js',
+    'substitution_request_validation.test.js',
+    'substitution_status_sync_regression.test.js',
+    'test_substitution_workflow_e2e.js',
     'hod_invigilation_dropdown.test.js',
     'branch_isolation_invigilation.test.js',
     'database.test.js',
@@ -101,6 +115,7 @@ const dbSuites = new Set([
     'faculty_timetable_extraction.test.js',
     'unresolved_subject_registration_flow.test.js',
     'empty_faculty_startup_regression.test.js',
+    'faculty_registration_requests.test.js',
     'hod_role_transfer_and_departure.test.js',
     'faculty_leaving_college.test.js'
 ]);

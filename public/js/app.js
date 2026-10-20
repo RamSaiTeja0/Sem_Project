@@ -308,6 +308,7 @@
         if (name === 'request-invigilation') { loadRequestInvigilationForm(); }
         if (name === 'faculty-substitutions') { loadFacultySubstitutionsView(); }
         if (name === 'hos-substitutions') { loadHOSSubstitutionsView(); }
+        if (name === 'substitute') { updateSubstituteFacultyView(); }
         if (name === 'schedule') loadSchedule();
         if (name === 'manage') { loadDocumentStatus(); loadManage(); }
         if (name === 'timetable') { applyTimetableDepartment(); }
@@ -456,6 +457,13 @@
             ttBottomActionsCard.style.display = isHOS ? '' : 'none';
         }
 
+        var ttSubtitle = el('ttLiveSubtitle');
+        if (ttSubtitle) {
+            ttSubtitle.textContent = isHOS
+                ? 'Every cell is clickable. Click any period to check availability or edit with the Edit option.'
+                : 'Every cell is clickable. Click any period to check availability.';
+        }
+
         var deptCode = state.user ? state.user.department : 'Branch';
         var branchName = state.user ? (state.user.branchName || '') : '';
         var branchDisplay = deptCode ? (branchName && branchName !== deptCode ? deptCode + ' — ' + branchName : deptCode) : 'Branch';
@@ -473,6 +481,19 @@
         var schedWrap = el('schedFacultyWrap');
         if (schedWrap) {
             schedWrap.style.display = isFaculty ? 'none' : '';
+        }
+
+        var subBadge = el('subFacultyBadge');
+        if (subBadge) {
+            subBadge.textContent = state.user ? (state.user.facultyName || state.user.name) : '';
+        }
+        var subReadOnly = el('subFacultyReadOnly');
+        if (subReadOnly) {
+            subReadOnly.style.display = isFaculty ? '' : 'none';
+        }
+        var subWrap = el('subFacultyWrap');
+        if (subWrap) {
+            subWrap.style.display = isFaculty ? 'none' : '';
         }
 
         // Faculty Profile Summary Card in My Timetable
@@ -614,6 +635,202 @@
         return m ? parseInt(m[1], 10) : null;
     }
 
+    // ------------------------------------------------------- subject display name resolution
+    var CLIENT_CANONICAL_SUBJECT_MAP = {
+        'PP': 'Python Programming',
+        'PYTHON': 'Python Programming',
+        'PYTHON PROG': 'Python Programming',
+        'PYTHON PROGRAMMING': 'Python Programming',
+        'DS': 'Data Structures',
+        'DATA STRUCTURES': 'Data Structures',
+        'DATASTRUCT': 'Data Structures',
+        'CO': 'Computer Organization',
+        'COMPUTER ORGANIZATION': 'Computer Organization',
+        'WT': 'Web Technologies',
+        'WEB TECHNOLOGIES': 'Web Technologies',
+        'WT-II': 'Web Technologies-II',
+        'SE': 'Software Engineering',
+        'SOFTWARE ENGINEERING': 'Software Engineering',
+        'CN': 'Computer Networks',
+        'COMPUTER NETWORKS': 'Computer Networks',
+        'CNCS': 'Computer Networks and Cyber Security',
+        'COMPUTER NETWORKS AND CYBER SECURITY': 'Computer Networks and Cyber Security',
+        'OS': 'Operating Systems',
+        'OPERATING SYSTEMS': 'Operating Systems',
+        'DBMS': 'Database Management Systems',
+        'JAVA': 'Java Programming',
+        'DLD': 'Digital Logic',
+        'DIGITAL LOGIC': 'Digital Logic',
+        'CC': 'Cloud Computing',
+        'CLOUD COMPUTING': 'Cloud Computing',
+        'MC': 'Mobile Computing',
+        'MOBILE COMPUTING': 'Mobile Computing',
+        'IOT': 'Internet of Things',
+        'INTERNET OF THINGS': 'Internet of Things',
+        'IMEP': 'Industrial Management and Entrepreneurship',
+        'IM & EP': 'Industrial Management and Entrepreneurship',
+        'BDCC': 'Big Data & Cloud Computing',
+        'BD & CC': 'Big Data & Cloud Computing',
+        'ANDROID': 'Android Programming',
+        'ANDROID PROG': 'Android Programming',
+        'ENGLISH': 'English',
+        'ENGINEERING PHYSICS': 'Engineering Physics',
+        'ENGINEERING CHEMISTRY': 'Engineering Chemistry',
+        'PROGRAMMING IN C': 'Programming in C',
+        'COMMUNICATION SKILLS': 'Communication Skills',
+
+        // Labs
+        'PP LAB': 'Python Programming Lab',
+        'PYTHON LAB': 'Python Programming Lab',
+        'PYTHON PROGRAMMING LAB': 'Python Programming Lab',
+        'DS LAB': 'Data Structures Lab',
+        'DATA STRUCTURES LAB': 'Data Structures Lab',
+        'DSLAB': 'Data Structures Lab',
+        'WT LAB': 'Web Technologies Lab',
+        'WEB LAB': 'Web Technologies Lab',
+        'WEB TECHNOLOGIES LAB': 'Web Technologies Lab',
+        'CN LAB': 'Computer Networks Lab',
+        'COMPUTER NETWORKS LAB': 'Computer Networks Lab',
+        'CNCS LAB': 'Computer Networks and Cyber Security Lab',
+        'COMPUTER NETWORKS AND CYBER SECURITY LAB': 'Computer Networks and Cyber Security Lab',
+        'DBMS LAB': 'DBMS Lab',
+        'JAVA LAB': 'Java Lab',
+        'AI & ML LAB': 'AI & ML Lab',
+        'AIML LAB': 'AI & ML Lab',
+        'AIMLLAB': 'AI & ML Lab',
+        'IOT LAB': 'IoT Lab',
+        'ANDROID LAB': 'Android Programming Lab',
+        'ANDROID PROG LAB': 'Android Programming Lab',
+        'LIFE SKILLS LAB': 'Life Skills Lab',
+        'C LAB': 'C Programming Lab',
+        'PHYSICS LAB': 'Physics Lab',
+
+        // EEE Theory & Lab
+        'EEE COCS LAB': 'Communications Skills Laboratory',
+        'COCS LAB': 'Communications Skills Laboratory',
+        'COCS': 'Communications Skills Laboratory',
+        'COMMUNICATION SKILLS LAB': 'Communications Skills Laboratory',
+        'COMMUNICATIONS SKILLS LABORATORY': 'Communications Skills Laboratory',
+        'EED': 'Electrical Engineering Drawing',
+        'EM-II': 'Electrical Machines- II',
+        'EM II': 'Electrical Machines- II',
+        'EM-II LAB': 'Electrical Machines- II Laboratory',
+        'EM II LAB': 'Electrical Machines- II Laboratory',
+        'GME': 'General Mechanical Engineering',
+        'EIE': 'Electrical Installation & Estimation',
+        'PE&PLC': 'Power Electronics & PLC',
+        'PE PLC': 'Power Electronics & PLC',
+        'HPS LAB': 'Hybrid Power Systems Laboratory',
+        'CIRCUIT THEORY': 'Circuit Theory',
+        'ELECTRONIC DEVICES': 'Electronic Devices',
+        'CONTROL SYSTEMS': 'Control Systems',
+        'POWER SYSTEMS-I': 'Power Systems-I',
+        'ELECTRICAL DRIVES': 'Electrical Drives',
+        'RENEWABLE ENERGY': 'Renewable Energy',
+        'SMART GRID': 'Smart Grid',
+        'EMBEDDED SYSTEMS': 'Embedded Systems',
+        'ELECTRICAL MEASUREMENTS LAB': 'Electrical Measurements Lab',
+        'ELECTRONIC DEVICES LAB': 'Electronic Devices Lab',
+        'CIRCUITS LAB': 'Circuits Lab',
+        'MEASUREMENTS LAB': 'Measurements Lab',
+        'MACHINES LAB': 'Machines Lab',
+        'MACHINE LAB': 'Machines Lab',
+        'POWER ELECTRONICS LAB': 'Power Electronics Lab',
+        'MICROCONTROLLER LAB': 'Microcontroller Lab',
+        'EMBEDDED SYSTEMS LAB': 'Embedded Systems Lab',
+        'AUTOMATION LAB': 'Automation Lab',
+
+        // General
+        'M-I': 'Engineering Mathematics-I',
+        'MATHS-I': 'Engineering Mathematics-I',
+        'ENGINEERING MATHEMATICS-I': 'Engineering Mathematics-I',
+        'M-II': 'Engineering Mathematics-II',
+        'MATHS-II': 'Engineering Mathematics-II',
+        'ENGINEERING MATHEMATICS-II': 'Engineering Mathematics-II',
+        'PROJECT WORK': 'Project Work',
+        'TPC': 'TPC'
+    };
+
+    var CLIENT_LAB_OVERRIDES = {
+        'PP': 'Python Programming Lab',
+        'PYTHON': 'Python Programming Lab',
+        'PYTHON PROG': 'Python Programming Lab',
+        'DS': 'Data Structures Lab',
+        'DATA STRUCTURES': 'Data Structures Lab',
+        'WT': 'Web Technologies Lab',
+        'CN': 'Computer Networks Lab',
+        'CNCS': 'Computer Networks and Cyber Security Lab',
+        'DBMS': 'DBMS Lab',
+        'JAVA': 'Java Lab',
+        'IOT': 'IoT Lab',
+        'ANDROID': 'Android Programming Lab',
+        'EM-II': 'Electrical Machines- II Laboratory',
+        'EM II': 'Electrical Machines- II Laboratory',
+        'COCS': 'Communications Skills Laboratory'
+    };
+
+    function resolveFullSubjectNameClient(subject, options) {
+        if (!subject || typeof subject !== 'string') return subject || '';
+        var raw = subject.trim();
+        if (!raw || raw.toUpperCase() === 'FREE') return raw;
+
+        if (raw.indexOf('/') >= 0) {
+            var parts = raw.split('/').map(function (p) { return p.trim(); });
+            if (parts.length > 1 && parts.every(Boolean)) {
+                return parts.map(function (p) { return resolveFullSubjectNameClient(p, options); }).join(' / ');
+            }
+        }
+
+        options = options || {};
+        var isLab = (options.type === 'lab') || /\b(lab|laboratory)\b/i.test(raw);
+
+        var cleanKey = raw.toUpperCase().replace(/\s+/g, ' ').replace(/[._-]+/g, ' ').trim();
+
+        if (CLIENT_CANONICAL_SUBJECT_MAP[cleanKey]) {
+            if (isLab && CLIENT_LAB_OVERRIDES[cleanKey]) {
+                return CLIENT_LAB_OVERRIDES[cleanKey];
+            }
+            return CLIENT_CANONICAL_SUBJECT_MAP[cleanKey];
+        }
+
+        var prefixMatch = raw.match(/^(CME|CSE|EEE|ECE|CIVIL|CIV|MECH|MEC|ME|IT|CS)\s+[-_:]*\s*(.*)$/i);
+        if (prefixMatch && prefixMatch[2]) {
+            var noPrefixKey = prefixMatch[2].toUpperCase().replace(/\s+/g, ' ').replace(/[._-]+/g, ' ').trim();
+            if (CLIENT_CANONICAL_SUBJECT_MAP[noPrefixKey]) {
+                if (isLab && CLIENT_LAB_OVERRIDES[noPrefixKey]) {
+                    return CLIENT_LAB_OVERRIDES[noPrefixKey];
+                }
+                return CLIENT_CANONICAL_SUBJECT_MAP[noPrefixKey];
+            }
+        }
+
+        if (isLab) {
+            if (CLIENT_LAB_OVERRIDES[cleanKey]) {
+                return CLIENT_LAB_OVERRIDES[cleanKey];
+            }
+            var baseKey = cleanKey.replace(/\b(LAB|LABORATORY)\b/gi, '').trim();
+            if (baseKey && CLIENT_LAB_OVERRIDES[baseKey]) {
+                return CLIENT_LAB_OVERRIDES[baseKey];
+            }
+            if (baseKey && CLIENT_CANONICAL_SUBJECT_MAP[baseKey]) {
+                return CLIENT_CANONICAL_SUBJECT_MAP[baseKey] + ' Lab';
+            }
+        }
+
+        // Check reference catalog if loaded in memory
+        if (state.entryReference && Array.isArray(state.entryReference.subjects)) {
+            var matchRef = state.entryReference.subjects.find(function (s) {
+                return s.name && s.name.toUpperCase().replace(/\s+/g, ' ').trim() === cleanKey;
+            });
+            if (matchRef && matchRef.name) {
+                var refKey = matchRef.name.toUpperCase().replace(/\s+/g, ' ').trim();
+                return CLIENT_CANONICAL_SUBJECT_MAP[refKey] || matchRef.name;
+            }
+        }
+
+        return raw;
+    }
+
     /**
      * Render a clickable grid. Every cell carries its own metadata in dataset
      * attributes, and clicking one calls onSelect with that metadata.
@@ -627,7 +844,16 @@
         var isFacultyView = Boolean(options.isFaculty || (grid && grid.view === 'faculty') || (headId === 'schedHead') || (headId === 'facPreviewHead'));
         var isFacultyPreview = Boolean(options.isFacultyPreview || (headId === 'facPreviewHead'));
         var isEditable = Boolean(options.editable && !isFacultyView);
-        var showEditIndicator = options.showEditIndicator !== undefined ? Boolean(options.showEditIndicator) : true;
+        var isMasterTimetable = (headId === 'ttHead' || bodyId === 'ttBody');
+        var isAuthorizedHOD = Boolean(state.user && (state.user.role === 'hos' || state.user.role === 'coordinator' || state.user.role === 'admin' || state.user.isActingHOD));
+        var showEditIndicator;
+        if (options.showEditIndicator !== undefined) {
+            showEditIndicator = Boolean(options.showEditIndicator);
+        } else if (isMasterTimetable) {
+            showEditIndicator = isAuthorizedHOD;
+        } else {
+            showEditIndicator = true;
+        }
 
         var hasEntries = grid && grid.cells && grid.cells.some(function (c) { return Boolean(c.subject); });
         var box = el('ttState');
@@ -635,7 +861,11 @@
             if (!hasEntries) {
                 box.style.display = 'block';
                 box.className = 'notice notice-info';
-                box.innerHTML = '<strong>No timetable entries yet.</strong> Upload a timetable or use <strong>＋ Add</strong> to create entries.';
+                if (isAuthorizedHOD) {
+                    box.innerHTML = '<strong>No timetable entries yet.</strong> Upload a timetable or use <strong>＋ Add</strong> to create entries.';
+                } else {
+                    box.innerHTML = '<strong>No timetable entries yet.</strong> No schedule has been published for this class yet.';
+                }
             } else {
                 box.style.display = 'none';
             }
@@ -724,15 +954,20 @@
                 button.setAttribute('data-room', cell.room || '');
                 button.setAttribute('data-status', cell.status || (cell.subject ? 'busy' : 'free'));
 
+                var displaySubject = resolveFullSubjectNameClient(cell.subject, {
+                    type: cell.type,
+                    department: (state.user && state.user.department) || (grid && grid.branch) || null
+                });
+
                 var cellTitle = day + ' · Period ' + period + (colspan > 1 ? '–' + spanToNum : '') +
-                    (cell.subject ? ' · ' + cell.subject : ' · free');
+                    (displaySubject ? ' · ' + displaySubject : ' · free');
                 if (onSelect) {
                     cellTitle += isFacultyView ? ' — click to check availability for substitution' : ' — click to check availability';
                 }
                 button.setAttribute('title', cellTitle);
                 button.setAttribute('aria-label',
                     day + ' Period ' + period + (colspan > 1 ? ' to ' + spanToNum : '') +
-                    (cell.subject ? ' — ' + cell.subject + (cell.faculty ? ', ' + cell.faculty : '') : ' — free'));
+                    (displaySubject ? ' — ' + displaySubject + (cell.faculty ? ', ' + cell.faculty : '') : ' — free'));
 
                 if (cell.subject) {
                     var typeBadge = '';
@@ -767,7 +1002,7 @@
 
                     button.innerHTML =
                         topBarHtml +
-                        '<div class="slot-subject">' + esc(cell.subject) + '</div>' +
+                        '<div class="slot-subject">' + esc(displaySubject) + '</div>' +
                         facultyHtml +
                         roomAndClassHtml;
                 } else {
@@ -790,6 +1025,8 @@
                             options.onEdit(cell, grid.periods);
                             return;
                         } else if (headId === 'ttHead' || bodyId === 'ttBody') {
+                            var isHOSUser = Boolean(state.user && (state.user.role === 'hos' || state.user.role === 'coordinator' || state.user.role === 'admin' || state.user.isActingHOD));
+                            if (!isHOSUser) return;
                             if (typeof window.openMasterSlotEditor === 'function') {
                                 window.openMasterSlotEditor(cell);
                                 return;
@@ -1290,10 +1527,13 @@
                 onEdit: isFaculty ? openFacultySlotEditor : null
             });
 
-            var busy = grid.cells.filter(function (c) { return c.status === 'busy'; });
+            var busy = grid.cells.filter(function (c) { return c.status === 'busy' && c.subject; });
             var total = grid.days.length * grid.periods.length;
             var subjects = [];
-            busy.forEach(function (c) { if (subjects.indexOf(c.subject) < 0) subjects.push(c.subject); });
+            busy.forEach(function (c) {
+                var full = resolveFullSubjectNameClient(c.subject, { type: c.type });
+                if (full && subjects.indexOf(full) < 0) subjects.push(full);
+            });
 
             el('schedStats').innerHTML = [
                 { label: 'Scheduled periods', value: busy.length, note: 'out of ' + total, tone: 'busy' },
@@ -1351,7 +1591,8 @@
         var isFree = !cell.subject || cell.status === 'free';
         if (facEditIsFree) facEditIsFree.checked = isFree;
         if (facEditSubject) {
-            facEditSubject.value = isFree ? '' : (cell.subject || '');
+            var initialSubject = isFree ? '' : (resolveFullSubjectNameClient(cell.subject, { type: cell.type }) || cell.subject || '');
+            facEditSubject.value = initialSubject;
             facEditSubject.required = !isFree;
         }
         if (facEditClass) facEditClass.value = isFree ? '' : (cell.className || cell.class || '');
@@ -1794,6 +2035,12 @@
                     (data.slot ? ' · availability shown for ' + data.slot.day + ' P' + data.slot.period : '');
             }
 
+            if (typeof switchFacultyTab === 'function') {
+                if (withAccount.length === 0 && withoutAccount.length > 0 && !window.__userSwitchedFacultyTab) {
+                    switchFacultyTab('without');
+                }
+            }
+
             var isFacultyUser = state.user && state.user.role === 'faculty';
 
             // Helper to render row
@@ -2053,6 +2300,7 @@
             facultyNote('Faculty account created successfully for <strong>' + esc(added.name) + '</strong>.', 'ok');
             logActivity('Created faculty account for ' + added.name);
             resetFacultyForm();
+            if (typeof switchFacultyTab === 'function') switchFacultyTab('with');
             loadFacultyTable();
             loadDashboard();
             refreshDepartmentFilters();
@@ -3034,7 +3282,10 @@
     function updatePendingSubstitutionsBadge() {
         if (!state.user || state.user.role !== 'faculty') return;
         getJson(API.substitutions + '/incoming').then(function (data) {
-            var count = (data && data.requests && data.requests.length) || 0;
+            var rawList = (data && data.requests) || [];
+            var count = rawList.filter(function (r) {
+                return (r.status || 'PENDING').toUpperCase() === 'PENDING';
+            }).length;
             var badge = el('pendingSubstitutionsCount');
             var tabBadge = el('tabIncomingCount');
             if (badge) {
@@ -3268,7 +3519,12 @@
         if (alertBox) alertBox.style.display = 'none';
 
         getJson(API.substitutions + '/incoming').then(function (data) {
-            var list = (data && data.requests) || [];
+            var rawList = (data && data.requests) || [];
+            // Filter strictly for genuinely PENDING requests that require action
+            var list = rawList.filter(function (r) {
+                return (r.status || 'PENDING').toUpperCase() === 'PENDING';
+            });
+
             if (!list.length) {
                 if (tableBody) tableBody.innerHTML = '';
                 if (emptyNotice) emptyNotice.style.display = 'block';
@@ -3277,6 +3533,13 @@
             if (emptyNotice) emptyNotice.style.display = 'none';
 
             tableBody.innerHTML = list.map(function (r) {
+                var actionHtml = (r.status === 'PENDING')
+                    ? '<div style="display:flex; gap:6px;">' +
+                        '<button type="button" class="btn btn-success btn-sm btn-accept-sub" data-id="' + esc(r.id) + '">Accept</button>' +
+                        '<button type="button" class="btn btn-danger btn-sm btn-open-reject-sub" data-id="' + esc(r.id) + '">Decline</button>' +
+                      '</div>'
+                    : '<span class="badge badge-success">' + esc(r.status) + '</span>';
+
                 return '<tr>' +
                     '<td><strong>' + esc(r.date) + '</strong></td>' +
                     '<td>' + esc(r.dayOfWeek || '—') + '</td>' +
@@ -3285,10 +3548,7 @@
                     '<td>' + esc(r.subject || '—') + '</td>' +
                     '<td><strong>' + esc(r.originalFacultyName) + '</strong></td>' +
                     '<td>' + esc(r.originalFacultyBranch || '—') + '</td>' +
-                    '<td><div style="display:flex; gap:6px;">' +
-                        '<button type="button" class="btn btn-success btn-sm btn-accept-sub" data-id="' + esc(r.id) + '">Accept</button>' +
-                        '<button type="button" class="btn btn-danger btn-sm btn-open-reject-sub" data-id="' + esc(r.id) + '">Decline</button>' +
-                    '</div></td>' +
+                    '<td>' + actionHtml + '</td>' +
                 '</tr>';
             }).join('');
 
@@ -3318,10 +3578,22 @@
         }).then(function (res) {
             return res.json().then(function (body) {
                 if (!res.ok) {
-                    if (alertBox) {
-                        alertBox.style.display = 'block';
-                        alertBox.innerHTML = '<div class="notice notice-danger"><strong>Cannot Accept:</strong> ' + esc(body.error || 'Failed to accept substitution') + '</div>';
+                    var errorMsg = body.error || 'Failed to accept substitution';
+                    var isAlreadyAccepted = /already accepted/i.test(errorMsg) || body.code === 'REQUEST_NOT_PENDING';
+                    if (isAlreadyAccepted) {
+                        if (alertBox) {
+                            alertBox.style.display = 'block';
+                            alertBox.innerHTML = '<div class="notice notice-info"><strong>Notice:</strong> This substitution request has already been accepted and recorded in your schedule.</div>';
+                            setTimeout(function () { alertBox.style.display = 'none'; }, 5000);
+                        }
+                    } else {
+                        if (alertBox) {
+                            alertBox.style.display = 'block';
+                            alertBox.innerHTML = '<div class="notice notice-danger"><strong>Cannot Accept:</strong> ' + esc(errorMsg) + '</div>';
+                        }
                     }
+                    loadIncomingSubstitutions();
+                    updatePendingSubstitutionsBadge();
                     return;
                 }
                 if (alertBox) {
@@ -3337,6 +3609,8 @@
                 alertBox.style.display = 'block';
                 alertBox.innerHTML = '<div class="notice notice-danger">' + esc(err.message) + '</div>';
             }
+            loadIncomingSubstitutions();
+            updatePendingSubstitutionsBadge();
         });
     }
 
@@ -3372,6 +3646,8 @@
                         alertBox.style.display = 'block';
                         alertBox.innerHTML = '<div class="notice notice-danger">' + esc(body.error || 'Failed to reject substitution') + '</div>';
                     }
+                    loadIncomingSubstitutions();
+                    updatePendingSubstitutionsBadge();
                     return;
                 }
                 if (alertBox) {
@@ -3388,6 +3664,8 @@
                 alertBox.style.display = 'block';
                 alertBox.innerHTML = '<div class="notice notice-danger">' + esc(err.message) + '</div>';
             }
+            loadIncomingSubstitutions();
+            updatePendingSubstitutionsBadge();
         });
     }
 
@@ -3401,7 +3679,16 @@
         if (alertBox) alertBox.style.display = 'none';
 
         getJson(API.substitutions + '/my').then(function (data) {
-            var list = (data && data.outgoingRequests) || [];
+            var outgoing = (data && data.outgoingRequests) || [];
+            var incoming = (data && data.incomingRequests) || [];
+            // Accepted and resolved incoming requests (classes you agreed to cover or declined)
+            var resolvedIncoming = incoming.filter(function (s) {
+                return s.status === 'ACCEPTED' || s.status === 'REJECTED';
+            });
+            var list = outgoing.concat(resolvedIncoming).sort(function (a, b) {
+                return (new Date(b.createdAt || 0).getTime()) - (new Date(a.createdAt || 0).getTime());
+            });
+
             if (!list.length) {
                 if (tableBody) tableBody.innerHTML = '';
                 if (emptyNotice) emptyNotice.style.display = 'block';
@@ -3410,6 +3697,10 @@
             if (emptyNotice) emptyNotice.style.display = 'none';
 
             tableBody.innerHTML = list.map(function (s) {
+                var currentUserName = (state.user && (state.user.facultyName || state.user.name || state.user.username) || '').toUpperCase();
+                var isOutgoing = (s.requestedBy === (state.user && state.user.username)) ||
+                    (s.originalFacultyName && s.originalFacultyName.toUpperCase() === currentUserName);
+
                 var statusBadge = s.status === 'ACCEPTED'
                     ? '<span class="badge badge-success">ACCEPTED</span>'
                     : (s.status === 'REJECTED'
@@ -3418,11 +3709,17 @@
                             ? '<span class="badge badge-neutral">CANCELLED</span>'
                             : '<span class="badge badge-warning">PENDING</span>'));
 
-                var notes = s.status === 'REJECTED'
-                    ? (s.rejectionReason ? 'Reason: ' + esc(s.rejectionReason) : 'Declined by substitute')
-                    : (s.status === 'ACCEPTED' ? 'Accepted by substitute' : (s.status === 'CANCELLED' ? 'Cancelled by you' : 'Awaiting response'));
+                var facultyColHtml = isOutgoing
+                    ? '<strong>' + esc(s.substituteFacultyName) + '</strong> (' + esc(s.substituteFacultyBranch || '') + ') <span class="muted" style="font-size:0.75rem;">[Substitute]</span>'
+                    : '<strong>' + esc(s.originalFacultyName) + '</strong> (' + esc(s.originalFacultyBranch || '') + ') <span class="badge badge-info" style="font-size:0.72rem;">Covering Class</span>';
 
-                var actionBtn = s.status === 'PENDING'
+                var notes = s.status === 'REJECTED'
+                    ? (s.rejectionReason ? 'Reason: ' + esc(s.rejectionReason) : (isOutgoing ? 'Declined by substitute' : 'Declined by you'))
+                    : (s.status === 'ACCEPTED'
+                        ? (isOutgoing ? 'Accepted by substitute' : 'Accepted by you (Covering class)')
+                        : (s.status === 'CANCELLED' ? 'Cancelled by you' : 'Awaiting response'));
+
+                var actionBtn = (isOutgoing && s.status === 'PENDING')
                     ? '<button type="button" class="btn btn-secondary btn-sm btn-cancel-sub" data-id="' + esc(s.id) + '">Cancel</button>'
                     : '—';
 
@@ -3432,7 +3729,7 @@
                     '<td><span class="badge badge-warning">P' + esc(s.period) + '</span></td>' +
                     '<td>' + esc(s.className || '—') + '</td>' +
                     '<td>' + esc(s.subject || '—') + '</td>' +
-                    '<td><strong>' + esc(s.substituteFacultyName) + '</strong> (' + esc(s.substituteFacultyBranch || '') + ')</td>' +
+                    '<td>' + facultyColHtml + '</td>' +
                     '<td>' + statusBadge + '</td>' +
                     '<td><span class="muted" style="font-size:0.85rem;">' + notes + '</span></td>' +
                     '<td>' + actionBtn + '</td>' +
@@ -3607,53 +3904,417 @@
         });
     }
 
+    var subDateInit = false;
+    function updateSubstituteFacultyView() {
+        var isFaculty = Boolean(state.user && state.user.role === 'faculty');
+        var subBadge = el('subFacultyBadge');
+        if (subBadge) {
+            subBadge.textContent = state.user ? (state.user.facultyName || state.user.name) : '';
+        }
+        var subReadOnly = el('subFacultyReadOnly');
+        if (subReadOnly) {
+            subReadOnly.style.display = isFaculty ? '' : 'none';
+        }
+        var subWrap = el('subFacultyWrap');
+        if (subWrap) {
+            subWrap.style.display = isFaculty ? 'none' : '';
+        }
+        if (isFaculty && state.user && el('subFaculty')) {
+            var myName = state.user.facultyName || state.user.name;
+            if (myName) el('subFaculty').value = myName;
+        }
+
+        var subDateInput = el('subDate');
+        var subDaySelect = el('subDay');
+        if (subDateInput && !subDateInput.value) {
+            var today = new Date();
+            var yyyy = today.getFullYear();
+            var mm = String(today.getMonth() + 1).padStart(2, '0');
+            var dd = String(today.getDate()).padStart(2, '0');
+            subDateInput.value = yyyy + '-' + mm + '-' + dd;
+        }
+
+        if (subDateInput && subDaySelect && !subDateInit) {
+            subDateInit = true;
+            var dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+            subDateInput.addEventListener('change', function () {
+                if (!subDateInput.value) return;
+                var parts = subDateInput.value.split('-');
+                if (parts.length === 3) {
+                    var d = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
+                    var dName = dayNames[d.getDay()];
+                    if (subDaySelect) subDaySelect.value = dName;
+                }
+            });
+
+            subDaySelect.addEventListener('change', function () {
+                var targetDay = subDaySelect.value;
+                if (!targetDay) return;
+                var targetIdx = dayNames.indexOf(targetDay);
+                if (targetIdx < 0) return;
+                var now = new Date();
+                var currentDayIdx = now.getDay();
+                var diff = (targetIdx - currentDayIdx + 7) % 7;
+                var targetDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() + diff);
+                var y = targetDate.getFullYear();
+                var m = String(targetDate.getMonth() + 1).padStart(2, '0');
+                var dStr = String(targetDate.getDate()).padStart(2, '0');
+                if (subDateInput) subDateInput.value = y + '-' + m + '-' + dStr;
+            });
+
+            if (subDateInput.value) {
+                var p = subDateInput.value.split('-');
+                if (p.length === 3) {
+                    var initD = new Date(parseInt(p[0], 10), parseInt(p[1], 10) - 1, parseInt(p[2], 10));
+                    var initDName = dayNames[initD.getDay()];
+                    if (subDaySelect && initDName) subDaySelect.value = initDName;
+                }
+            }
+        }
+    }
+
     // ------------------------------------------------------- substitute
     function findCover() {
-        var facultyName = el('subFaculty').value;
-        var day = el('subDay').value;
+        var isFaculty = Boolean(state.user && state.user.role === 'faculty');
+        var facultyName = isFaculty
+            ? (state.user ? (state.user.facultyName || state.user.name) : null)
+            : (el('subFaculty') ? el('subFaculty').value : null);
+        var day = el('subDay') ? el('subDay').value : null;
+        var dateInput = el('subDate');
+        var date = (dateInput && dateInput.value) ? dateInput.value : null;
         var container = el('subResult');
-        if (!facultyName || !day) return;
+        if (!container) return;
+        if (!day) {
+            container.innerHTML = notice('Please select a day.', 'warn');
+            return;
+        }
+        if (!isFaculty && !facultyName) {
+            container.innerHTML = notice('Please select a faculty member.', 'warn');
+            return;
+        }
 
-        container.innerHTML = notice('Looking up periods…', 'info');
+        if (!date) {
+            var now = new Date();
+            var dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+            var targetIdx = dayNames.indexOf(day);
+            var diff = targetIdx >= 0 ? ((targetIdx - now.getDay() + 7) % 7) : 0;
+            var targetDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() + diff);
+            var y = targetDate.getFullYear();
+            var m = String(targetDate.getMonth() + 1).padStart(2, '0');
+            var d = String(targetDate.getDate()).padStart(2, '0');
+            date = y + '-' + m + '-' + d;
+            if (dateInput) dateInput.value = date;
+        }
 
-        getJson(API.timetable + '?faculty=' + encodeURIComponent(facultyName)).then(function (grid) {
-            var busy = grid.cells.filter(function (c) { return c.day === day && c.status === 'busy'; });
+        container.innerHTML = notice('Looking up periods and available faculty…', 'info');
+
+        var url = isFaculty ? '/api/timetable/mine' : (API.timetable + '?faculty=' + encodeURIComponent(facultyName));
+
+        getJson(url).then(function (grid) {
+            var cells = (grid && grid.cells) || [];
+            var totalBusy = cells.filter(function (c) { return c.status === 'busy'; });
+
+            if (!totalBusy.length) {
+                container.innerHTML = notice(
+                    isFaculty ? 'No timetable found for your account.' : ('No timetable found for ' + esc(facultyName) + '.'),
+                    'info'
+                );
+                return;
+            }
+
+            var busy = cells.filter(function (c) { return c.day === day && c.status === 'busy'; }).sort(function (a, b) {
+                return a.period - b.period;
+            });
+
             if (!busy.length) {
                 container.innerHTML = notice(
-                    facultyName + ' has no scheduled periods on ' + day + '.', 'ok');
+                    (isFaculty ? 'You have' : esc(facultyName) + ' has') + ' no scheduled periods on ' + esc(day) + '.', 'ok');
                 return;
             }
 
             return Promise.all(busy.map(function (cell) {
                 return postJson(API.availability, {
-                    day: cell.day, period: cell.period,
-                    subject: cell.subject, faculty: facultyName, class: cell.className
-                }).then(function (res) { return { cell: cell, result: res.body }; });
+                    day: cell.day,
+                    period: cell.period,
+                    subject: cell.subject,
+                    faculty: facultyName,
+                    class: cell.className,
+                    date: date
+                }).then(function (res) {
+                    return { cell: cell, result: res.body };
+                });
             })).then(function (rows) {
-                container.innerHTML =
-                    '<div class="notice notice-info">' + esc(facultyName) + ' teaches ' +
-                    rows.length + ' period(s) on ' + esc(day) +
-                    '. Faculty free at each are listed below — nothing is assigned.</div>' +
-                    '<div class="table-scroll" style="margin-top:12px;"><table class="data"><thead><tr>' +
-                    '<th>Period</th><th>Subject</th><th>Class</th><th class="num">Free</th><th>Available faculty</th>' +
-                    '</tr></thead><tbody>' +
-                    rows.map(function (row) {
-                        var names = row.result.availableFaculty;
-                        return '<tr><td>P' + esc(row.cell.period) + '</td>' +
-                            '<td>' + esc(row.cell.subject) + '</td>' +
-                            '<td>' + esc(row.cell.className || '—') + '</td>' +
-                            '<td class="num"><span class="badge ' +
-                                (names.length ? 'badge-free' : 'badge-busy') + '">' + names.length + '</span></td>' +
-                            '<td>' + (names.length ? esc(names.join(', ')) : '<span class="muted">nobody free</span>') + '</td>' +
-                            '</tr>';
-                    }).join('') +
-                    '</tbody></table></div>' +
-                    '<div class="readonly-banner">READ ONLY — No substitution has been assigned.</div>';
-                logActivity('Listed cover for ' + facultyName + ' on ' + day);
+                var displayName = isFaculty ? 'You teach ' : (esc(facultyName) + ' teaches ');
+                var html =
+                    '<div class="notice notice-info" style="margin-bottom:14px;">' + displayName +
+                    rows.length + ' scheduled period(s) on <strong>' + esc(day) + '</strong> (' + esc(date) + '). ' +
+                    'Available faculty for each period are listed below. Click <strong>Select</strong> next to a colleague to prepare a substitution request.</div>';
+
+                rows.forEach(function (row) {
+                    var cell = row.cell;
+                    var res = row.result || {};
+                    var candidates = (res.available && res.available.length) ? res.available.slice() : [];
+                    if (!candidates.length && res.availableFaculty && res.availableFaculty.length) {
+                        candidates = res.availableFaculty.map(function (n) {
+                            return { name: n, faculty: n, branch: res.priorityBranch || '', status: 'FREE' };
+                        });
+                    }
+
+                    // Filter out the requesting faculty member
+                    candidates = candidates.filter(function (c) {
+                        var candName = (c.name || c.faculty || '').toUpperCase();
+                        return candName && candName !== facultyName.toUpperCase();
+                    });
+
+                    html += '<div class="card period-cover-card" id="periodCard_' + cell.period + '" style="margin-bottom:16px; border:1px solid var(--border);">';
+                    html += '  <div class="card-head" style="padding:10px 14px; background:var(--bg-muted, rgba(0,0,0,0.02)); display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">';
+                    html += '    <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">';
+                    html += '      <span class="badge badge-warning" style="font-size:0.88rem; padding:3px 8px;">Period ' + esc(cell.period) + '</span>';
+                    html += '      <strong style="font-size:1rem;">' + esc(cell.subject || 'Teaching') + '</strong>';
+                    html += '      <span class="badge badge-neutral">' + esc(cell.className || '—') + '</span>';
+                    if (cell.room) {
+                        html += '    <span class="muted font-sm">Room ' + esc(cell.room) + '</span>';
+                    }
+                    html += '    </div>';
+                    html += '    <div>';
+                    html += '      <span class="badge ' + (candidates.length ? 'badge-success' : 'badge-busy') + '">' +
+                        (candidates.length ? (candidates.length + ' Available') : 'None Available') + '</span>';
+                    html += '    </div>';
+                    html += '  </div>';
+
+                    html += '  <div class="card-body" style="padding:12px 14px;">';
+                    if (!candidates.length) {
+                        html += '    <div class="notice notice-info" style="margin:0;">No faculty members are available to cover Period ' + esc(cell.period) + '.</div>';
+                    } else {
+                        html += '    <div class="table-scroll">';
+                        html += '      <table class="data directory" style="width:100%; margin:0;">';
+                        html += '        <thead><tr><th>Faculty Name</th><th>Branch</th><th>Availability</th><th style="text-align:right;">Action</th></tr></thead>';
+                        html += '        <tbody>';
+                        candidates.forEach(function (c) {
+                            var candId = c.facultyId || c.id || '';
+                            var candName = c.name || c.faculty || '';
+                            var candBranch = c.branch || c.department || '';
+                            var phone = c.phone ? esc(c.phone) : '';
+                            html += '        <tr class="candidate-row" data-period="' + esc(cell.period) + '" data-sub-id="' + esc(candId) + '" data-sub-name="' + esc(candName) + '">';
+                            html += '          <td><strong>' + esc(candName) + '</strong>' + (phone ? ' <span class="muted font-sm" style="margin-left:6px;">📞 ' + phone + '</span>' : '') + '</td>';
+                            html += '          <td><span class="badge badge-neutral">' + esc(candBranch || '—') + '</span></td>';
+                            html += '          <td><span class="badge badge-success">FREE</span></td>';
+                            html += '          <td style="text-align:right;">';
+                            html += '            <button type="button" class="btn btn-primary btn-sm btn-sub-candidate-select" ' +
+                                'data-period="' + esc(cell.period) + '" ' +
+                                'data-class="' + esc(cell.className || '') + '" ' +
+                                'data-subject="' + esc(cell.subject || '') + '" ' +
+                                'data-room="' + esc(cell.room || '') + '" ' +
+                                'data-date="' + esc(date) + '" ' +
+                                'data-day="' + esc(day) + '" ' +
+                                'data-sub-id="' + esc(candId) + '" ' +
+                                'data-sub-name="' + esc(candName) + '" ' +
+                                'data-sub-branch="' + esc(candBranch) + '">Select</button>';
+                            html += '          </td>';
+                            html += '        </tr>';
+                        });
+                        html += '        </tbody>';
+                        html += '      </table>';
+                        html += '    </div>';
+                    }
+                    html += '  </div>';
+                    html += '</div>';
+                });
+
+                html += '<div id="subConfirmWrap" style="display:none; margin-top:20px;"></div>';
+                html += '<div class="readonly-banner" style="margin-top:16px;">READ ONLY — No substitution has been assigned. Select an available faculty member above to submit a substitution request.</div>';
+
+                container.innerHTML = html;
+
+                // Attach click handlers to all Select buttons
+                var selectBtns = container.querySelectorAll('.btn-sub-candidate-select');
+                Array.prototype.forEach.call(selectBtns, function (btn) {
+                    btn.addEventListener('click', function () {
+                        // Reset all buttons
+                        Array.prototype.forEach.call(selectBtns, function (b) {
+                            b.textContent = 'Select';
+                            b.classList.remove('btn-success');
+                            b.classList.add('btn-primary');
+                            var tr = b.closest('tr');
+                            if (tr) tr.classList.remove('is-selected');
+                        });
+
+                        // Set active
+                        btn.textContent = 'Selected ✓';
+                        btn.classList.remove('btn-primary');
+                        btn.classList.add('btn-success');
+                        var currentTr = btn.closest('tr');
+                        if (currentTr) currentTr.classList.add('is-selected');
+
+                        var period = parseInt(btn.getAttribute('data-period'), 10);
+                        var className = btn.getAttribute('data-class');
+                        var subject = btn.getAttribute('data-subject');
+                        var room = btn.getAttribute('data-room');
+                        var reqDate = btn.getAttribute('data-date');
+                        var reqDay = btn.getAttribute('data-day');
+                        var subId = btn.getAttribute('data-sub-id');
+                        var subName = btn.getAttribute('data-sub-name');
+                        var subBranch = btn.getAttribute('data-sub-branch');
+
+                        renderSubConfirmation({
+                            date: reqDate,
+                            day: reqDay,
+                            period: period,
+                            className: className,
+                            subject: subject,
+                            room: room,
+                            substituteFacultyId: subId,
+                            substituteFacultyName: subName,
+                            substituteFacultyBranch: subBranch
+                        });
+                    });
+                });
+
+                logActivity('Listed cover for ' + facultyName + ' on ' + day + ' (' + date + ')');
             });
-        }).catch(function () {
-            container.innerHTML = notice('Could not load that faculty timetable.', 'error');
+        }).catch(function (err) {
+            var msg = (err && (err.error || err.message)) || 'Could not load that faculty timetable.';
+            if (msg.indexOf('No faculty named') >= 0 || msg.indexOf('NOT_FOUND') >= 0) {
+                container.innerHTML = notice(
+                    isFaculty ? 'No timetable found for your account.' : 'No timetable found for that faculty member.',
+                    'info'
+                );
+            } else {
+                container.innerHTML = notice(esc(msg), 'error');
+            }
         });
+    }
+
+    function renderSubConfirmation(item) {
+        var wrap = el('subConfirmWrap');
+        if (!wrap) return;
+        wrap.style.display = 'block';
+
+        wrap.innerHTML =
+            '<div class="card" id="subRequestConfirmCard" style="border:2px solid var(--primary, #2563eb); box-shadow:0 4px 14px rgba(0,0,0,0.08);">' +
+            '  <div class="card-head" style="border-bottom:1px solid var(--border); padding:12px 16px;">' +
+            '    <div>' +
+            '      <h3 style="margin:0; font-size:1.1rem; color:var(--text);">Confirm Substitution Request</h3>' +
+            '      <p class="muted" style="margin:4px 0 0; font-size:0.85rem;">Review the request details before sending to your colleague.</p>' +
+            '    </div>' +
+            '    <span class="badge badge-warning" style="font-size:0.8rem;">Status: PENDING</span>' +
+            '  </div>' +
+            '  <div class="card-body" style="padding:16px;">' +
+            '    <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:14px; margin-bottom:16px;">' +
+            '      <div><span class="muted font-sm">Date & Day</span><div style="font-weight:600; font-size:0.95rem; margin-top:2px;">' + esc(item.date) + ' (' + esc(item.day) + ')</div></div>' +
+            '      <div><span class="muted font-sm">Selected Period</span><div style="margin-top:2px;"><span class="badge badge-warning" style="font-size:0.85rem;">Period ' + esc(item.period) + '</span></div></div>' +
+            '      <div><span class="muted font-sm">Class & Subject</span><div style="font-weight:600; font-size:0.95rem; margin-top:2px;">' + esc(item.className || '—') + ' — ' + esc(item.subject || 'Teaching') + '</div></div>' +
+            '      <div><span class="muted font-sm">Proposed Substitute</span><div style="font-weight:600; font-size:0.95rem; margin-top:2px;"><strong>' + esc(item.substituteFacultyName) + '</strong> <span class="badge badge-neutral">' + esc(item.substituteFacultyBranch || '') + '</span></div></div>' +
+            '    </div>' +
+            '    <div id="subRequestAlert" style="display:none; margin-bottom:14px;"></div>' +
+            '    <div style="display:flex; gap:10px; justify-content:flex-end; align-items:center;">' +
+            '      <button type="button" class="btn btn-secondary" id="btnCancelSubSelection">Cancel Selection</button>' +
+            '      <button type="button" class="btn btn-primary" id="btnSendSubRequest">Send Request</button>' +
+            '    </div>' +
+            '  </div>' +
+            '</div>';
+
+        wrap.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+
+        var btnCancel = el('btnCancelSubSelection');
+        if (btnCancel) {
+            btnCancel.addEventListener('click', function () {
+                wrap.style.display = 'none';
+                wrap.innerHTML = '';
+                var container = el('subResult');
+                if (container) {
+                    Array.prototype.forEach.call(container.querySelectorAll('.btn-sub-candidate-select'), function (b) {
+                        b.textContent = 'Select';
+                        b.classList.remove('btn-success');
+                        b.classList.add('btn-primary');
+                        var tr = b.closest('tr');
+                        if (tr) tr.classList.remove('is-selected');
+                    });
+                }
+            });
+        }
+
+        var btnSend = el('btnSendSubRequest');
+        if (btnSend) {
+            btnSend.addEventListener('click', function () {
+                var alertBox = el('subRequestAlert');
+                if (alertBox) alertBox.style.display = 'none';
+                btnSend.disabled = true;
+                btnSend.textContent = 'Sending Request…';
+                if (btnCancel) btnCancel.disabled = true;
+
+                fetch(API.substitutions + '/requests', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        date: item.date,
+                        period: item.period,
+                        className: item.className,
+                        subject: item.subject,
+                        substituteFacultyId: item.substituteFacultyId,
+                        substituteFacultyName: item.substituteFacultyName,
+                        isAdjustment: true
+                    })
+                }).then(function (res) {
+                    return res.json().then(function (body) {
+                        if (!res.ok) {
+                            btnSend.disabled = false;
+                            btnSend.textContent = 'Send Request';
+                            if (btnCancel) btnCancel.disabled = false;
+                            if (alertBox) {
+                                alertBox.style.display = 'block';
+                                alertBox.innerHTML = '<div class="notice notice-danger"><strong>Request Failed:</strong> ' + esc(body.error || 'Failed to send substitution request.') + '</div>';
+                            }
+                            return;
+                        }
+
+                        // Confirmed by backend database
+                        if (alertBox) {
+                            alertBox.style.display = 'block';
+                            alertBox.innerHTML = '<div class="notice notice-success"><strong>✓ Request Sent!</strong> Substitution request sent to <strong>' +
+                                esc(item.substituteFacultyName) + '</strong> for Period ' + esc(item.period) + ' on ' + esc(item.date) + '. Status is <strong>PENDING</strong>. Saved to database.</div>';
+                        }
+
+                        btnSend.style.display = 'none';
+                        if (btnCancel) btnCancel.style.display = 'none';
+
+                        var actionsDiv = btnSend.parentElement;
+                        if (actionsDiv) {
+                            var doneBadge = document.createElement('span');
+                            doneBadge.className = 'badge badge-success';
+                            doneBadge.style.fontSize = '0.9rem';
+                            doneBadge.style.padding = '6px 12px';
+                            doneBadge.textContent = '✓ Request Saved (PENDING)';
+                            actionsDiv.appendChild(doneBadge);
+
+                            var viewHistoryBtn = document.createElement('button');
+                            viewHistoryBtn.type = 'button';
+                            viewHistoryBtn.className = 'btn btn-secondary btn-sm';
+                            viewHistoryBtn.style.marginLeft = '10px';
+                            viewHistoryBtn.textContent = 'View My Requests →';
+                            viewHistoryBtn.addEventListener('click', function () {
+                                switchView('faculty-substitutions');
+                                if (typeof switchSubTab === 'function') switchSubTab('history');
+                            });
+                            actionsDiv.appendChild(viewHistoryBtn);
+                        }
+
+                        if (typeof updatePendingSubstitutionsBadge === 'function') {
+                            updatePendingSubstitutionsBadge();
+                        }
+                    });
+                }).catch(function (err) {
+                    btnSend.disabled = false;
+                    btnSend.textContent = 'Send Request';
+                    if (btnCancel) btnCancel.disabled = false;
+                    if (alertBox) {
+                        alertBox.style.display = 'block';
+                        alertBox.innerHTML = '<div class="notice notice-danger"><strong>Error:</strong> ' + esc(err.message || 'Network error occurred.') + '</div>';
+                    }
+                });
+            });
+        }
     }
 
     // ------------------------------------------------------- attendance
@@ -5019,46 +5680,64 @@
         });
     }
 
-    function initFacultyManagementEvents() {
-        // Tab switching
+    function switchFacultyTab(tabName) {
         var tabWith = el('tabFacWithAccount');
         var tabWithout = el('tabFacWithoutAccount');
         var panelWith = el('panelFacWithAccount');
         var panelWithout = el('panelFacWithoutAccount');
 
-        if (tabWith && !tabWith.__boundTab) {
-            tabWith.__boundTab = true;
-            tabWith.addEventListener('click', function () {
+        if (tabName === 'with') {
+            if (tabWith) {
                 tabWith.classList.add('active');
                 tabWith.style.background = '';
                 tabWith.style.color = '';
                 tabWith.style.border = '';
-                if (tabWithout) {
-                    tabWithout.classList.remove('active');
-                    tabWithout.style.background = 'transparent';
-                    tabWithout.style.color = 'var(--ink-700)';
-                    tabWithout.style.border = '1px solid var(--border)';
-                }
-                if (panelWith) panelWith.style.display = 'block';
-                if (panelWithout) panelWithout.style.display = 'none';
+            }
+            if (tabWithout) {
+                tabWithout.classList.remove('active');
+                tabWithout.style.background = 'transparent';
+                tabWithout.style.color = 'var(--ink-700)';
+                tabWithout.style.border = '1px solid var(--border)';
+            }
+            if (panelWith) panelWith.style.display = 'block';
+            if (panelWithout) panelWithout.style.display = 'none';
+        } else if (tabName === 'without') {
+            if (tabWithout) {
+                tabWithout.classList.add('active');
+                tabWithout.style.background = '';
+                tabWithout.style.color = '';
+                tabWithout.style.border = '';
+            }
+            if (tabWith) {
+                tabWith.classList.remove('active');
+                tabWith.style.background = 'transparent';
+                tabWith.style.color = 'var(--ink-700)';
+                tabWith.style.border = '1px solid var(--border)';
+            }
+            if (panelWith) panelWith.style.display = 'none';
+            if (panelWithout) panelWithout.style.display = 'block';
+        }
+    }
+    window.switchFacultyTab = switchFacultyTab;
+
+    function initFacultyManagementEvents() {
+        // Tab switching
+        var tabWith = el('tabFacWithAccount');
+        var tabWithout = el('tabFacWithoutAccount');
+
+        if (tabWith && !tabWith.__boundTab) {
+            tabWith.__boundTab = true;
+            tabWith.addEventListener('click', function () {
+                window.__userSwitchedFacultyTab = true;
+                switchFacultyTab('with');
             });
         }
 
         if (tabWithout && !tabWithout.__boundTab) {
             tabWithout.__boundTab = true;
             tabWithout.addEventListener('click', function () {
-                tabWithout.classList.add('active');
-                tabWithout.style.background = '';
-                tabWithout.style.color = '';
-                tabWithout.style.border = '';
-                if (tabWith) {
-                    tabWith.classList.remove('active');
-                    tabWith.style.background = 'transparent';
-                    tabWith.style.color = 'var(--ink-700)';
-                    tabWith.style.border = '1px solid var(--border)';
-                }
-                if (panelWith) panelWith.style.display = 'none';
-                if (panelWithout) panelWithout.style.display = 'block';
+                window.__userSwitchedFacultyTab = true;
+                switchFacultyTab('without');
             });
         }
 
@@ -5149,21 +5828,40 @@
             var actBtn = target.closest('.btn-fac-activate');
             if (actBtn) {
                 var aId = actBtn.getAttribute('data-id');
+                var aName = actBtn.getAttribute('data-name') || aId;
+                actBtn.disabled = true;
+                actBtn.textContent = 'Reactivating…';
+
                 fetch('/api/faculty/' + encodeURIComponent(aId) + '/activate', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' }
+                    headers: { 'Content-Type': 'application/json' },
+                    credentials: 'same-origin'
                 })
                 .then(function (res) {
-                    return res.json().then(function (data) {
+                    return res.json().catch(function () { return {}; }).then(function (data) {
                         if (!res.ok) throw new Error(data.error || 'Failed to reactivate faculty.');
                         return data;
                     });
                 })
-                .then(function () {
+                .then(function (data) {
+                    if (typeof facultyNote === 'function') {
+                        facultyNote('Faculty <strong>' + esc(data.name || aName) + '</strong> has been reactivated.', 'ok');
+                    }
                     loadFacultyTable();
+                    if (typeof loadHOSInvigFacultyDropdown === 'function') {
+                        loadHOSInvigFacultyDropdown();
+                    }
                 })
                 .catch(function (err) {
-                    alert(err.message || 'Failed to reactivate faculty.');
+                    if (actBtn) {
+                        actBtn.disabled = false;
+                        actBtn.textContent = 'Reactivate';
+                    }
+                    if (typeof facultyNote === 'function') {
+                        facultyNote(err.message || 'Failed to reactivate faculty.', 'danger');
+                    } else {
+                        alert(err.message || 'Failed to reactivate faculty.');
+                    }
                 });
                 return;
             }
@@ -5359,6 +6057,7 @@
                         el('facultySuccessPanel').style.display = 'block';
                     }
 
+                    if (typeof switchFacultyTab === 'function') switchFacultyTab('with');
                     loadFacultyTable();
                     loadHOSInvigFacultyDropdown();
                 })
@@ -5505,9 +6204,11 @@
             var facultyOptions = (facultyData.faculty || []).map(function (f) {
                 return { value: f.name, label: f.name + ' (' + f.department + ')' };
             });
-            fillSelect(el('subFaculty'), facultyOptions);
-
             var mine = state.user && state.user.facultyName;
+            fillSelect(el('subFaculty'), facultyOptions,
+                mine && facultyOptions.some(function (o) { return o.value === mine; })
+                    ? mine : (facultyOptions[0] && facultyOptions[0].value));
+            updateSubstituteFacultyView();
             fillSelect(el('schedFaculty'), facultyOptions,
                 mine && facultyOptions.some(function (o) { return o.value === mine; })
                     ? mine : (facultyOptions[0] && facultyOptions[0].value));
@@ -6984,6 +7685,8 @@
                     inputFacFile.click();
                 });
                 inputFacFile.addEventListener('change', function () {
+                    facPendingContract = null;
+                    if (facPreviewCard) facPreviewCard.style.display = 'none';
                     var file = inputFacFile.files && inputFacFile.files[0];
                     if (file) {
                         if (nameFac) nameFac.textContent = file.name;
@@ -7008,6 +7711,8 @@
                         return;
                     }
 
+                    facPendingContract = null;
+                    if (facPreviewCard) facPreviewCard.style.display = 'none';
                     if (btnFacUpload) {
                         btnFacUpload.disabled = true;
                         btnFacUpload.textContent = 'Extracting…';

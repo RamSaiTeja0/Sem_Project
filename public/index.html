@@ -566,17 +566,25 @@
           <div class="card-head">
             <div>
               <h2>Adjust / Substitute</h2>
-              <p>Find cover for an absent faculty member across a whole day. The result is informational.</p>
+              <p>Find available colleagues and request peer substitution for your scheduled teaching periods.</p>
             </div>
           </div>
           <div class="card-body">
             <div class="controls">
-              <label class="field"><span>Absent faculty</span><select id="subFaculty"></select></label>
-              <label class="field"><span>Day</span><select id="subDay"></select></label>
-              <button type="button" class="btn" id="subFind">Find cover</button>
+              <label class="field" id="subFacultyWrap"><span>Absent faculty</span><select id="subFaculty"></select></label>
+              <div class="field" id="subFacultyReadOnly" style="display:none;">
+                <span>Faculty</span>
+                <span class="badge badge-neutral" id="subFacultyBadge" style="font-size:0.95rem; padding:6px 12px; display:inline-block;"></span>
+              </div>
+              <label class="field" id="subDateWrap" style="max-width:180px;">
+                <span>Date</span>
+                <input type="date" id="subDate" />
+              </label>
+              <label class="field" style="max-width:160px;"><span>Day</span><select id="subDay"></select></label>
+              <button type="button" class="btn btn-primary" id="subFind">Find cover</button>
             </div>
             <div id="subResult" style="margin-top:18px;">
-              <p class="muted">Choose a faculty member and a day to list their periods and who could cover each.</p>
+              <p class="muted">Choose a day to list your periods and who could cover each.</p>
             </div>
           </div>
         </div>
@@ -837,7 +845,7 @@ Prof. B. Kumar, FREE, FREE, Database Management Systems"></textarea>
           <div class="card-head">
             <div>
               <h2>Master Timetable</h2>
-              <p>Every cell is clickable. Click any period to check availability or edit with the Edit option.</p>
+              <p id="ttLiveSubtitle">Every cell is clickable. Click any period to check availability or edit with the Edit option.</p>
             </div>
             <div class="head-actions">
               <button type="button" class="btn btn-sm btn-secondary" id="ttManageBtn" style="display:none;">+ Add / Edit Entry</button>
@@ -1962,7 +1970,7 @@ Prof. B. Kumar, FREE, FREE, Database Management Systems"></textarea>
                       <th>Period</th>
                       <th>Class</th>
                       <th>Subject</th>
-                      <th>Substitute Faculty</th>
+                      <th>Faculty / Colleague</th>
                       <th>Status</th>
                       <th>Notes / Rejection</th>
                       <th>Action</th>
